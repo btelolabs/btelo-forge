@@ -10,13 +10,14 @@ import (
 const epsilon = 1e-3
 
 // piece is the part of a clip inside the rendered range: source [In, Out) of Path at Speed, Delay seconds after the
-// range starts, heard at Gain (0 when silent).
+// range starts, heard at Gain (0 when silent) and seen at Opacity.
 type piece struct {
 	Path           string
 	In, Out, Speed float64
 	Delay          float64
 	Gain           float64
 	Sound          bool
+	Opacity        float64
 }
 
 func (p piece) length() float64 { return (p.Out - p.In) / p.Speed }
@@ -48,13 +49,14 @@ func clipPiece(p *project.Project, c project.Clip, track project.VideoTrack, fro
 	src := p.SourceOf(c)
 	gain := c.Volume * track.Volume
 	return piece{
-		Path:  src.Path,
-		In:    c.In + (a-c.Start)*c.Speed,
-		Out:   c.In + (b-c.Start)*c.Speed,
-		Speed: c.Speed,
-		Delay: a - from,
-		Gain:  gain,
-		Sound: src.HasAudio && !track.Muted && gain > 0,
+		Path:    src.Path,
+		In:      c.In + (a-c.Start)*c.Speed,
+		Out:     c.In + (b-c.Start)*c.Speed,
+		Speed:   c.Speed,
+		Delay:   a - from,
+		Gain:    gain,
+		Sound:   src.HasAudio && !track.Muted && gain > 0,
+		Opacity: c.Opacity,
 	}, true
 }
 
@@ -121,8 +123,8 @@ func (w window) audible() bool {
 // OutputSize is the encoded frame size for a target height (0 keeps the canvas), rounded to even numbers.
 func OutputSize(c project.Canvas, height int) (int, int) {
 	w, h := float64(c.Width), float64(c.Height)
-	if height > 0 && float64(height) < h {
-		w, h = w*float64(height)/h, float64(height)
+	if short := min(w, h); height > 0 && float64(height) < short {
+		w, h = w*float64(height)/short, h*float64(height)/short
 	}
 	return even(w), even(h)
 }

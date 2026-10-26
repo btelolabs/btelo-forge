@@ -52,9 +52,9 @@ func (h *History) Redo(current *Project) *Project {
 func (h *History) CanUndo() bool { return len(h.past) > 0 }
 func (h *History) CanRedo() bool { return len(h.future) > 0 }
 
-// saveVersion is bumped whenever the saved layout changes; older saves are discarded rather than migrated
-// because they only hold an unfinished edit that the source video can always restart.
-const saveVersion = 2
+// saveVersion is bumped whenever the saved layout changes. Version 2 had no opacity and is read as fully opaque;
+// older versions are discarded, since they only hold an unfinished edit that the source video can always restart.
+const saveVersion = 3
 
 type saved struct {
 	Version int      `json:"version"`
@@ -94,10 +94,13 @@ func Load(path string, src Source) (*Project, error) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, err
 	}
-	if s.Version != saveVersion || s.Project == nil {
+	if s.Version != saveVersion && s.Version != 2 || s.Project == nil {
 		return nil, fmt.Errorf("saved edit version %d is no longer supported", s.Version)
 	}
 	p := s.Project
+	if s.Version == 2 {
+		p.solid()
+	}
 	if len(p.Sources) == 0 {
 		return nil, errors.New("no sources")
 	}
@@ -112,9 +115,26 @@ func Load(path string, src Source) (*Project, error) {
 	return p, nil
 }
 
+// solid makes every clip and overlay fully opaque, as edits were before opacity existed.
+func (p *Project) solid() {
+	for k := range p.Video {
+		for i := range p.Video[k].Clips {
+			p.Video[k].Clips[i].Opacity = 1
+		}
+	}
+	for k := range p.Overlays {
+		for i := range p.Overlays[k].Items {
+			p.Overlays[k].Items[i].Opacity = 1
+		}
+	}
+}
+
 func (p *Project) validate() error {
 	if len(p.Video) == 0 || len(p.Video[0].Clips) == 0 || len(p.Overlays) == 0 || len(p.Music) == 0 {
 		return errors.New("missing tracks")
+	}
+	if !p.Export.Valid() {
+		return errors.New("unknown export settings")
 	}
 	if p.Canvas.Width <= 0 || p.Canvas.Height <= 0 || p.Canvas.FPS <= 0 {
 		return errors.New("invalid canvas")
@@ -130,7 +150,7 @@ func (p *Project) validate() error {
 	for k, t := range p.Video {
 		for i, c := range t.Clips {
 			if c.Source < 0 || c.Source >= len(p.Sources) || c.Speed < Speeds[0] || c.Speed > Speeds[len(Speeds)-1] ||
-				c.In < 0 || c.Out > p.Sources[c.Source].Duration+0.05 || c.Out-c.In <= 0 {
+				c.In < 0 || c.Out > p.Sources[c.Source].Duration+0.05 || c.Out-c.In <= 0 || c.Opacity < 0 || c.Opacity > 1 {
 				return errors.New("a clip is out of range")
 			}
 			if k > 0 && i > 0 && c.Start < t.Clips[i-1].End()-1e-6 {
@@ -153,7 +173,7 @@ func (p *Project) validate() error {
 	}
 	for _, t := range p.Overlays {
 		for _, o := range t.Items {
-			if o.End <= o.Start || o.Kind == ImageOverlay && (o.Image == "" || o.Aspect <= 0) {
+			if o.End <= o.Start || o.Kind == ImageOverlay && (o.Image == "" || o.Aspect <= 0) || o.Opacity < 0 || o.Opacity > 1 {
 				return errors.New("invalid overlay")
 			}
 			if err := id(o.ID); err != nil {

@@ -406,7 +406,7 @@ void bvc_alert(const char *message) {
 	@autoreleasepool {
 		[NSApplication sharedApplication];
 		NSAlert *alert = [NSAlert new];
-		alert.messageText = @"btelo Cut";
+		alert.messageText = @"btelo-video-cut";
 		alert.informativeText = @(message);
 		alert.alertStyle = NSAlertStyleCritical;
 		[alert runModal];

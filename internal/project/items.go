@@ -177,13 +177,13 @@ func (p *Project) span(t, length float64) (float64, float64) {
 // AddText places a caption at t lasting up to three seconds.
 func (p *Project) AddText(body string, t float64) int {
 	start, end := p.span(t, 3)
-	return p.placeOverlay(Overlay{Kind: TextOverlay, Body: body, Start: start, End: end, X: 0.5, Y: 0.82, Size: 0.075, Color: [3]uint8{255, 255, 255}, Outline: true})
+	return p.placeOverlay(Overlay{Kind: TextOverlay, Body: body, Start: start, End: end, X: 0.5, Y: 0.82, Size: 0.075, Color: [3]uint8{255, 255, 255}, Outline: true, Opacity: 1})
 }
 
 // AddImage places an image (width over height aspect) at t for five seconds, a third of the frame high.
 func (p *Project) AddImage(path string, aspect, t float64) int {
 	start, end := p.span(t, 5)
-	return p.placeOverlay(Overlay{Kind: ImageOverlay, Image: path, Aspect: aspect, Start: start, End: end, X: 0.5, Y: 0.5, Size: 0.35})
+	return p.placeOverlay(Overlay{Kind: ImageOverlay, Image: path, Aspect: aspect, Start: start, End: end, X: 0.5, Y: 0.5, Size: 0.35, Opacity: 1})
 }
 
 // AddCaptions adds timed text on a new overlay track of its own, styled as subtitles, and returns the track.
@@ -194,7 +194,7 @@ func (p *Project) AddCaptions(lines []Overlay) int {
 			continue
 		}
 		tr.Items = append(tr.Items, Overlay{ID: p.id(), Kind: TextOverlay, Body: l.Body, Start: l.Start, End: l.End,
-			X: 0.5, Y: 0.9, Size: 0.06, Color: [3]uint8{255, 255, 255}, Box: true})
+			X: 0.5, Y: 0.9, Size: 0.06, Color: [3]uint8{255, 255, 255}, Box: true, Opacity: 1})
 	}
 	if len(p.Overlays) == 1 && len(p.Overlays[0].Items) == 0 {
 		p.Overlays[0] = tr

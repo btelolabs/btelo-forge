@@ -13,7 +13,7 @@ var (
 	colFaint      = gfx.Hex(0x666e74)
 	colAccent     = gfx.Hex(0x1fbf75)
 	colAccentHi   = gfx.Hex(0x34d68a)
-	colOnAccent   = gfx.Hex(0x06140d)
+	colOnAccent   = gfx.Hex(0xffffff) // text and icons on green
 	colDanger     = gfx.Hex(0xf0605d)
 	colSuccess    = gfx.Hex(0x34d68a)
 	colWarning    = gfx.Hex(0xf2c879)
@@ -37,6 +37,7 @@ const (
 	icCut      = "\ue14e"
 	icDelete   = "\ue872"
 	icUndo     = "\ue166"
+	icRestore  = "\ue8ba"
 	icRedo     = "\ue15a"
 	icAdd      = "\ue145"
 	icMusic    = "\ue405"

@@ -29,11 +29,6 @@ type lastExport struct {
 	at  time.Time
 }
 
-var resolutionNames = msgs("Original", "1080p", "720p", "480p")
-var resolutionHeights = []int{0, 1080, 720, 480}
-var qualityNames = msgs("High quality", "Balanced", "Small file")
-var codecNames = msgs("H.264 · plays anywhere", "H.265 · smaller")
-
 // destination is where the current edit exports to: the default folder from the settings, or beside the source.
 func (a *App) destination(p *project.Project) string {
 	return render.Destination(p.Sources[0].Path, a.settings.ExportDir)
@@ -44,97 +39,6 @@ func (a *App) setExport(e project.Export) {
 	a.change(func() { a.p.Export = e })
 	a.settings.Export = e
 	a.saveSettings()
-}
-
-// drawExportPanel draws the export tab and returns the bottom of its content.
-func (a *App) drawExportPanel(r gfx.Rect) float32 {
-	u := &a.u
-	e := a.p.Export
-	y := r.Y
-	u.heading(gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(22)}, u.t("Saved to"))
-	y += u.px(26)
-	out := a.destination(a.p)
-	f := u.face(12)
-	lines := f.Wrap(out, r.W)
-	for _, l := range lines[:min(3, len(lines))] {
-		u.c.Text(f, r.X, y, l, colText)
-		y += f.Height() * 1.25
-	}
-	y += u.px(4)
-	if u.button("export/dir", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(30)}, icFolder, u.t("Change the default folder in Settings"), ghost, true) {
-		a.settingsOpen = true
-	}
-	y += u.px(42)
-
-	u.heading(gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(22)}, u.t("Resolution"))
-	y += u.px(26)
-	res := 0
-	for k, h := range resolutionHeights {
-		if h == e.Height {
-			res = k
-		}
-	}
-	if pick := u.chips("export/res", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(30)}, u.ts(resolutionNames), res, true); pick != res {
-		if h := resolutionHeights[pick]; h == 0 || h < a.p.Canvas.Height {
-			e.Height = h
-			a.setExport(e)
-		} else {
-			a.toast(u.tf("The original is only %dp; it is never upscaled", a.p.Canvas.Height), false)
-		}
-	}
-	y += u.px(42)
-	u.heading(gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(22)}, u.t("Quality / compression"))
-	y += u.px(26)
-	if pick := u.chips("export/quality", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(30)}, u.ts(qualityNames), int(e.Quality), true); pick != int(e.Quality) {
-		e.Quality = project.Quality(pick)
-		a.setExport(e)
-	}
-	y += u.px(42)
-	u.heading(gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(22)}, u.t("Codec"))
-	y += u.px(26)
-	codec := 0
-	if e.HEVC {
-		codec = 1
-	}
-	if pick := u.chips("export/codec", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(30)}, u.ts(codecNames), codec, true); pick != codec {
-		e.HEVC = pick == 1
-		a.setExport(e)
-	}
-	y += u.px(46)
-
-	w, h := render.OutputSize(a.p.Canvas, a.p.Export.Height)
-	clips, music, overlays := 0, 0, 0
-	for _, t := range a.p.Video {
-		clips += len(t.Clips)
-	}
-	for _, t := range a.p.Music {
-		music += len(t.Clips)
-	}
-	for _, t := range a.p.Overlays {
-		overlays += len(t.Items)
-	}
-	codecName := "H.264"
-	if a.p.Export.HEVC {
-		codecName = "H.265"
-	}
-	info := []string{
-		u.tf("Output %d×%d · %s · length %s", w, h, codecName, clock(a.p.Duration())),
-		u.tf("%d clips · %d music clips · %d overlays", clips, music, overlays),
-	}
-	if st, err := os.Stat(a.p.Sources[0].Path); err == nil {
-		info = append(info, u.tf("Original %s · for the smallest file pick Small file and H.265", size(st.Size())))
-	}
-	for _, l := range info {
-		u.label(u.face(12), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(20)}, l, colDim, 0)
-		y += u.px(22)
-	}
-	y += u.px(12)
-	if u.button("export/go", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(42)}, icExport, u.t("Export video (Ctrl+E)"), primary, a.export == nil) {
-		a.startExport()
-	}
-	y += u.px(52)
-	u.label(u.face(11), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(18)}, u.t("These settings are remembered for your next edits"), colFaint, 0)
-	return y + u.px(18)
 }
 
 func size(n int64) string {

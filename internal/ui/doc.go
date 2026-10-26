@@ -45,6 +45,8 @@ type doc struct {
 	savedAt    time.Time
 	playhead   float64
 	sel        selection
+	picked     map[int]bool // items selected besides sel
+	marquee    *marquee
 	view       timelineView
 	shown      shownFrame
 	times      timeFields
@@ -130,6 +132,7 @@ func (a *App) edited() {
 	if !a.selectionExists() {
 		a.sel = selection{}
 	}
+	a.pruneSelection()
 	if a.player.Playing() {
 		a.play(a.playhead)
 	}

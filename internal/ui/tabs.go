@@ -106,4 +106,20 @@ func (a *App) drawEmpty(r gfx.Rect) {
 	if u.button("empty/open", br, icFolder, u.t("Choose a video…"), primary, a.opening == "") {
 		a.chooseVideo()
 	}
+	if status, failed := a.toolsStatus(); status != "" {
+		col := colDim
+		if failed {
+			col = gfx.Hex(0xffb4b2)
+		}
+		line := gfx.Rect{X: box.X + u.px(20), Y: box.Bottom() + u.px(16), W: box.W - u.px(40), H: u.px(20)}
+		u.label(u.face(12), line, status, col, 0.5)
+		if a.tools.downloading {
+			bar := gfx.Rect{X: box.X + box.W/4, Y: line.Bottom() + u.px(8), W: box.W / 2, H: u.px(4)}
+			u.c.RoundRect(bar, u.px(2), colSurface)
+			u.c.RoundRect(gfx.Rect{X: bar.X, Y: bar.Y, W: max(bar.W*float32(a.tools.fraction), bar.H), H: bar.H}, u.px(2), colAccent)
+		}
+		if failed && u.button("empty/retry", gfx.Rect{X: box.X + box.W/2 - u.px(60), Y: line.Bottom() + u.px(10), W: u.px(120), H: u.px(32)}, "", u.t("Retry"), plain, true) {
+			a.prepareTools()
+		}
+	}
 }

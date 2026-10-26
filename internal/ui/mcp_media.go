@@ -222,41 +222,6 @@ func (a *App) addMediaTools(s *mcp.Server) {
 		return st, nil
 	})
 
-	type exportIn struct {
-		Height  *int    `json:"height,omitempty" jsonschema:"0 keeps the original, or 1080, 720, 480"`
-		Quality *string `json:"quality,omitempty" jsonschema:"high, balanced or small"`
-		Codec   *string `json:"codec,omitempty" jsonschema:"h264 or h265"`
-	}
-	tool(s, a, "export", "Encode the active edit to an MP4 (next to the source, or in the default export folder). Runs in the background; poll export_status.",
-		func(in exportIn) (any, error) {
-			if a.p == nil {
-				return nil, errNoProject
-			}
-			e := a.p.Export
-			if in.Height != nil {
-				e.Height = *in.Height
-			}
-			if in.Quality != nil {
-				q := -1
-				for i, id := range qualityIDs {
-					if id == *in.Quality {
-						q = i
-					}
-				}
-				if q < 0 {
-					return nil, fmt.Errorf("unknown quality %q", *in.Quality)
-				}
-				e.Quality = project.Quality(q)
-			}
-			if in.Codec != nil {
-				e.HEVC = *in.Codec == "h265"
-			}
-			if e != a.p.Export {
-				a.setExport(e)
-			}
-			out, err := a.startExport()
-			return map[string]string{"output": out}, err
-		})
 	tool(s, a, "export_status", "Progress of the running export, or the outcome of the last one.", func(none) (any, error) {
 		if j := a.export; j != nil {
 			return map[string]any{"running": true, "output": j.out, "progress": j.progress}, nil

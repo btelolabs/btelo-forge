@@ -129,7 +129,7 @@ func Build(spec Spec) (Graph, error) {
 		for _, pc := range row {
 			in := b.input("-ss", num(pc.In), "-t", num(pc.Out-pc.In), "-i", pc.Path)
 			if spec.Video {
-				b.add("[%d:v]setpts=(PTS-STARTPTS)/%s+%s/TB,fps=%s,%s,format=yuv420p[uv%d]", in, num(pc.Speed), num(pc.Delay), num(spec.FPS), fitted(spec.Width, spec.Height), k)
+				b.add("[%d:v]setpts=(PTS-STARTPTS)/%s+%s/TB,fps=%s,%s,%s[uv%d]", in, num(pc.Speed), num(pc.Delay), num(spec.FPS), fitted(spec.Width, spec.Height), translucent(pc.Opacity), k)
 				next := fmt.Sprintf("[up%d]", k)
 				b.add("%s[uv%d]overlay=eof_action=pass:enable='between(t,%s,%s)'%s", video, k, num(pc.Delay), num(pc.Delay+pc.length()), next)
 				video = next
@@ -187,6 +187,23 @@ func Build(spec Spec) (Graph, error) {
 	return g, nil
 }
 
+// translucent formats an upper-track picture with its opacity as alpha, so the tracks below show through.
+func translucent(opacity float64) string {
+	if opacity >= 1 {
+		return "format=yuv420p"
+	}
+	return "format=yuva420p,colorchannelmixer=aa=" + num(max(opacity, 0))
+}
+
+// dimmed fades a main-track picture towards the black beneath it; it is empty for a solid picture.
+func dimmed(opacity float64) string {
+	if opacity >= 1 {
+		return ""
+	}
+	o := num(max(opacity, 0))
+	return "colorchannelmixer=rr=" + o + ":gg=" + o + ":bb=" + o + ","
+}
+
 // mainVideo joins the main track's pieces back to back, padded with black when the upper tracks run past them.
 func (b *builder) mainVideo(spec Spec, w window, inputs []int) string {
 	if len(w.main) == 0 {
@@ -196,7 +213,7 @@ func (b *builder) mainVideo(spec Spec, w window, inputs []int) string {
 	var c strings.Builder
 	for i, pc := range w.main {
 		in := inputs[i]
-		b.add("[%d:v]setpts=(PTS-STARTPTS)/%s,fps=%s,%s,format=yuv420p[mv%d]", in, num(pc.Speed), num(spec.FPS), fitted(spec.Width, spec.Height), i)
+		b.add("[%d:v]setpts=(PTS-STARTPTS)/%s,fps=%s,%s,%sformat=yuv420p[mv%d]", in, num(pc.Speed), num(spec.FPS), fitted(spec.Width, spec.Height), dimmed(pc.Opacity), i)
 		fmt.Fprintf(&c, "[mv%d]", i)
 	}
 	fmt.Fprintf(&c, "concat=n=%d:v=1:a=0", len(w.main))

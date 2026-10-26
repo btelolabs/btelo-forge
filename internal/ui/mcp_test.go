@@ -188,8 +188,33 @@ func TestAnAIEditsAndExportsThroughMCP(t *testing.T) {
 	if st.Project.Video[0].Volume != 1 {
 		t.Fatal("undo did not revert set_track")
 	}
-	var out map[string]string
-	s.ok("export", map[string]any{"height": 180, "quality": "small"}, &out)
+	var options struct {
+		Presets []map[string]string `json:"presets"`
+	}
+	s.ok("export_options", nil, &options)
+	if len(options.Presets) != len(exportPresets) {
+		t.Fatalf("export_options %+v", options)
+	}
+	var set exportSettings
+	s.ok("set_export", map[string]any{"preset": "strong", "audio": "voice"}, &set)
+	if set.Preset != "custom" || set.Height != 720 || set.FPS != 30 || set.Codec != "h265" || set.Audio != "voice" {
+		t.Fatalf("set_export %+v", set)
+	}
+	s.ok("set_export", map[string]any{"preset": "extreme"}, &set)
+	if set.Preset != "extreme" || set.Height != 480 || set.Quality != "smallest" {
+		t.Fatalf("set_export %+v", set)
+	}
+	if res := s.call("set_export", map[string]any{"codec": "mpeg2"}); !res.IsError {
+		t.Fatal("an unknown codec was accepted")
+	}
+	var out struct {
+		Output   string         `json:"output"`
+		Settings exportSettings `json:"settings"`
+	}
+	s.ok("export", map[string]any{"preset": "balanced", "height": 180, "quality": "small"}, &out)
+	if out.Settings.Height != 180 || out.Settings.Quality != "small" || out.Settings.Codec != "h264" {
+		t.Fatalf("export settings %+v", out.Settings)
+	}
 	var status map[string]any
 	deadline := time.Now().Add(time.Minute)
 	for {
@@ -198,16 +223,16 @@ func TestAnAIEditsAndExportsThroughMCP(t *testing.T) {
 			break
 		}
 	}
-	if status["error"] != nil || status["output"] != out["output"] {
+	if status["error"] != nil || status["output"] != out.Output {
 		t.Fatalf("export status %+v", status)
 	}
-	info, err := media.Probe(context.Background(), out["output"])
+	info, err := media.Probe(context.Background(), out.Output)
 	if err != nil || info.Height != 180 || math.Abs(info.Duration-3) > 0.15 {
 		t.Fatalf("exported %+v %v", info, err)
 	}
 	var exports []map[string]any
 	s.ok("list_exports", nil, &exports)
-	if len(exports) != 1 || exports[0]["path"] != out["output"] {
+	if len(exports) != 1 || exports[0]["path"] != out.Output {
 		t.Fatalf("list_exports %+v", exports)
 	}
 	if x.a.settings.Export.Height != 180 {

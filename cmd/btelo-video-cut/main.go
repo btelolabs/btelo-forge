@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/media"
 	"github.com/btelolabs/btelo-video-cut/internal/ui"
 )
 
@@ -56,16 +55,13 @@ func run(background bool, capture string, deadline time.Duration, files []string
 	if err != nil {
 		return err
 	}
-	w, err := openWindow("btelo Cut", 1440, 900, background)
+	w, err := openWindow(ui.ProductName, 1440, 900, background)
 	if err != nil {
 		return err
 	}
 	defer w.Close()
 	app := ui.New(w, fonts, filepath.Join(cache, "btelo-video-cut"), filepath.Join(config, "btelo-video-cut"))
 	defer app.Close()
-	if err := media.Available(); err != nil {
-		app.Notice(err.Error())
-	}
 	for _, f := range files {
 		app.Open(f)
 	}

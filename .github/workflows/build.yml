@@ -61,13 +61,13 @@ jobs:
             CGO_ENABLED=1 GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$version" \
               -o "build/btelo-video-cut-$arch" ./cmd/btelo-video-cut
           done
-          app="dist/btelo-cut-macos/btelo Cut.app"
+          app="dist/btelo-cut-macos/btelo-video-cut.app"
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
           lipo -create -output "$app/Contents/MacOS/btelo-video-cut" build/btelo-video-cut-arm64 build/btelo-video-cut-amd64
           sed "s/VERSION/$short/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
           iconset=build/AppIcon.iconset
           mkdir -p "$iconset"
-          sips -s format png docs/logo.jpg --out build/logo.png > /dev/null
+          cp docs/logo.png build/logo.png
           for size in 16 32 128 256 512; do
             sips -z $size $size build/logo.png --out "$iconset/icon_${size}x${size}.png" > /dev/null
             sips -z $((size * 2)) $((size * 2)) build/logo.png --out "$iconset/icon_${size}x${size}@2x.png" > /dev/null

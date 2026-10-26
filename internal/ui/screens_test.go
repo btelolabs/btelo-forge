@@ -20,7 +20,22 @@ func TestScreens(t *testing.T) {
 			x.a.tab = tab
 			x.settle(10 * time.Second)
 			x.shot(string(lang) + "-panel-" + name)
+			if name == "export" {
+				x.a.panelScroll[tab] = 1e6
+				x.frame(Input{})
+				x.shot(string(lang) + "-panel-export-end")
+				x.a.panelScroll[tab] = 0
+			}
 		}
+		x.a.seek(2)
+		x.a.addText()
+		x.a.selectAll()
+		x.a.tab = 1
+		x.frame(Input{})
+		x.frame(Input{})
+		x.shot(string(lang) + "-selection")
+		x.a.undo()
+		x.a.selectOnly(selection{})
 		x.a.settingsOpen = true
 		for page, name := range []string{"general", "mcp", "phone", "extensions", "about"} {
 			x.a.settingsPage = page

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/btelolabs/btelo-video-cut/internal/library"
+	"github.com/btelolabs/btelo-video-cut/internal/media"
 	"github.com/btelolabs/btelo-video-cut/internal/transcribe"
 )
 
@@ -22,7 +23,7 @@ type configKind struct {
 }
 
 // configTitles marks the titles of configKinds for translation.
-var configTitles = msgs("Music sources", "Subtitle models")
+var configTitles = msgs("Music sources", "Subtitle models", "ffmpeg")
 
 var configKinds = []configKind{
 	{
@@ -49,6 +50,20 @@ var configKinds = []configKind{
 			return nil
 		},
 	},
+	{
+		id: "ffmpeg", file: "ffmpeg.json", title: configTitles[2], defaults: media.DefaultToolsJSON, guide: media.FormatGuide,
+		apply: func(a *App, data []byte) error {
+			c, err := media.ParseToolsConfig(data)
+			if err != nil {
+				return err
+			}
+			a.tools.config = c
+			if a.tools.stop != nil {
+				a.prepareTools()
+			}
+			return nil
+		},
+	},
 }
 
 func findConfig(id string) (configKind, error) {
@@ -57,7 +72,7 @@ func findConfig(id string) (configKind, error) {
 			return k, nil
 		}
 	}
-	return configKind{}, fmt.Errorf("unknown configuration %q (use music_sources or subtitle_models)", id)
+	return configKind{}, fmt.Errorf("unknown configuration %q (use music_sources, subtitle_models or ffmpeg)", id)
 }
 
 func (a *App) configPath(k configKind) string { return filepath.Join(a.stateDir, k.file) }

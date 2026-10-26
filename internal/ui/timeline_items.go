@@ -93,19 +93,35 @@ func (a *App) itemDrag(t tracks, r gfx.Rect, prefix string, id int, sel selectio
 		u.cursor = CursorMove
 	}
 	switch {
+	case (u.ctrl || u.shift) && u.press(bid, r):
+		// Ctrl/⌘-click toggles the item in the selection, Shift-click adds it; neither moves anything.
+		if u.ctrl {
+			a.togglePick(id)
+		} else {
+			a.addPick(id)
+		}
+		u.active = ""
+		return
 	case u.press(lid, left), u.press(rid, right):
-		a.sel = sel
+		a.selectOnly(sel)
 		begin()
 	case u.press(bid, r):
+		if !a.isPicked(id) {
+			a.selectOnly(sel)
+		}
 		a.sel, a.tab = sel, tab
 		begin()
 	}
 	for edge, key := range []string{bid, lid, rid} {
 		if u.dragging(key) && u.drag.moved {
+			if len(a.picked) > 0 {
+				a.selectOnly(sel)
+			}
 			apply(float64(u.mx-u.drag.x)/t.pps, edge, u.my)
 		}
 		if u.letGo(key) {
 			if !u.drag.moved && edge == 0 {
+				a.selectOnly(sel)
 				a.playhead = min(max(t.at(u.mx), 0), a.p.Duration())
 				a.requestFrame()
 			}
@@ -156,7 +172,7 @@ func (a *App) drawVideoClips(t tracks) {
 
 func (a *App) drawClip(t tracks, track int, c project.Clip, r gfx.Rect) {
 	u := &a.u
-	selected := a.sel.kind == selClip && a.sel.id == c.ID
+	selected := a.isPicked(c.ID)
 	bg := colVideo
 	if track > 0 {
 		bg = colVideoUpper
@@ -262,7 +278,7 @@ func (a *App) drawMusicClips(t tracks) {
 			empty = false
 			r := a.clipRect(t, l, m.Start, m.End())
 			id := m.ID
-			selected := a.sel.kind == selMusic && a.sel.id == id
+			selected := a.isPicked(id)
 			hot := u.hover(fmt.Sprintf("music/%d", id), r)
 			bg := colMusic
 			if hot || selected {
@@ -331,7 +347,7 @@ func (a *App) drawOverlayItems(t tracks) {
 			empty = false
 			r := a.clipRect(t, l, o.Start, o.End)
 			id := o.ID
-			selected := a.sel.kind == selOverlay && a.sel.id == id
+			selected := a.isPicked(id)
 			hot := u.hover(fmt.Sprintf("ov/%d", id), r)
 			bg, hi, glyph, label := colCaption, colCaptionHi, icFont, firstLine(o.Body)
 			if o.Kind == project.ImageOverlay {
@@ -351,7 +367,7 @@ func (a *App) drawOverlayItems(t tracks) {
 			u.c.Pop()
 			a.outline(r, selected, hot)
 			if u.double && u.pressed && r.Contains(u.pressX, u.pressY) && o.Kind == project.TextOverlay {
-				a.sel = selection{kind: selOverlay, id: id}
+				a.selectOnly(selection{kind: selOverlay, id: id})
 				a.focusBody(o.Body)
 			}
 			a.itemDrag(t, r, "ov", id, selection{kind: selOverlay, id: id}, tabOverlays,

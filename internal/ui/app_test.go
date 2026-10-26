@@ -43,7 +43,7 @@ func TestEditorCutsSpeedsCaptionsAndExports(t *testing.T) {
 	if c, _ := x.a.p.Clip(second); c.Speed != 2 || math.Abs(x.a.p.Duration()-5) > 0.01 {
 		t.Fatalf("speed %v duration %v", c.Speed, x.a.p.Duration())
 	}
-	tr = x.a.tracks(l.timeline)
+	tr = x.a.tracks(x.a.layout().timeline)
 	y := main.rect.Y + main.rect.H/2
 	x.drag(tr.x(0)+2, y, tr.x(0.5)+2, y)
 	if in := x.a.p.Video[0].Clips[0].In; in < 0.3 || in > 0.7 {
@@ -122,14 +122,14 @@ func TestAppendingStackingAndTrackVolume(t *testing.T) {
 		t.Fatal("the upper clip should be on top")
 	}
 
-	tr = x.a.tracks(l.timeline)
+	tr = x.a.tracks(x.a.layout().timeline)
 	hdr, _ := tr.lane(groupVideo, 0)
 	x.click(gfx.Rect{X: hdr.header.X + 20, Y: hdr.header.Y + 6, W: 1, H: 1})
 	if x.a.sel.kind != selTrack || x.a.sel.group != groupVideo || x.a.sel.track != 0 {
 		t.Fatalf("header click selected %+v", x.a.sel)
 	}
 	x.frame(Input{})
-	tr = x.a.tracks(l.timeline)
+	tr = x.a.tracks(x.a.layout().timeline)
 	hdr, _ = tr.lane(groupVideo, 0)
 	slider := gfx.Rect{X: hdr.header.X + x.a.u.px(4), Y: hdr.header.Y + x.a.u.px(22), W: hdr.header.W - x.a.u.px(42), H: x.a.u.px(20)}
 	x.drag(slider.X+slider.W/2, slider.Y+slider.H/2, slider.X+x.a.u.px(7)+1, slider.Y+slider.H/2)
@@ -220,4 +220,24 @@ func TestClosingStopsBackgroundDecoders(t *testing.T) {
 		t.Fatalf("Close took %v", took)
 	}
 	x.a.Close()
+}
+
+func TestVideosDroppedBeforeFFmpegIsReadyOpenOnceItIs(t *testing.T) {
+	x := newHarness(t)
+	clip := x.fixture()
+	x.a.prepareTools()
+	if x.a.tools.ready {
+		t.Fatal("preparing again should start from not ready")
+	}
+	x.frame(Input{Dropped: []string{clip}})
+	if len(x.a.tools.waiting) != 1 || x.a.p != nil {
+		t.Fatalf("the drop was not queued: %v", x.a.tools.waiting)
+	}
+	x.pump(time.Minute, func() bool { return x.a.p != nil })
+	if x.a.p.Sources[0].Path != clip || len(x.a.tools.waiting) != 0 {
+		t.Fatal("the queued video did not open")
+	}
+	if state := x.a.state(); !state.FFmpeg.Ready || state.FFmpeg.Version == "" {
+		t.Fatalf("%+v", state.FFmpeg)
+	}
 }

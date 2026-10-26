@@ -64,6 +64,7 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 	lineH := float32(int(f.Height()*1.3 + 0.5))
 	pad := u.px(8)
 	focused := u.focus == id
+	u.focusDrawn = u.focusDrawn || focused
 	text := *value
 	if focused {
 		text = string(u.edit.text)

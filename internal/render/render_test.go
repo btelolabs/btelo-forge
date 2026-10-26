@@ -265,3 +265,35 @@ func TestPreviewStreamsHaveTheRequestedSize(t *testing.T) {
 		t.Fatalf("audio preview %v s, want 2", seconds)
 	}
 }
+
+func TestOpacityDimsTheMainTrackAndShowsWhatIsBelow(t *testing.T) {
+	dir := t.TempDir()
+	red := solid(t, dir, "red.mp4", "red", "320x180", "2", false)
+	blue := solid(t, dir, "blue.mp4", "blue", "320x180", "2", false)
+	p := project.New(red, project.Export{})
+	upper := p.Place(p.AddSource(blue), 0)
+	p.SetOpacity([]int{upper}, 0.5)
+	out := filepath.Join(dir, "mixed.mp4")
+	if err := Encode(context.Background(), p, nil, out, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	img, err := media.Frame(context.Background(), out, 1, 160, 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := img.RGBAAt(80, 45); c.R < 90 || c.R > 170 || c.B < 90 || c.B > 170 {
+		t.Fatalf("half-transparent blue over red gave %v", c)
+	}
+	p.SetOpacity([]int{upper}, 0)
+	p.SetOpacity([]int{p.Video[0].Clips[0].ID}, 0.5)
+	out = filepath.Join(dir, "dim.mp4")
+	if err := Encode(context.Background(), p, nil, out, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if img, err = media.Frame(context.Background(), out, 1, 160, 90); err != nil {
+		t.Fatal(err)
+	}
+	if c := img.RGBAAt(80, 45); c.R < 90 || c.R > 160 || c.B > 40 {
+		t.Fatalf("half-faded red over black under an invisible clip gave %v", c)
+	}
+}

@@ -51,6 +51,10 @@ func msgs(s ...string) []string { return s }
 
 // describe turns an error into a message for the user, translating the ones the app knows.
 func (a *App) describe(err error) string {
+	var small *render.TargetTooSmall
+	if errors.As(err, &small) {
+		return a.u.tf("The target size is too small for this video; allow at least %.1f MB", small.MinimumMB)
+	}
 	var missing *transcribe.MissingEngine
 	if errors.As(err, &missing) {
 		if missing.Install == "" {
@@ -71,8 +75,10 @@ var knownErrors = []struct {
 	err     error
 	message string
 }{
-	{media.ErrMissingTool, "ffmpeg / ffprobe not found: put them next to the program, or install them (winget install ffmpeg, or brew install ffmpeg on a Mac)"},
+	{media.ErrMissingTool, "ffmpeg / ffprobe not found"},
 	{render.ErrTooLong, "Too many segments to export in one go; merge some of them and try again"},
+	{errToolsNotReady, "ffmpeg is still being prepared"},
+	{render.ErrEncoderMissing, "This ffmpeg cannot encode the chosen format; pick another format or install a full ffmpeg build"},
 	{render.ErrCredits, "The video was exported, but its credits file could not be written"},
 }
 

@@ -41,7 +41,7 @@ func (u *ctx) button(id string, r gfx.Rect, glyph, text string, kind buttonKind,
 	bg, fg := colSurface, colText
 	switch kind {
 	case primary:
-		bg, fg = colAccent, gfx.Hex(0xffffff)
+		bg, fg = colAccent, colOnAccent
 		if hot {
 			bg = colAccentHi
 		}
@@ -131,7 +131,7 @@ func (u *ctx) chips(id string, r gfx.Rect, options []string, selected int, enabl
 		hot := enabled && u.hover(cid, cr)
 		bg, fg := colSurface, colDim
 		if i == selected {
-			bg, fg = gfx.Mix(colSurface, colAccent, 0.55), gfx.Hex(0xffffff)
+			bg, fg = gfx.Mix(colSurface, colAccent, 0.55), colOnAccent
 		} else if hot {
 			bg, fg = colSurfaceHi, colText
 		}
@@ -168,7 +168,7 @@ func (u *ctx) slider(id string, r gfx.Rect, value *float64, lo, hi float64, enab
 		radius = u.px(7)
 		u.cursor = CursorHand
 	}
-	u.c.Circle(knob, r.Y+r.H/2, radius, gfx.Hex(0xffffff))
+	u.c.Circle(knob, r.Y+r.H/2, radius, colWhite)
 	if !enabled {
 		return false, false
 	}
@@ -191,7 +191,7 @@ func (u *ctx) checkbox(id string, r gfx.Rect, text string, on bool) bool {
 	box := gfx.Rect{X: r.X, Y: r.Y + (r.H-u.px(18))/2, W: u.px(18), H: u.px(18)}
 	if on {
 		u.c.RoundRect(box, u.px(4), colAccent)
-		u.icon(icCheck, box, 11, gfx.Hex(0xffffff))
+		u.icon(icCheck, box, 11, colOnAccent)
 	} else {
 		u.c.RoundOutline(box, u.px(4), u.px(1.5), colDim)
 	}
@@ -239,29 +239,39 @@ func (u *ctx) drawTip(screen gfx.Rect) time.Duration {
 
 // flowChips lays out options of their natural width, wrapping onto more rows; it returns the choice and the height.
 func (u *ctx) flowChips(id string, r gfx.Rect, options []string, selected int) (int, float32) {
+	return u.flowChipsSome(id, r, options, selected, nil)
+}
+
+// flowChipsSome is flowChips where options whose entry in enabled is false are shown but cannot be picked; a nil
+// enabled allows every option.
+func (u *ctx) flowChipsSome(id string, r gfx.Rect, options []string, selected int, enabled []bool) (int, float32) {
 	f := u.face(12.5)
 	gap := u.px(4)
 	x, y := r.X, r.Y
 	for i, o := range options {
+		on := enabled == nil || enabled[i]
 		w := f.Measure(o) + u.px(18)
 		if x > r.X && x+w > r.Right() {
 			x, y = r.X, y+r.H+gap
 		}
 		cr := gfx.Rect{X: x, Y: y, W: w, H: r.H}
 		cid := id + "/" + o
-		hot := u.hover(cid, cr)
+		hot := on && u.hover(cid, cr)
 		bg, fg := colSurface, colDim
-		if i == selected {
-			bg, fg = gfx.Mix(colSurface, colAccent, 0.55), gfx.Hex(0xffffff)
-		} else if hot {
+		switch {
+		case i == selected:
+			bg, fg = gfx.Mix(colSurface, colAccent, 0.55), colOnAccent
+		case hot:
 			bg, fg = colSurfaceHi, colText
+		case !on:
+			fg = colFaint
 		}
 		u.c.RoundRect(cr, u.px(5), bg)
 		u.label(f, cr, o, fg, 0.5)
 		if hot {
 			u.cursor = CursorHand
 		}
-		if u.clicked(cid, cr) {
+		if on && u.clicked(cid, cr) {
 			selected = i
 		}
 		x += w + gap

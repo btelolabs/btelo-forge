@@ -114,9 +114,14 @@ func (a *App) settingsExtensions(r gfx.Rect) {
 		u.focus = ""
 	}
 	builtIn := string(k.defaults)
-	if u.button("settings/ext/builtin", rectAt(r.X, y, u.px(190), u.px(34)), "", u.t("Load the built-in version"), ghost, e.text[k.id] != builtIn) {
-		e.view[k.id].remember(&editor{text: []rune(e.text[k.id])}, false)
-		e.text[k.id], e.err[k.id] = builtIn, ""
-		u.focus = ""
+	if u.button("settings/ext/restore", rectAt(r.X, y, u.px(170), u.px(34)), icRestore, u.t("Restore defaults"), plain, custom || e.text[k.id] != builtIn) {
+		if err := a.resetConfig(k); err != nil {
+			e.err[k.id] = err.Error()
+		} else {
+			e.view[k.id].remember(&editor{text: []rune(e.text[k.id])}, false)
+			e.text[k.id], e.saved[k.id], e.err[k.id] = builtIn, builtIn, ""
+			u.focus = ""
+			a.toast(u.tf("%s restored to the defaults; Ctrl+Z in the editor brings your version back", u.t(k.title)), false)
+		}
 	}
 }

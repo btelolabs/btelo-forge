@@ -13,7 +13,7 @@ import (
 )
 
 // mcpInstructions tells an AI what the server is and how to use it; it is also part of the text the settings copy.
-const mcpInstructions = `btelo Cut is a desktop video editor running on this computer. These tools drive the open editor window directly.
+const mcpInstructions = ProductName + ` is a desktop video editor running on this computer. These tools drive the open editor window directly.
 Workflow: call get_state first; ids of clips, overlays and music come from it. Times are seconds on the output timeline.
 Open a video with open_video (placement "new_tab" for a separate edit, "append" to add it to the end of the main track,
 "upper" to lay it over the picture from a time). Cut with split/delete_item/trim_item, change speed or clip volume with
@@ -21,17 +21,21 @@ set_clip, mix tracks with set_track, add captions and images with add_text/add_i
 add music with search_music + add_library_music or add_music_file, make subtitles with generate_subtitles
 (list_music_sources and list_subtitle_models show the choices). The music sources and the subtitle engines and models
 are JSON configurations: read one with get_config (it includes a guide to the format), change it with set_config
-(it is checked before it is used) and undo that with reset_config — for example to add a music site or a new model.
+(it is checked before it is used) and undo that with reset_config — for example to add a music site, a new model
+or another ffmpeg download (name ffmpeg). Change several items at once with set_items (volume, opacity) and
+delete_items. Before exporting, export_options lists the presets — from high quality to extreme compression, or fit a
+size in megabytes — and set_export or export applies them. get_state reports whether ffmpeg is ready.
 Check the result with frame_at (a picture of the output at a time) or screenshot (the editor window), then export with
 export and poll export_status. Every change can be undone with undo.`
 
 // mcpServer builds the MCP server whose tools act on the editor.
 func (a *App) mcpServer() *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "btelo-cut", Title: "btelo Cut", Version: Version}, &mcp.ServerOptions{Instructions: mcpInstructions})
+	s := mcp.NewServer(&mcp.Implementation{Name: "btelo-cut", Title: ProductName, Version: Version}, &mcp.ServerOptions{Instructions: mcpInstructions})
 	a.addStateTools(s)
 	a.addEditTools(s)
 	a.addMediaTools(s)
 	a.addConfigTools(s)
+	a.addExportTools(s)
 	return s
 }
 
@@ -48,7 +52,7 @@ func (a *App) mcpConnection() string {
 		url = fmt.Sprintf("http://127.0.0.1:%d/mcp", mcpPort)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Connect to the btelo Cut video editor over MCP and use it to edit videos for me.\n\n")
+	fmt.Fprintf(&b, "Connect to the %s video editor over MCP and use it to edit videos for me.\n\n", ProductName)
 	fmt.Fprintf(&b, "MCP server (Streamable HTTP, no authentication, only reachable from this computer): %s\n\n", url)
 	fmt.Fprintf(&b, "Claude Code:\n  claude mcp add --transport http btelo-cut %s\n\n", url)
 	fmt.Fprintf(&b, "Codex (~/.codex/config.toml):\n  [mcp_servers.btelo-cut]\n  url = \"%s\"\n\n", url)
@@ -63,10 +67,11 @@ func (a *App) mcpConnection() string {
 
 // mcpToolNames lists every tool, for the copied instructions; TestMCPToolsAreAllListed keeps it in step.
 var mcpToolNames = []string{
-	"get_state", "new_tab", "switch_tab", "close_tab", "open_video", "seek", "split", "delete_item", "move_item",
-	"trim_item", "set_clip", "set_track", "add_text", "add_image", "update_overlay", "add_music_file", "search_music",
-	"list_music_sources", "add_library_music", "generate_subtitles", "list_subtitle_models", "subtitle_status", "export",
-	"export_status", "list_exports", "undo", "redo", "screenshot", "frame_at", "get_config", "set_config", "reset_config",
+	"get_state", "new_tab", "switch_tab", "close_tab", "open_video", "seek", "split", "delete_item", "delete_items", "move_item",
+	"trim_item", "set_clip", "set_items", "set_track", "add_text", "add_image", "update_overlay", "add_music_file", "search_music",
+	"list_music_sources", "add_library_music", "generate_subtitles", "list_subtitle_models", "subtitle_status",
+	"export", "export_status", "export_options", "set_export", "list_exports", "undo", "redo", "screenshot", "frame_at",
+	"get_config", "set_config", "reset_config",
 }
 
 // tool registers a handler that runs on the UI goroutine and answers with JSON.
@@ -84,14 +89,15 @@ func jsonText(v any) (string, error) {
 type none struct{}
 
 type clipView struct {
-	ID     int     `json:"id"`
-	Source string  `json:"source"`
-	In     float64 `json:"in"`
-	Out    float64 `json:"out"`
-	Speed  float64 `json:"speed"`
-	Start  float64 `json:"start"`
-	End    float64 `json:"end"`
-	Volume float64 `json:"volume"`
+	ID      int     `json:"id"`
+	Source  string  `json:"source"`
+	In      float64 `json:"in"`
+	Out     float64 `json:"out"`
+	Speed   float64 `json:"speed"`
+	Start   float64 `json:"start"`
+	End     float64 `json:"end"`
+	Volume  float64 `json:"volume"`
+	Opacity float64 `json:"opacity"`
 }
 
 type videoTrackView struct {
@@ -115,6 +121,7 @@ type overlayView struct {
 	Outline    bool    `json:"outline,omitempty"`
 	Background bool    `json:"background,omitempty"`
 	Image      string  `json:"image,omitempty"`
+	Opacity    float64 `json:"opacity"`
 }
 
 type overlayTrackView struct {
@@ -152,12 +159,6 @@ type projectView struct {
 	Output   string             `json:"export_to"`
 }
 
-type exportSettings struct {
-	Height  int    `json:"height"`
-	Quality string `json:"quality"`
-	Codec   string `json:"codec"`
-}
-
 type tabView struct {
 	Index   int    `json:"index"`
 	Title   string `json:"title"`
@@ -169,15 +170,28 @@ type stateView struct {
 	Tabs     []tabView    `json:"tabs"`
 	Project  *projectView `json:"project,omitempty"`
 	Language Language     `json:"language"`
+	FFmpeg   ffmpegView   `json:"ffmpeg"`
 }
 
-var qualityIDs = []string{"high", "balanced", "small"}
+// ffmpegView tells an AI whether videos can be opened yet.
+type ffmpegView struct {
+	Ready    bool    `json:"ready"`
+	Version  string  `json:"version,omitempty"`
+	Path     string  `json:"path,omitempty"`
+	Progress float64 `json:"download_progress,omitempty"`
+	Status   string  `json:"status,omitempty"`
+}
 
 func colorHex(c [3]uint8) string { return fmt.Sprintf("#%02x%02x%02x", c[0], c[1], c[2]) }
 
 func (a *App) state() stateView {
 	var s stateView
 	s.Language = a.settings.Language
+	s.FFmpeg = ffmpegView{Ready: a.tools.ready, Version: a.tools.found.Version, Path: a.tools.found.FFmpeg}
+	if a.tools.downloading {
+		s.FFmpeg.Progress = a.tools.fraction
+	}
+	s.FFmpeg.Status, _ = a.toolsStatus()
 	for i, d := range a.docs {
 		s.Tabs = append(s.Tabs, tabView{Index: i, Title: d.title(a), Active: d == a.doc, Opening: d.opening})
 	}
@@ -186,22 +200,18 @@ func (a *App) state() stateView {
 	}
 	p := a.p
 	v := &projectView{Duration: p.Duration(), Playhead: a.playhead, Canvas: p.Canvas, Output: a.destination(p)}
-	codec := "h264"
-	if p.Export.HEVC {
-		codec = "h265"
-	}
-	v.Export = exportSettings{Height: p.Export.Height, Quality: qualityIDs[p.Export.Quality], Codec: codec}
+	v.Export = a.exportView(p.Export)
 	for k, t := range p.Video {
 		tv := videoTrackView{Index: k, Main: k == 0, Muted: t.Muted, Volume: t.Volume, Clips: []clipView{}}
 		for _, c := range t.Clips {
-			tv.Clips = append(tv.Clips, clipView{ID: c.ID, Source: p.SourceOf(c).Path, In: c.In, Out: c.Out, Speed: c.Speed, Start: c.Start, End: c.End(), Volume: c.Volume})
+			tv.Clips = append(tv.Clips, clipView{ID: c.ID, Source: p.SourceOf(c).Path, In: c.In, Out: c.Out, Speed: c.Speed, Start: c.Start, End: c.End(), Volume: c.Volume, Opacity: c.Opacity})
 		}
 		v.Video = append(v.Video, tv)
 	}
 	for k, t := range p.Overlays {
 		tv := overlayTrackView{Index: k, Hidden: t.Hidden, Items: []overlayView{}}
 		for _, o := range t.Items {
-			ov := overlayView{ID: o.ID, Kind: "text", Start: o.Start, End: o.End, X: o.X, Y: o.Y, Size: o.Size}
+			ov := overlayView{ID: o.ID, Kind: "text", Start: o.Start, End: o.End, X: o.X, Y: o.Y, Size: o.Size, Opacity: o.Opacity}
 			if o.Kind == project.ImageOverlay {
 				ov.Kind, ov.Image = "image", o.Image
 			} else {

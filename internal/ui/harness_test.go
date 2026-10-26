@@ -80,7 +80,12 @@ func newHarness(t testing.TB) *harness {
 		a.Close()
 		catalog.Close()
 	})
-	return &harness{t: t, a: a, h: h, c: gfx.NewCanvas(1600, 1000), scale: 1, dir: dir}
+	x := &harness{t: t, a: a, h: h, c: gfx.NewCanvas(1600, 1000), scale: 1, dir: dir}
+	x.pump(time.Minute, func() bool { return a.tools.ready || a.tools.err != nil })
+	if a.tools.err != nil {
+		t.Fatalf("ffmpeg: %v", a.tools.err)
+	}
+	return x
 }
 
 // sourcesAt is the built-in music configuration with every site moved to a test server, so no test reaches the

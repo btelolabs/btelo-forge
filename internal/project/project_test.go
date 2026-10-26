@@ -1,7 +1,11 @@
 package project
 
 import (
+	"encoding/json"
+	"errors"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -212,5 +216,74 @@ func TestSaveLoadRoundTripsAndRejectsAChangedSource(t *testing.T) {
 	changed.Duration = 12
 	if _, err := Load(path, changed); err == nil {
 		t.Fatal("loaded an edit for a different source")
+	}
+}
+
+func TestExportReadsTheOldCodecField(t *testing.T) {
+	var e Export
+	if err := json.Unmarshal([]byte(`{"Height":720,"Quality":2,"HEVC":true}`), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e != (Export{Height: 720, Quality: Small, Codec: HEVC}) {
+		t.Fatalf("%+v", e)
+	}
+	data, _ := json.Marshal(Export{Codec: AV1, FPS: 30, TargetMB: 9.5, Audio: AudioVoice})
+	var back Export
+	if err := json.Unmarshal(data, &back); err != nil || back != (Export{Codec: AV1, FPS: 30, TargetMB: 9.5, Audio: AudioVoice}) {
+		t.Fatalf("%s → %+v %v", data, back, err)
+	}
+	if (Export{Quality: 9}).Valid() || (Export{TargetMB: -1}).Valid() || !(Export{}).Valid() {
+		t.Fatal("Valid")
+	}
+}
+
+func TestBatchEditsSkipWhatDoesNotApply(t *testing.T) {
+	p := New(Source{Path: "a.mp4", Duration: 10, Width: 640, Height: 360, FPS: 30, HasVideo: true, HasAudio: true}, Export{})
+	main := p.Video[0].Clips[0].ID
+	p.SplitClip(main, 5)
+	second := p.Video[0].Clips[1].ID
+	text := p.AddText("hi", 1)
+	music := p.AddMusic("m.mp3", "m", "", 20, 0)
+	if n := p.SetVolumes([]int{main, text, music}, 0.4); n != 2 {
+		t.Fatalf("volume changed %d items", n)
+	}
+	if v, _ := p.Volume(music); v != 0.4 {
+		t.Fatal(v)
+	}
+	if n := p.SetOpacity([]int{main, text, music}, 1.7); n != 2 {
+		t.Fatalf("opacity changed %d items", n)
+	}
+	if o, _ := p.Opacity(text); o != 1 {
+		t.Fatalf("opacity not clamped: %v", o)
+	}
+	p.SetOpacity([]int{text}, 0.25)
+	if o, _ := p.Overlay(text); o.Opacity != 0.25 {
+		t.Fatal(o.Opacity)
+	}
+	if _, err := p.DeleteItems([]int{main, second, text}); !errors.Is(err, ErrMainTrackEmpty) || !p.Has(text) {
+		t.Fatalf("deleting the whole main track: %v", err)
+	}
+	if n, err := p.DeleteItems([]int{second, text, music, music, 999}); err != nil || n != 3 || p.Has(text) || p.Has(music) || !p.Has(main) {
+		t.Fatalf("deleted %d: %v", n, err)
+	}
+}
+
+func TestVersionTwoEditsLoadOpaque(t *testing.T) {
+	src := Source{Path: "a.mp4", Duration: 10, Width: 640, Height: 360, FPS: 30, HasVideo: true}
+	p := New(src, Export{})
+	p.AddText("hi", 1)
+	for k := range p.Video[0].Clips {
+		p.Video[0].Clips[k].Opacity = 0
+	}
+	p.Overlays[0].Items[0].Opacity = 0
+	data, _ := json.Marshal(saved{Version: 2, Project: p})
+	path := filepath.Join(t.TempDir(), "v2.json")
+	os.WriteFile(path, data, 0o644)
+	got, err := Load(path, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Video[0].Clips[0].Opacity != 1 || got.Overlays[0].Items[0].Opacity != 1 {
+		t.Fatal("a version 2 edit did not load opaque")
 	}
 }

@@ -226,7 +226,7 @@ func (a *App) drawMusicPanel(r gfx.Rect) {
 	m := &a.music
 	a.ensureCatalog()
 	y := r.Y
-	if a.sel.kind == selMusic {
+	if a.sel.kind == selMusic && !a.selectionCard() {
 		if k, i, ok := a.p.FindMusic(a.sel.id); ok {
 			y = a.drawSelectedMusic(gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(150)}, a.p.Music[k].Clips[i])
 		}
@@ -288,9 +288,6 @@ func (a *App) drawMusicPanel(r gfx.Rect) {
 		}
 		y += u.px(40)
 	}
-	footer := u.px(40)
-	list := gfx.Rect{X: r.X, Y: y, W: r.W, H: r.Bottom() - y - footer}
-	a.drawTrackList(list)
 	var note string
 	switch {
 	case m.source == srcAll:
@@ -311,8 +308,12 @@ func (a *App) drawMusicPanel(r gfx.Rect) {
 	}
 	f := u.face(11)
 	lines := f.Wrap(note, r.W)
-	for i, l := range lines[:min(len(lines), 2)] {
-		u.c.Text(f, r.X, r.Bottom()-footer+u.px(6)+float32(i)*f.Height()*1.15, l, colFaint)
+	lines = lines[:min(len(lines), 4)]
+	lineH := f.Height() * 1.15
+	footer := float32(len(lines))*lineH + u.px(12)
+	a.drawTrackList(gfx.Rect{X: r.X, Y: y, W: r.W, H: r.Bottom() - y - footer})
+	for i, l := range lines {
+		u.c.Text(f, r.X, r.Bottom()-footer+u.px(8)+float32(i)*lineH, l, colFaint)
 	}
 }
 
@@ -410,7 +411,7 @@ func (a *App) drawTrackRow(r gfx.Rect, t library.Track) {
 		u.cursor = CursorHand
 	}
 	u.c.RoundRect(pb, u.px(17), pbg)
-	u.icon(glyph, pb, 12, gfx.Hex(0xffffff))
+	u.icon(glyph, pb, 12, colOnAccent)
 	u.hint("audition/"+key, u.t("Preview"), pb)
 	if u.clicked("audition/"+key, pb) {
 		a.auditionTrack(t)

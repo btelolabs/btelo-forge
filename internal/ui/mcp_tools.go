@@ -48,6 +48,10 @@ func (a *App) addEditTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{Name: "open_video", Description: "Open a video: in a new tab, appended to the main track, or on an upper track that covers the picture."},
 		func(ctx contextT, req *mcp.CallToolRequest, in openIn) (*mcp.CallToolResult, any, error) {
 			_, err := call(a, func() (any, error) {
+				if !a.tools.ready {
+					text, _ := a.toolsStatus()
+					return nil, errors.New(text)
+				}
 				switch in.Placement {
 				case "", "append":
 				case "new_tab":
@@ -181,11 +185,12 @@ func (a *App) addEditTools(s *mcp.Server) {
 		return a.state().Project, err
 	})
 	type clipIn struct {
-		ID     int      `json:"id" jsonschema:"video clip id"`
-		Speed  *float64 `json:"speed,omitempty" jsonschema:"0.25 to 4"`
-		Volume *float64 `json:"volume,omitempty" jsonschema:"gain of the clip's own sound, 0 to 2"`
+		ID      int      `json:"id" jsonschema:"video clip id"`
+		Speed   *float64 `json:"speed,omitempty" jsonschema:"0.25 to 4"`
+		Volume  *float64 `json:"volume,omitempty" jsonschema:"gain of the clip's own sound, 0 to 2"`
+		Opacity *float64 `json:"opacity,omitempty" jsonschema:"0 to 1; on the main track it fades to black, above it the tracks below show through"`
 	}
-	tool(s, a, "set_clip", "Change a video clip's speed or the volume of its own sound.", func(in clipIn) (any, error) {
+	tool(s, a, "set_clip", "Change a video clip's speed, the volume of its own sound or its opacity.", func(in clipIn) (any, error) {
 		err := a.edit(func(p *project.Project) error {
 			if _, ok := p.Clip(in.ID); !ok {
 				return fmt.Errorf("no video clip %d", in.ID)
@@ -196,10 +201,54 @@ func (a *App) addEditTools(s *mcp.Server) {
 			if in.Volume != nil {
 				p.SetClipVolume(in.ID, *in.Volume)
 			}
+			if in.Opacity != nil {
+				p.SetOpacity([]int{in.ID}, *in.Opacity)
+			}
 			return nil
 		})
 		return a.state().Project, err
 	})
+	type idsIn struct {
+		IDs []int `json:"ids" jsonschema:"ids of clips, music clips and overlays from get_state"`
+	}
+	tool(s, a, "delete_items", "Delete several clips, music clips and overlays in one undoable step. Nothing is deleted when it would empty the main track.",
+		func(in idsIn) (any, error) {
+			if err := a.knownItems(in.IDs); err != nil {
+				return nil, err
+			}
+			var n int
+			err := a.edit(func(p *project.Project) error {
+				var err error
+				n, err = p.DeleteItems(in.IDs)
+				return err
+			})
+			return map[string]any{"deleted": n, "project": a.state().Project}, err
+		})
+	type itemsIn struct {
+		IDs     []int    `json:"ids" jsonschema:"ids of clips, music clips and overlays from get_state"`
+		Volume  *float64 `json:"volume,omitempty" jsonschema:"0 to 2, for the items with sound (video and music clips)"`
+		Opacity *float64 `json:"opacity,omitempty" jsonschema:"0 to 1, for the items with a picture (video clips and overlays)"`
+	}
+	tool(s, a, "set_items", "Set the volume and/or opacity of several items at once, in one undoable step; items without sound or picture are skipped.",
+		func(in itemsIn) (any, error) {
+			if err := a.knownItems(in.IDs); err != nil {
+				return nil, err
+			}
+			if in.Volume == nil && in.Opacity == nil {
+				return nil, errors.New("give volume, opacity or both")
+			}
+			changed := map[string]int{}
+			err := a.edit(func(p *project.Project) error {
+				if in.Volume != nil {
+					changed["volume"] = p.SetVolumes(in.IDs, *in.Volume)
+				}
+				if in.Opacity != nil {
+					changed["opacity"] = p.SetOpacity(in.IDs, *in.Opacity)
+				}
+				return nil
+			})
+			return map[string]any{"changed": changed, "project": a.state().Project}, err
+		})
 	type trackIn struct {
 		Kind   string   `json:"kind" jsonschema:"video, music or overlay"`
 		Index  int      `json:"index"`
@@ -252,6 +301,7 @@ type overlayIn struct {
 	Color      *string  `json:"color,omitempty" jsonschema:"text colour #rrggbb"`
 	Outline    *bool    `json:"outline,omitempty"`
 	Background *bool    `json:"background,omitempty" jsonschema:"dark box behind the text"`
+	Opacity    *float64 `json:"opacity,omitempty" jsonschema:"0 (invisible) to 1 (solid)"`
 }
 
 func (in overlayIn) apply(p *project.Project, id int) error {
@@ -284,6 +334,9 @@ func (in overlayIn) apply(p *project.Project, id int) error {
 		}
 		if in.Background != nil {
 			o.Box = *in.Background
+		}
+		if in.Opacity != nil {
+			o.Opacity = min(max(*in.Opacity, 0), 1)
 		}
 	})
 	if in.Start != nil || in.End != nil {
@@ -377,4 +430,20 @@ func result(v any, err error) (*mcp.CallToolResult, any, error) {
 		return nil, nil, err
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: data}}}, nil, nil
+}
+
+// knownItems checks that every id names an item of the active edit.
+func (a *App) knownItems(ids []int) error {
+	if a.p == nil {
+		return errNoProject
+	}
+	if len(ids) == 0 {
+		return errors.New("give at least one id")
+	}
+	for _, id := range ids {
+		if !a.p.Has(id) {
+			return fmt.Errorf("no clip, music clip or overlay %d", id)
+		}
+	}
+	return nil
 }

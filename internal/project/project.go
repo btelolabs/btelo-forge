@@ -32,6 +32,7 @@ type Clip struct {
 	Speed   float64
 	Start   float64
 	Volume  float64
+	Opacity float64 // 1 is solid; on the main track lower values fade to black, above it they show the tracks below
 }
 
 // Length is the clip's duration on the timeline.
@@ -95,6 +96,7 @@ type Overlay struct {
 	Box     bool
 	Image   string
 	Aspect  float64 // image width over height
+	Opacity float64 // 1 is solid
 }
 
 // OverlayTrack is a row of overlays; later tracks draw on top of earlier ones and every overlay is above the video.
@@ -107,22 +109,6 @@ type OverlayTrack struct {
 type Canvas struct {
 	Width, Height int
 	FPS           float64
-}
-
-// Quality picks how hard the encoder compresses.
-type Quality int
-
-const (
-	High Quality = iota
-	Balanced
-	Small
-)
-
-// Export is how the result is encoded.
-type Export struct {
-	Height  int // 0 keeps the canvas height
-	Quality Quality
-	HEVC    bool
 }
 
 // Project is everything an edit consists of.
@@ -157,7 +143,7 @@ func (p *Project) id() int {
 }
 
 func (p *Project) fullClip(source int) Clip {
-	return Clip{ID: p.id(), Source: source, In: 0, Out: p.Sources[source].Duration, Speed: 1, Volume: 1}
+	return Clip{ID: p.id(), Source: source, In: 0, Out: p.Sources[source].Duration, Speed: 1, Volume: 1, Opacity: 1}
 }
 
 // Clone returns a deep copy, used for undo history.

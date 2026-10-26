@@ -1,6 +1,6 @@
 # Third-party notices
 
-btelo Cut includes or links the following components, each under its own licence.
+btelo-video-cut includes or links the following components, each under its own licence.
 
 ## Built into the program
 
@@ -18,8 +18,11 @@ btelo Cut includes or links the following components, each under its own licence
 
 ## Used but not included
 
-- **ffmpeg / ffprobe** do all decoding and encoding; they are installed separately by the user
-  (`winget install ffmpeg`, `brew install ffmpeg`) and run as separate programs.
+- **ffmpeg / ffprobe** do all decoding and encoding and run as separate programs. The app uses a copy already on the
+  computer, or downloads one on first run into its own folder: the GPL builds of
+  [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) on Windows and of
+  [ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de) on macOS, under their own licences (GPL, with x264, x265,
+  SVT-AV1 and libaom). The download addresses are in `internal/media/ffmpeg.json`.
 - **whisper.cpp** (MIT) and its **ggml Whisper models** (MIT, from OpenAI's Whisper) are downloaded on first use of
   AI subtitles, from the official GitHub releases and Hugging Face.
 - **Music and sound effects** come from Kevin MacLeod / incompetech.com (CC BY 4.0), Openverse (CC0 and CC BY),

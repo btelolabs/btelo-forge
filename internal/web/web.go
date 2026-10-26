@@ -1,5 +1,5 @@
-// Package web serves the exported videos to phones on the local network: an htmx page listing them and the files,
-// behind a random key in the address.
+// Package web is the page phones on the local network open: it lists the exported videos to play or download, and
+// takes videos, sound and pictures uploaded from the phone. Everything is behind a random key in the address.
 package web
 
 import (
@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,13 +26,26 @@ type File struct {
 	At   time.Time
 }
 
-// Text is the page's wording, in the app's language.
+// Text is the page's wording, in the app's language. Uploaded and Refused are format strings taking a count and a
+// list of names.
 type Text struct {
-	Title, Empty, Download, Refresh string
+	Title, Empty, Download, Refresh   string
+	Exports, Upload, UploadHint, Send string
+	Uploaded, Refused, Failed         string
 }
 
-// Handler serves the page for files() to anyone presenting key.
-func Handler(key string, files func() []File, text func() Text) http.Handler {
+// Site is what the page shows and where uploads go; its functions are called from server goroutines.
+type Site struct {
+	Files     func() []File
+	Text      func() Text
+	UploadDir func() (string, error)
+	Received  func(paths []string)
+}
+
+// Handler serves site to anyone presenting key.
+func Handler(key string, site Site) http.Handler {
+	files, text := site.Files, site.Text
+	var storing sync.Mutex
 	mux := http.NewServeMux()
 	allowed := func(w http.ResponseWriter, r *http.Request) bool {
 		got := r.URL.Query().Get("k")
@@ -62,6 +77,40 @@ func Handler(key string, files func() []File, text func() Text) http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		list.Execute(w, rows(files(), text()))
+	})
+	mux.HandleFunc("POST /upload", func(w http.ResponseWriter, r *http.Request) {
+		if !allowed(w, r) {
+			return
+		}
+		t := text()
+		dir, err := site.UploadDir()
+		if err != nil {
+			uploadResult.Execute(w, resultView{Failed: fmt.Sprintf(t.Failed, err)})
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, MaxUpload)
+		storing.Lock()
+		saved, refused, err := receive(r, dir)
+		storing.Unlock()
+		if len(saved) > 0 {
+			site.Received(saved)
+		}
+		v := resultView{}
+		if len(saved) > 0 {
+			names := make([]string, len(saved))
+			for i, p := range saved {
+				names[i] = filepath.Base(p)
+			}
+			v.Uploaded = fmt.Sprintf(t.Uploaded, len(saved), strings.Join(names, ", "))
+		}
+		if len(refused) > 0 {
+			v.Refused = fmt.Sprintf(t.Refused, len(refused), strings.Join(refused, ", "))
+		}
+		if err != nil {
+			v.Failed = fmt.Sprintf(t.Failed, err)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		uploadResult.Execute(w, v)
 	})
 	mux.HandleFunc("GET /file/{n}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		if !allowed(w, r) {
@@ -139,11 +188,34 @@ header{display:flex;align-items:center;justify-content:space-between;padding:18p
 h1{font-size:18px;margin:0}button{background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font:inherit}
 main{padding:12px 16px;max-width:720px;margin:0 auto}.item{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}
 .name{font-weight:600;word-break:break-all}.meta{color:var(--dim);font-size:13px;margin:2px 0 10px}video{width:100%;border-radius:8px;background:#000;margin-bottom:10px}
-a.dl{display:block;text-align:center;background:var(--accent);color:#06140d;text-decoration:none;font-weight:600;border-radius:8px;padding:10px}
+a.dl{display:block;text-align:center;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;border-radius:8px;padding:10px}
 .empty{color:var(--dim);text-align:center;padding:40px 0}
+h2{font-size:15px;color:var(--dim);margin:22px 0 4px;font-weight:600}
+.upload{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
+.upload p{color:var(--dim);font-size:13px;margin:0 0 10px}
+input[type=file]{width:100%;color:var(--dim);margin-bottom:10px}
+.send{width:100%;background:var(--accent);border:0;color:#fff;font-weight:600;padding:10px}
+progress{width:100%;height:6px;margin-top:10px;accent-color:var(--accent)}progress[hidden]{display:none}
+.ok{color:var(--accent);margin-top:10px}.bad{color:#ffb4b2;margin-top:10px}
 </style></head>
 <body><header><h1>{{.Title}}</h1><button hx-get="/list" hx-target="#list">{{.Refresh}}</button></header>
-<main id="list" hx-get="/list" hx-trigger="load, every 10s"></main></body></html>`))
+<main>
+<form class="upload" hx-post="/upload" hx-encoding="multipart/form-data" hx-target="#sent" hx-on::before-request="var p=document.getElementById('progress');p.value=0;p.hidden=false" hx-on::after-request="this.reset();document.getElementById('progress').hidden=true;htmx.trigger('#list','refresh')">
+<h1 style="font-size:16px;margin:0 0 4px">{{.Upload}}</h1><p>{{.UploadHint}}</p>
+<input type="file" name="files" multiple accept="video/*,audio/*,image/*" required>
+<button class="send" type="submit">{{.Send}}</button>
+<progress id="progress" max="100" value="0" hidden></progress><div id="sent"></div>
+</form>
+<h2>{{.Exports}}</h2>
+<div id="list" hx-get="/list" hx-trigger="load, every 10s, refresh"></div>
+</main>
+<script>htmx.on("htmx:xhr:progress",function(e){if(e.detail.lengthComputable){document.getElementById("progress").value=e.detail.loaded/e.detail.total*100}})</script>
+</body></html>`))
+
+type resultView struct{ Uploaded, Refused, Failed string }
+
+var uploadResult = template.Must(template.New("result").Parse(`{{if .Uploaded}}<div class="ok">{{.Uploaded}}</div>{{end}}` +
+	`{{if .Refused}}<div class="bad">{{.Refused}}</div>{{end}}{{if .Failed}}<div class="bad">{{.Failed}}</div>{{end}}`))
 
 var list = template.Must(template.New("list").Parse(`{{if not .Rows}}<p class="empty">{{.Text.Empty}}</p>{{end}}
 {{range .Rows}}<div class="item"><div class="name">{{.Name}}</div><div class="meta">{{.Size}} · {{.When}}</div>

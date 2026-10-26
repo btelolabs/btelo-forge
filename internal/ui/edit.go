@@ -62,7 +62,9 @@ func (a *App) shortcuts() {
 		case k.Code == keyEnd:
 			a.seek(a.p.Duration())
 		case k.Code == keyEscape:
-			a.sel = selection{}
+			a.selectOnly(selection{})
+		case k.Code == 'A' && k.Ctrl:
+			a.selectAll()
 		}
 	}
 	u.keys = nil
@@ -112,6 +114,10 @@ func (a *App) split() {
 }
 
 func (a *App) deleteSelection() {
+	if ids := a.selectedIDs(); len(ids) > 1 {
+		a.deleteItems(ids)
+		return
+	}
 	switch a.sel.kind {
 	case selClip:
 		if k, _, _ := a.p.FindClip(a.sel.id); k == 0 && len(a.p.Video[0].Clips) <= 1 {
@@ -126,13 +132,13 @@ func (a *App) deleteSelection() {
 	default:
 		return
 	}
-	a.sel = selection{}
+	a.selectOnly(selection{})
 }
 
 // focusBody puts the caret in the selected text overlay's editor with its text selected.
 func (a *App) focusBody(body string) {
 	a.tab = tabOverlays
-	a.u.focus = "overlay/body"
+	a.u.setFocus("overlay/body")
 	a.u.edit = editor{text: []rune(body), multiline: true}
 	a.u.edit.anchor, a.u.edit.caret = 0, len(a.u.edit.text)
 }

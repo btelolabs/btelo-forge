@@ -31,6 +31,10 @@ func (a *App) drawPanel(r gfx.Rect) {
 		a.tab = pick
 	}
 	body := gfx.Rect{X: in.X, Y: in.Y + u.px(44), W: in.W, H: in.H - u.px(44)}
+	if a.p != nil && a.selectionCard() {
+		used := a.drawSelectionCard(body)
+		body.Y, body.H = body.Y+used, body.H-used
+	}
 	switch a.tab {
 	case tabMusic:
 		a.drawMusicPanel(body)
@@ -47,10 +51,15 @@ func (a *App) drawPanel(r gfx.Rect) {
 func (a *App) scrolled(r gfx.Rect, draw func(gfx.Rect) float32) {
 	u := &a.u
 	offset := &a.panelScroll[a.tab]
+	// Clamp to the content height of the last frame first, so a shorter panel never shows an empty view.
+	if last := a.panelContent[a.tab]; last > 0 {
+		*offset = min(max(*offset, 0), max(last-r.H, 0))
+	}
 	u.c.Push(r)
 	bottom := draw(gfx.Rect{X: r.X, Y: r.Y - *offset, W: r.W - u.px(8), H: r.H + *offset})
 	u.c.Pop()
 	content := bottom + *offset - r.Y + u.px(12)
+	a.panelContent[a.tab] = content
 	if u.hover("panel/scroll", r) && u.wheel != 0 {
 		*offset -= u.wheel * u.px(60)
 		u.wheel = 0
@@ -86,7 +95,7 @@ func (a *App) drawOverlayPanel(r gfx.Rect) float32 {
 		u.hint(b.id, b.hint, br)
 	}
 	y := r.Y + u.px(46)
-	if a.sel.kind == selOverlay {
+	if a.sel.kind == selOverlay && !a.selectionCard() {
 		if o, ok := a.p.Overlay(a.sel.id); ok {
 			return a.drawOverlayEditor(gfx.Rect{X: r.X, Y: y, W: r.W, H: r.Bottom() - y}, o)
 		}
@@ -175,6 +184,13 @@ func (a *App) drawOverlayEditor(r gfx.Rect, o project.Overlay) float32 {
 	sc, sd := u.slider("ov/size", sr, &size, lo, hi, true)
 	a.live(sc, sd, func() { a.p.UpdateOverlay(o.ID, func(x *project.Overlay) { x.Size = size }) })
 	u.label(u.face(12), gfx.Rect{X: sr.Right() + u.px(4), Y: y, W: u.px(44), H: u.px(28)}, fmt.Sprintf("%d%%", int(math.Round(size*100))), colDim, 1)
+	y += u.px(36)
+	u.label(u.face(12.5), gfx.Rect{X: r.X, Y: y, W: u.px(62), H: u.px(28)}, u.t("Opacity"), colDim, 0)
+	opacity := o.Opacity
+	or := gfx.Rect{X: r.X + u.px(64), Y: y, W: r.W - u.px(112), H: u.px(28)}
+	oc, od := u.slider("ov/opacity", or, &opacity, 0, 1, true)
+	a.live(oc, od, func() { a.p.SetOpacity([]int{o.ID}, opacity) })
+	u.label(u.face(12), gfx.Rect{X: or.Right() + u.px(4), Y: y, W: u.px(44), H: u.px(28)}, fmt.Sprintf("%d%%", int(math.Round(opacity*100))), colDim, 1)
 	y += u.px(36)
 
 	if o.Kind == project.TextOverlay {

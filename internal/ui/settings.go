@@ -13,6 +13,9 @@ import (
 	"github.com/btelolabs/btelo-video-cut/internal/project"
 )
 
+// ProductName is the name of the app in every language.
+const ProductName = "btelo-video-cut"
+
 // Repository is where the source lives.
 const Repository = "https://github.com/btelolabs/btelo-video-cut"
 
@@ -109,7 +112,7 @@ func (a *App) setLanguage(l Language) {
 }
 
 // Title is the window title in the current language.
-func (a *App) Title() string { return a.u.t("btelo Cut") }
+func (a *App) Title() string { return ProductName }
 
 func newKey() string {
 	b := make([]byte, 16)

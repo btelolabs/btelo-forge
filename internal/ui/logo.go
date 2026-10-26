@@ -32,10 +32,27 @@ func logo() *image.RGBA {
 	return logoImage
 }
 
-var logoScaler gfx.Scaler
+// LogoRounding is the corner radius of the mark as a share of its side.
+const LogoRounding = 0.18
 
-// drawLogo draws the mark in r, resampled only when the size changes.
+var (
+	logoScaler  gfx.Scaler
+	logoScaled  *image.RGBA
+	logoRounded *image.RGBA
+)
+
+// drawLogo draws the mark in r with rounded corners, resampled only when the size changes.
 func drawLogo(u *ctx, r gfx.Rect) {
 	p := r.Pixels()
-	u.c.Blit(logoScaler.Scaled(logo(), p.Dx(), p.Dy()), p.Min.X, p.Min.Y, true)
+	scaled := logoScaler.Scaled(logo(), p.Dx(), p.Dy())
+	if scaled == nil {
+		return
+	}
+	if scaled != logoScaled || logoRounded == nil || logoRounded.Rect != scaled.Rect {
+		logoScaled = scaled
+		logoRounded = image.NewRGBA(scaled.Rect)
+		copy(logoRounded.Pix, scaled.Pix)
+		gfx.RoundCorners(logoRounded, LogoRounding*float32(min(p.Dx(), p.Dy())))
+	}
+	u.c.Blit(logoRounded, p.Min.X, p.Min.Y, false)
 }

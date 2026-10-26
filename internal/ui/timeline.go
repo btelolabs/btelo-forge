@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/btelolabs/btelo-video-cut/internal/gfx"
 )
@@ -118,6 +119,28 @@ func (a *App) tracks(r gfx.Rect) tracks {
 	t.x0 = a.view.scroll
 
 	gap := u.px(4)
+	order, h := a.laneOrder()
+	t.contentH = h
+	a.view.vscroll = min(max(a.view.vscroll, 0), max(0, h-t.view.H))
+	y := t.view.Y - a.view.vscroll
+	prev := group(-1)
+	for i, l := range order {
+		if i > 0 && l.group != prev {
+			y += u.px(8)
+		}
+		prev = l.group
+		lh := a.laneHeight(l.group, l.track)
+		l.rect = gfx.Rect{X: t.area.X, Y: y, W: t.area.W, H: lh}
+		l.header = gfx.Rect{X: r.X + u.px(8), Y: y, W: t.headerW - u.px(14), H: lh}
+		t.lanes = append(t.lanes, l)
+		y += lh + gap
+	}
+	return t
+}
+
+// laneOrder lists the lanes from top to bottom (overlays, video, music) and the height they need together.
+func (a *App) laneOrder() ([]lane, float32) {
+	u := &a.u
 	var order []lane
 	for k := len(a.p.Overlays) - 1; k >= 0; k-- {
 		order = append(order, lane{group: groupOverlay, track: k})
@@ -135,25 +158,13 @@ func (a *App) tracks(r gfx.Rect) tracks {
 			h += u.px(8)
 		}
 		prev = order[i].group
-		h += a.laneHeight(order[i].group, order[i].track) + gap
+		h += a.laneHeight(order[i].group, order[i].track) + u.px(4)
 	}
-	t.contentH = h
-	a.view.vscroll = min(max(a.view.vscroll, 0), max(0, h-t.view.H))
-	y := t.view.Y - a.view.vscroll
-	prev = group(-1)
-	for i, l := range order {
-		if i > 0 && l.group != prev {
-			y += u.px(8)
-		}
-		prev = l.group
-		lh := a.laneHeight(l.group, l.track)
-		l.rect = gfx.Rect{X: t.area.X, Y: y, W: t.area.W, H: lh}
-		l.header = gfx.Rect{X: r.X + u.px(8), Y: y, W: t.headerW - u.px(14), H: lh}
-		t.lanes = append(t.lanes, l)
-		y += lh + gap
-	}
-	return t
+	return order, h
 }
+
+// timelineChrome is the height of the timeline around its lanes: toolbar, ruler and scroll bar.
+func (a *App) timelineChrome() float32 { return a.u.px(38 + 22 + 4 + 4 + 4 + 12) }
 
 // zoom multiplies the scale around output time pivot, keeping it under the same pixel.
 func (a *App) zoom(t tracks, factor float64, pivot float64) {
@@ -399,17 +410,57 @@ func (a *App) drawPlayhead(t tracks) {
 	u.c.Triangle(x-u.px(6), t.ruler.Y+u.px(3), x+u.px(6), t.ruler.Y+u.px(3), x, t.ruler.Y+u.px(12), colPlayhead)
 }
 
-// trackBackground lets a click on empty track space seek there and clear the selection.
+// marquee is a selection box being drawn on empty timeline space; it starts from the items already selected when
+// Ctrl/⌘ or Shift was held.
+type marquee struct {
+	x, y float64 // where it started, in seconds and timeline content pixels, so it follows scrolling
+	keep []int
+}
+
+// trackBackground lets a click on empty track space seek there and clear the selection, and a drag draw a box that
+// selects every item it touches.
 func (a *App) trackBackground(t tracks) {
 	u := &a.u
 	if u.press("tl/empty", t.area) {
-		a.sel = selection{}
 		a.player.Stop()
+		var keep []int
+		if u.ctrl || u.shift {
+			keep = a.selectedIDs()
+		} else {
+			a.selectOnly(selection{})
+		}
+		a.marquee = &marquee{x: t.at(u.pressX), y: float64(u.pressY - t.view.Y + a.view.vscroll), keep: keep}
 	}
-	if u.dragging("tl/empty") || u.letGo("tl/empty") {
-		a.playhead = min(max(t.at(u.mx), 0), a.p.Duration())
-		a.requestFrame()
+	m := a.marquee
+	if m == nil {
+		return
 	}
+	if u.dragging("tl/empty") && u.drag.moved {
+		box := a.marqueeRect(t, m)
+		ids := append(slices.Clone(m.keep), a.itemsIn(t, box)...)
+		a.selectOnly(selection{})
+		for _, id := range ids {
+			a.addPick(id)
+		}
+		u.c.Fill(box, gfx.Alpha(colAccent, 0.12))
+		u.c.RoundOutline(box, u.px(2), max(1, u.px(1)), colAccentHi)
+	}
+	if u.letGo("tl/empty") {
+		if !u.drag.moved {
+			a.playhead = min(max(t.at(u.mx), 0), a.p.Duration())
+			a.requestFrame()
+		}
+		a.marquee = nil
+	} else if u.active != "tl/empty" {
+		a.marquee = nil
+	}
+}
+
+// marqueeRect is the box from where the marquee started to the pointer, on screen.
+func (a *App) marqueeRect(t tracks, m *marquee) gfx.Rect {
+	x0, y0 := t.x(m.x), t.view.Y+float32(m.y)-a.view.vscroll
+	x1, y1 := a.u.mx, a.u.my
+	return gfx.Rect{X: min(x0, x1), Y: min(y0, y1), W: max(x0, x1) - min(x0, x1), H: max(y0, y1) - min(y0, y1)}
 }
 
 func (a *App) drawScrollbars(t tracks) {

@@ -81,6 +81,11 @@ func (a *App) dropUpper() bool {
 // openVideo probes path in the background. An empty tab opens it, restoring an unfinished edit of the same file;
 // a tab with an edit appends it to the main track, or places it at the playhead on an upper track.
 func (a *App) openVideo(path string, upper bool) {
+	if !a.tools.ready {
+		a.tools.waiting = append(a.tools.waiting, path)
+		a.toast(a.u.tf("%s opens as soon as ffmpeg is ready", filepath.Base(path)), false)
+		return
+	}
 	d := a.doc
 	if d.opening != "" {
 		a.toast(a.u.t("Still opening the previous file"), false)
@@ -131,7 +136,7 @@ func (a *App) load(d *doc, src project.Source) {
 		p = project.New(src, a.settings.Export)
 	}
 	d.p, d.hist, d.dirty = p, project.History{}, false
-	d.playhead, d.sel, d.shown, d.view = 0, selection{}, shownFrame{}, timelineView{}
+	d.playhead, d.sel, d.picked, d.shown, d.view = 0, selection{}, nil, shownFrame{}, timelineView{}
 	for _, s := range p.Sources {
 		a.media.start(a, s)
 	}
@@ -283,6 +288,10 @@ func (a *App) musicPeaks(path string) []float32 {
 // importAudio probes sound files, adds them to the local library and, when place is set, to the timeline at the
 // playhead.
 func (a *App) importAudio(paths []string, place bool) {
+	if !a.tools.ready {
+		a.toast(a.describe(errToolsNotReady), true)
+		return
+	}
 	d := a.doc
 	a.background(func(ctx context.Context) {
 		for _, path := range paths {

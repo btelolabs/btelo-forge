@@ -27,6 +27,7 @@ type key struct {
 	x, y, size    float64
 	color         [3]uint8
 	outline, box  bool
+	opacity       float64
 	width, height int
 }
 
@@ -45,7 +46,7 @@ func New(font *gfx.Font) *Renderer {
 
 // Draw renders t for a w×h frame; an empty body gives an image of zero size.
 func (r *Renderer) Draw(t project.Overlay, w, h int) Image {
-	k := key{t.Body, t.X, t.Y, t.Size, t.Color, t.Outline, t.Box, w, h}
+	k := key{t.Body, t.X, t.Y, t.Size, t.Color, t.Outline, t.Box, t.Opacity, w, h}
 	r.mu.Lock()
 	if img, ok := r.cache[k]; ok {
 		r.mu.Unlock()
@@ -112,19 +113,19 @@ func (r *Renderer) draw(t project.Overlay, w, h int) Image {
 	at := image.Pt(int(math.Round(cx-float64(iw)/2)), int(math.Round(cy-float64(ih)/2)))
 	at.X = min(max(at.X, 0), max(w-iw, 0))
 	at.Y = min(max(at.Y, 0), max(h-ih, 0))
-	return Image{RGBA: img, At: at}
+	return Image{RGBA: gfx.Fade(img, t.Opacity), At: at}
 }
 
 type pictureKey struct {
 	src           *image.RGBA
-	size          float64
+	size, opacity float64
 	width, height int
 }
 
 // Picture renders an image overlay for a w×h frame: src scaled to the overlay's height and centred at its position,
 // kept inside the frame. Only the scaling is cached, so dragging the image does not resample it.
 func (r *Renderer) Picture(o project.Overlay, src *image.RGBA, w, h int) Image {
-	k := pictureKey{src, o.Size, w, h}
+	k := pictureKey{src, o.Size, o.Opacity, w, h}
 	r.mu.Lock()
 	out, ok := r.pictures[k]
 	r.mu.Unlock()
@@ -136,6 +137,7 @@ func (r *Renderer) Picture(o project.Overlay, src *image.RGBA, w, h int) Image {
 		}
 		out = image.NewRGBA(image.Rect(0, 0, iw, ih))
 		draw.CatmullRom.Scale(out, out.Rect, src, src.Rect, draw.Src, nil)
+		out = gfx.Fade(out, o.Opacity)
 		r.mu.Lock()
 		if len(r.pictures) > 64 {
 			clear(r.pictures)

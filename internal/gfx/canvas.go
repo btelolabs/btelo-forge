@@ -18,6 +18,11 @@ func (r Rect) Bottom() float32 { return r.Y + r.H }
 // Contains reports whether (x, y) is inside r.
 func (r Rect) Contains(x, y float32) bool { return x >= r.X && y >= r.Y && x < r.X+r.W && y < r.Y+r.H }
 
+// Intersects reports whether r and o overlap.
+func (r Rect) Intersects(o Rect) bool {
+	return r.X < o.Right() && o.X < r.Right() && r.Y < o.Bottom() && o.Y < r.Bottom()
+}
+
 // Inset shrinks r by d on every side.
 func (r Rect) Inset(d float32) Rect { return Rect{r.X + d, r.Y + d, max(r.W-2*d, 0), max(r.H-2*d, 0)} }
 
@@ -334,3 +339,45 @@ func Hex(v uint32) color.RGBA { return color.RGBA{uint8(v >> 16), uint8(v >> 8),
 
 // RGBA makes an opaque colour from red, green and blue.
 func RGBA(c [3]uint8) color.RGBA { return color.RGBA{c[0], c[1], c[2], 255} }
+
+// RoundCorners clips img to a rounded rectangle of the given radius in place, with anti-aliased edges.
+func RoundCorners(img *image.RGBA, radius float32) {
+	iw, ih := img.Rect.Dx(), img.Rect.Dy()
+	w, h := float32(iw), float32(ih)
+	radius = min(radius, w/2, h/2)
+	n := min(int(math.Ceil(float64(radius))), iw)
+	into := func(v, size float32) float32 { return max(radius-v, v-(size-radius), 0) }
+	for y := 0; y < ih; y++ {
+		dy := into(float32(y)+0.5, h)
+		if dy <= 0 {
+			continue
+		}
+		for x := 0; x < iw; x++ {
+			if x == n && x < iw-n {
+				x = iw - n
+			}
+			dx := into(float32(x)+0.5, w)
+			if dx <= 0 {
+				continue
+			}
+			cov := clamp01(radius + 0.5 - float32(math.Hypot(float64(dx), float64(dy))))
+			p := img.Pix[img.PixOffset(img.Rect.Min.X+x, img.Rect.Min.Y+y):]
+			for k := 0; k < 4; k++ {
+				p[k] = uint8(float32(p[k])*cov + 0.5)
+			}
+		}
+	}
+}
+
+// Fade returns a copy of img with its opacity scaled by a (0 to 1); img itself is returned when a is 1.
+func Fade(img *image.RGBA, a float64) *image.RGBA {
+	if a >= 1 {
+		return img
+	}
+	out := image.NewRGBA(img.Rect)
+	k := float32(max(a, 0))
+	for i, v := range img.Pix {
+		out.Pix[i] = uint8(float32(v)*k + 0.5)
+	}
+	return out
+}

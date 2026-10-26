@@ -21,10 +21,7 @@ func (a *App) drawSettings() {
 	}
 	u := &a.u
 	u.c.Fill(a.screen, gfxShade)
-	w, h := min(u.px(760), a.screen.W-u.px(40)), min(u.px(560), a.screen.H-u.px(40))
-	if a.settingsPage == settingsExtensionsPage {
-		w, h = min(u.px(1040), a.screen.W-u.px(40)), min(u.px(760), a.screen.H-u.px(40))
-	}
+	w, h := min(u.px(1040), a.screen.W-u.px(40)), min(u.px(760), a.screen.H-u.px(40))
 	r := rectCentered(a.screen, w, h)
 	panel(u, r)
 	in := r.Inset(u.px(22))
@@ -111,14 +108,27 @@ func (a *App) settingsGeneral(r gfx.Rect) {
 		a.saveSettings()
 	}
 	y += u.px(48)
-	a.paragraph(r.X, y, r.W, u.t("Export quality, size and codec are remembered from your last export and used for new edits."), 12, colFaint)
+	y = a.paragraph(r.X, y, r.W, u.t("Export quality, size and codec are remembered from your last export and used for new edits."), 12, colFaint)
+	y += u.px(18)
+	u.heading(rectAt(r.X, y, r.W, u.px(22)), "ffmpeg")
+	y += u.px(26)
+	info, failed := a.toolsStatus()
+	col := colDim
+	if failed {
+		col = gfx.Hex(0xffb4b2)
+	}
+	if info == "" {
+		info = u.tf("Version %s · %s", a.tools.found.Version, a.tools.found.FFmpeg)
+	}
+	y = a.paragraph(r.X, y, r.W, info, 12, col)
+	a.paragraph(r.X, y+u.px(4), r.W, u.t("Found on this computer or downloaded once into the app's own folder; where it comes from is set in Settings → Extensions."), 11.5, colFaint)
 }
 
 func (a *App) settingsMCP(r gfx.Rect) {
 	u := &a.u
 	y := a.paragraph(r.X, r.Y, r.W, u.t("Any AI that speaks MCP (Claude, Codex, Cursor and others) can drive this app: open videos, cut, add text, images, music and subtitles, look at the result and export. Copy the text below and give it to your AI — that is all it needs."), 12.5, colDim)
 	y += u.px(10)
-	if on := u.checkbox("settings/mcp", rectAt(r.X, y, r.W, u.px(26)), u.t("Let AI tools control btelo Cut (only from this computer)"), a.settings.MCP); on != a.settings.MCP {
+	if on := u.checkbox("settings/mcp", rectAt(r.X, y, r.W, u.px(26)), u.tf("Let AI tools control %s (only from this computer)", ProductName), a.settings.MCP); on != a.settings.MCP {
 		a.settings.MCP = on
 		a.saveSettings()
 		a.applyServices()
@@ -146,12 +156,23 @@ func (a *App) settingsMCP(r gfx.Rect) {
 		a.copyText(a.mcpConnection())
 	}
 	y += u.px(50)
-	text := a.mcpConnection()
 	box := rectAt(r.X, y, r.W, r.Bottom()-y)
 	u.c.RoundRect(box, u.px(8), gfx.Mix(colSurface, colBlack, 0.3))
-	u.c.Push(box.Inset(u.px(10)))
-	a.paragraph(box.X+u.px(12), box.Y+u.px(10), box.W-u.px(24), text, 11, colDim)
+	inner := box.Inset(u.px(10))
+	if u.hover("settings/mcp/text", box) && u.wheel != 0 {
+		a.mcpScroll -= u.wheel * u.px(60)
+		u.wheel = 0
+	}
+	u.c.Push(inner)
+	bottom := a.paragraph(box.X+u.px(12), inner.Y-a.mcpScroll, box.W-u.px(30), a.mcpConnection(), 11, colDim)
 	u.c.Pop()
+	content := bottom + a.mcpScroll - inner.Y
+	a.mcpScroll = min(max(a.mcpScroll, 0), max(content-inner.H, 0))
+	if content > inner.H {
+		h := max(inner.H*inner.H/content, u.px(24))
+		sy := inner.Y + (inner.H-h)*a.mcpScroll/(content-inner.H)
+		u.c.RoundRect(rectAt(box.Right()-u.px(7), sy, u.px(3), h), u.px(1.5), colSurfaceHi)
+	}
 }
 
 func (a *App) copyText(text string) {
@@ -164,9 +185,9 @@ func (a *App) copyText(text string) {
 
 func (a *App) settingsPhone(r gfx.Rect) {
 	u := &a.u
-	y := a.paragraph(r.X, r.Y, r.W, u.t("Open a page on your phone to play and download the videos you exported. The phone must be on the same Wi-Fi; the address contains a private key, so only people you give it to can use it."), 12.5, colDim)
+	y := a.paragraph(r.X, r.Y, r.W, u.t("Open a page on your phone to play and download the videos you exported, and to send videos, sound and pictures from the phone to this computer. The phone must be on the same Wi-Fi; the address contains a private key, so only people you give it to can use it."), 12.5, colDim)
 	y += u.px(10)
-	if on := u.checkbox("settings/phone", rectAt(r.X, y, r.W, u.px(26)), u.t("Share exported videos with my phone"), a.settings.Phone); on != a.settings.Phone {
+	if on := u.checkbox("settings/phone", rectAt(r.X, y, r.W, u.px(26)), u.t("Connect my phone (download exports, upload from the phone)"), a.settings.Phone); on != a.settings.Phone {
 		a.settings.Phone = on
 		a.saveSettings()
 		a.applyServices()
@@ -204,15 +225,32 @@ func (a *App) settingsPhone(r gfx.Rect) {
 		}
 		tx := q.Right() + u.px(18)
 		ty := a.paragraph(tx, y, r.Right()-tx, u.t("Scan with the phone camera, or type one of these addresses into its browser:"), 12, colDim)
-		for _, link := range s.phoneURL {
-			ty = a.paragraph(tx, ty+u.px(4), r.Right()-tx, link, 11.5, colAccentHi)
+		for i, link := range s.phoneURL {
+			ty += u.px(6)
+			cb := rectAt(r.Right()-u.px(34), ty, u.px(30), u.px(30))
+			end := a.paragraph(tx, ty+u.px(4), cb.X-tx-u.px(8), link, 11.5, colAccentHi)
+			if u.iconButton(fmt.Sprintf("settings/phone/copy/%d", i), cb, icCopy, u.t("Copy address"), false, true) {
+				a.copyText(link)
+			}
+			ty = max(end, cb.Bottom())
 		}
-		if u.button("settings/phone/copy", rectAt(tx, ty+u.px(10), u.px(160), u.px(32)), icCopy, u.t("Copy address"), plain, true) {
-			a.copyText(url)
-		}
-		y = max(q.Bottom(), ty+u.px(42)) + u.px(16)
+		y = max(q.Bottom(), ty) + u.px(18)
 	}
-	a.paragraph(r.X, y, r.W, u.tf("%d exported videos are listed.", len(a.exports())), 12, colFaint)
+	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Uploads from the phone are saved in"))
+	y += u.px(26)
+	dir, err := a.uploadDir()
+	if err != nil {
+		dir = err.Error()
+	}
+	box := rectAt(r.X, y, r.W-u.px(160), u.px(32))
+	u.c.RoundRect(box, u.px(7), colSurface)
+	u.label(u.face(12), box.Inset(u.px(10)), dir, colText, 0)
+	if u.button("settings/phone/dir", rectAt(box.Right()+u.px(8), y, u.px(152), u.px(32)), icFolder, u.t("Choose folder…"), plain, true) {
+		a.chooseExportDir()
+	}
+	y += u.px(38)
+	y = a.paragraph(r.X, y, r.W, u.t("This is the default export folder (Settings → General); when exports go beside each original, uploads go to your videos folder."), 11.5, colFaint)
+	a.paragraph(r.X, y+u.px(6), r.W, u.tf("%d exported videos are listed.", len(a.exports())), 12, colFaint)
 }
 
 func (a *App) settingsAbout(r gfx.Rect) {
@@ -239,7 +277,7 @@ func (a *App) settingsAbout(r gfx.Rect) {
 	y += u.px(36)
 	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Licence"))
 	y += u.px(26)
-	y = a.paragraph(r.X, y, r.W, u.t("btelo Cut is free to use, including for commercial videos. You may read the source and change it for your own use. Redistributing it, selling it, or selling copies or modified versions is not allowed. See LICENSE in the repository for the full terms."), 12.5, colDim)
+	y = a.paragraph(r.X, y, r.W, u.tf("%s is free to use, including for commercial videos. You may read the source and change it for your own use. Redistributing it, selling it, or selling copies or modified versions is not allowed. See LICENSE in the repository for the full terms.", ProductName), 12.5, colDim)
 	y += u.px(14)
 	a.paragraph(r.X, y, r.W, u.t("Music from the built-in libraries keeps its own licence (CC0 or CC BY); credits for it are written next to each export."), 12, colFaint)
 }

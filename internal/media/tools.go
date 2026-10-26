@@ -8,60 +8,46 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/btelolabs/btelo-video-cut/internal/proc"
 )
 
-// ErrMissingTool means ffmpeg or ffprobe is neither next to the program nor on PATH.
-var ErrMissingTool = errors.New("ffmpeg / ffprobe not found: put them next to the program, or install them (winget install ffmpeg, or brew install ffmpeg on a Mac)")
+// ErrMissingTool means no usable ffmpeg and ffprobe were found or installed.
+var ErrMissingTool = errors.New("ffmpeg / ffprobe not found")
 
 var (
-	toolOnce  sync.Once
-	toolPaths map[string]string
+	chosen     atomic.Pointer[Tools] // set by Use once the app has found or installed ffmpeg
+	searchOnce sync.Once
+	searched   map[string]string
 )
 
+// Use makes every command run the given programs.
+func Use(t Tools) { chosen.Store(&t) }
+
+// tool is the path of ffmpeg or ffprobe: the pair given to Use, or else whatever is next to the program or on PATH.
 func tool(name string) (string, error) {
-	toolOnce.Do(func() {
-		toolPaths = map[string]string{}
-		dir := ""
-		if exe, err := os.Executable(); err == nil {
-			dir = filepath.Dir(exe)
+	if t := chosen.Load(); t != nil {
+		if name == "ffprobe" {
+			return t.FFprobe, nil
 		}
-		for _, n := range []string{"ffmpeg", "ffprobe"} {
-			if dir != "" {
-				if p := filepath.Join(dir, n+exeSuffix()); fileExists(p) {
-					toolPaths[n] = p
-					continue
-				}
-			}
-			if p, err := exec.LookPath(n); err == nil {
-				toolPaths[n] = p
-				continue
-			}
-			// Apps started from Finder do not get the shell's PATH, so look where Homebrew installs too.
-			for _, dir := range []string{"/opt/homebrew/bin", "/usr/local/bin"} {
-				if p := filepath.Join(dir, n); runtime.GOOS == "darwin" && fileExists(p) {
-					toolPaths[n] = p
-					break
-				}
+		return t.FFmpeg, nil
+	}
+	searchOnce.Do(func() {
+		searched = map[string]string{}
+		for _, t := range candidates(&ToolsConfig{}, "") {
+			if fileExists(t.FFmpeg) && fileExists(t.FFprobe) {
+				searched["ffmpeg"], searched["ffprobe"] = t.FFmpeg, t.FFprobe
+				return
 			}
 		}
 	})
-	if p, ok := toolPaths[name]; ok {
+	if p, ok := searched[name]; ok {
 		return p, nil
 	}
 	return "", ErrMissingTool
-}
-
-func exeSuffix() string {
-	if runtime.GOOS == "windows" {
-		return ".exe"
-	}
-	return ""
 }
 
 func fileExists(p string) bool {

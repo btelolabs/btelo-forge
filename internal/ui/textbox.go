@@ -96,6 +96,7 @@ func (e *editor) lineEnd(i int) int {
 // textBox edits *value. It returns changed on every edit and done when focus leaves (Enter, Esc, Tab or a click outside).
 func (u *ctx) textBox(id string, r gfx.Rect, value *string, placeholder string, multiline bool) (changed, done bool) {
 	focused := u.focus == id
+	u.focusDrawn = u.focusDrawn || focused
 	hot := u.hover(id, r)
 	if hot {
 		u.cursor = CursorText

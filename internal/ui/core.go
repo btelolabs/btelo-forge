@@ -108,6 +108,7 @@ type ctx struct {
 	tip        tip
 	tipSeen    bool
 	edit       editor
+	focusDrawn bool // the focused text box was drawn this frame
 	caretBlink time.Time
 	imeAt      [3]float32
 	blinking   bool
@@ -184,11 +185,20 @@ func (u *ctx) clicked(id string, r gfx.Rect) bool {
 	return u.letGo(id) && r.Contains(u.mx, u.my)
 }
 
-// end frees a hold whose widget was not drawn this frame.
+// setFocus gives the keyboard to text box id from outside it; it keeps the focus until the box is next drawn.
+func (u *ctx) setFocus(id string) {
+	u.focus, u.focusDrawn = id, true
+}
+
+// end frees a hold, and the keyboard focus, of a widget that was not drawn this frame.
 func (u *ctx) end() {
 	if u.active != "" && !u.down {
 		u.active = ""
 	}
+	if !u.focusDrawn {
+		u.focus = ""
+	}
+	u.focusDrawn = false
 }
 
 func (u *ctx) face(size float32) *gfx.Face     { return u.fonts.Regular.Face(u.px(size)) }

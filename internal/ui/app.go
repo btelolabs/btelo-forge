@@ -10,6 +10,7 @@ import (
 	"github.com/btelolabs/btelo-video-cut/internal/caption"
 	"github.com/btelolabs/btelo-video-cut/internal/gfx"
 	"github.com/btelolabs/btelo-video-cut/internal/library"
+	"github.com/btelolabs/btelo-video-cut/internal/media"
 	"github.com/btelolabs/btelo-video-cut/internal/playback"
 	"github.com/btelolabs/btelo-video-cut/internal/transcribe"
 )
@@ -54,7 +55,12 @@ type App struct {
 	toasts       []toast
 	settingsPage int
 	extensions   extensionsPage
+	mcpScroll    float32 // how far the AI setup text in Settings is scrolled
+	exportForm   exportForm
+	encoders     media.Encoders // nil until probed
+	tools        toolsState
 	panelScroll  [4]float32
+	panelContent [4]float32 // height of each panel's content at the last frame
 	screen       gfx.Rect
 	services     *services
 }
@@ -82,7 +88,9 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	a.music.init()
 	a.subtitles.config = transcribe.DefaultConfig()
 	a.subtitles.manager = transcribe.NewManager(filepath.Join(cacheDir, "whisper"))
+	a.tools.config = media.DefaultToolsConfig()
 	a.loadConfigs()
+	a.prepareTools()
 	a.newTab()
 	a.applyServices()
 	return a
@@ -189,7 +197,12 @@ func (a *App) layout() layout {
 	l.tabs = gfx.Rect{X: 0, Y: 0, W: s.W, H: u.px(40)}
 	l.body = gfx.Rect{X: 0, Y: l.tabs.H, W: s.W, H: s.H - l.tabs.H}
 	panelW := min(u.px(380), s.W*0.34)
+	// The timeline is as tall as its tracks need, between a usual height and half the window; the preview gets the rest.
 	timelineH := min(u.px(300), l.body.H*0.46)
+	if a.p != nil {
+		_, lanes := a.laneOrder()
+		timelineH = max(timelineH, min(a.timelineChrome()+lanes, l.body.H*0.5))
+	}
 	l.panel = gfx.Rect{X: s.W - panelW, Y: l.body.Y, W: panelW, H: l.body.H - timelineH}
 	l.timeline = gfx.Rect{X: 0, Y: s.H - timelineH, W: s.W, H: timelineH}
 	main := gfx.Rect{X: 0, Y: l.body.Y, W: s.W - panelW, H: l.body.H - timelineH}
@@ -246,15 +259,9 @@ func (a *App) background(work func(ctx context.Context)) {
 // Open loads a video into the current tab as if it had been dropped on the window.
 func (a *App) Open(path string) { a.openVideo(path, false) }
 
-// Notice shows a message that stays until clicked.
-func (a *App) Notice(text string) {
-	a.toast(text, true)
-	a.toasts[len(a.toasts)-1].until = time.Now().Add(24 * time.Hour)
-}
-
 // Idle reports whether nothing is loading or decoding in the background, for tools that capture settled frames.
 func (a *App) Idle() bool {
-	if a.opening != "" || a.shown.busy || len(a.jobs) > 0 {
+	if a.opening != "" || a.shown.busy || len(a.jobs) > 0 || !a.tools.ready && a.tools.err == nil {
 		return false
 	}
 	if a.p != nil && !a.media.settled(a.p) {

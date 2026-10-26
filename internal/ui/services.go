@@ -77,7 +77,7 @@ func (a *App) applyServices() {
 		s.phoneErr = err
 		if err == nil {
 			key := a.settings.PhoneKey
-			s.phone = serve(web.Handler(key, a.phoneFiles, a.phoneText), l)
+			s.phone = serve(web.Handler(key, a.phoneSite()), l)
 			s.phoneURL = nil
 			for _, ip := range web.LANAddresses() {
 				s.phoneURL = append(s.phoneURL, fmt.Sprintf("http://%s:%d/?k=%s", ip, port, key))
@@ -102,26 +102,6 @@ func (s *services) stop() {
 			shutdown(srv)
 		}
 	}
-}
-
-// phoneFiles runs on a server goroutine, so it asks the UI goroutine for the list.
-func (a *App) phoneFiles() []web.File {
-	list, _ := call(a, func() ([]web.File, error) {
-		var out []web.File
-		for _, r := range a.exports() {
-			out = append(out, web.File{Path: r.Path, At: r.At})
-		}
-		return out, nil
-	})
-	return list
-}
-
-func (a *App) phoneText() web.Text {
-	t, _ := call(a, func() (web.Text, error) {
-		return web.Text{Title: a.u.t("btelo Cut · exported videos"), Empty: a.u.t("No exported videos yet. Export one in the app and it shows up here."),
-			Download: a.u.t("Download"), Refresh: a.u.t("Refresh")}, nil
-	})
-	return t
 }
 
 // errBusy means the editor did not answer in time, usually because a modal system dialog is open.

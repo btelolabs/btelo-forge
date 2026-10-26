@@ -71,3 +71,33 @@ func TestScalerReusesItsResult(t *testing.T) {
 		t.Fatal("new size must not write into the source")
 	}
 }
+
+func TestRoundCornersClearsOnlyTheCorners(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 40, 30))
+	for i := range img.Pix {
+		img.Pix[i] = 200
+	}
+	RoundCorners(img, 8)
+	alpha := func(x, y int) uint8 { return img.RGBAAt(x, y).A }
+	for _, c := range [][2]int{{0, 0}, {39, 0}, {0, 29}, {39, 29}} {
+		if alpha(c[0], c[1]) != 0 {
+			t.Fatalf("corner %v kept alpha %d", c, alpha(c[0], c[1]))
+		}
+	}
+	for _, c := range [][2]int{{20, 0}, {0, 15}, {39, 15}, {20, 29}, {20, 15}, {5, 5}} {
+		if alpha(c[0], c[1]) != 200 {
+			t.Fatalf("pixel %v changed to %d", c, alpha(c[0], c[1]))
+		}
+	}
+	if a := alpha(2, 2); a == 0 || a == 200 {
+		t.Fatalf("the curve is not anti-aliased: %d", a)
+	}
+	for y := 0; y < 30; y++ {
+		for x := 0; x < 40; x++ {
+			p := img.RGBAAt(x, y)
+			if p.R > p.A {
+				t.Fatalf("pixel %d,%d is not premultiplied: %v", x, y, p)
+			}
+		}
+	}
+}

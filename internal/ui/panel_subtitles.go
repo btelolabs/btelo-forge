@@ -236,7 +236,7 @@ func (a *App) generateSubtitles() error {
 			before := d.p.Clone()
 			var items []project.Overlay
 			for _, l := range lines {
-				items = append(items, project.Overlay{Body: l.Text, Start: l.Start, End: l.End})
+				items = append(items, project.Overlay{Body: l.Text, Start: l.Start, End: l.End, Opacity: 1})
 			}
 			d.p.AddCaptions(items)
 			s.lastDone = len(items)

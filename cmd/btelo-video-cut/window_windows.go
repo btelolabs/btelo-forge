@@ -70,7 +70,7 @@ func (h winWindow) LaunchURL(url string) error { return win.LaunchURL(url) }
 
 func alert(text string) {
 	t, _ := syscall.UTF16PtrFromString(text)
-	caption, _ := syscall.UTF16PtrFromString("btelo Cut")
+	caption, _ := syscall.UTF16PtrFromString("btelo-video-cut")
 	const iconError = 0x10
 	syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW").Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(caption)), iconError)
 }

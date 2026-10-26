@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,7 +82,7 @@ func TestEveryMessageIsTranslated(t *testing.T) {
 	digits := func(s string) bool { return strings.Trim(s, "0123456789p") == "" }
 	var missing, stale []string
 	for s, at := range used {
-		if _, ok := zh[s]; !ok && !digits(s) && !strings.HasPrefix(s, "H.26") {
+		if _, ok := zh[s]; !ok && !digits(s) && !slices.Contains(codecShortNames, s) {
 			missing = append(missing, at+": "+strconv.Quote(s))
 		}
 	}

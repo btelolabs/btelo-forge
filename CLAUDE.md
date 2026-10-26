@@ -1,4 +1,4 @@
-# btelo Cut — notes for AI assistants
+# btelo-video-cut — notes for AI assistants
 
 - Pure Go desktop app: Win32 without cgo (`internal/win`), Cocoa through cgo on macOS (`internal/mac`). No web views,
   no Wails. The UI is immediate-mode, drawn in software (`internal/ui`, `internal/gfx`).

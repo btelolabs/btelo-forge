@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>btelo Cut</string>
+	<string>btelo-video-cut</string>
 	<key>CFBundleDisplayName</key>
-	<string>btelo Cut</string>
+	<string>btelo-video-cut</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.btelolabs.cut</string>
 	<key>CFBundleExecutable</key>
@@ -25,6 +25,6 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>btelo Cut shares your exported videos with your phone when you turn on phone sharing.</string>
+	<string>btelo-video-cut shares your exported videos with your phone when you turn on phone sharing.</string>
 </dict>
 </plist>
