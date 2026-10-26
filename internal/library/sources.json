@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "kevin",
+      "name": "Kevin MacLeod",
+      "kind": "music",
+      "mode": "catalog",
+      "note": {
+        "en": "Kevin MacLeod's library (CC BY 4.0, much of it also in the YouTube Audio Library) · credits are written on export",
+        "zh": "Kevin MacLeod 曲库（CC BY 4.0，很多也收录在 YouTube 音频库）· 导出时自动写入署名"
+      },
+      "hint": {"en": "Search titles, genres or moods (e.g. calm, epic)", "zh": "搜索曲名、风格或情绪（如 calm、epic、平静）"},
+      "filters": ["Soundtrack", "Contemporary", "Electronica", "World", "Horror", "Jazz", "Rock", "Classical"],
+      "featured": 10,
+      "request": {"url": "https://incompetech.com/music/royalty-free/pieces.json", "cacheHours": 168},
+      "where": {"filename": "*", "title": "*"},
+      "fields": {
+        "id": "{filename}",
+        "title": "{title}",
+        "artist": "Kevin MacLeod",
+        "genre": "{genre|map:genres}",
+        "mood": "{feel|split:,|trim|join: · }",
+        "keywords": "{genre|map:genres|map:zh} {feel|split:,|trim|map:zh|join: }",
+        "duration": "{length}",
+        "url": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/{filename|path}",
+        "ext": "mp3",
+        "license": "CC BY 4.0",
+        "credit": "{title|quote} Kevin MacLeod (incompetech.com) · Licensed under Creative Commons: By Attribution 4.0 · https://creativecommons.org/licenses/by/4.0/",
+        "page": "https://incompetech.com/music/royalty-free/music.html"
+      },
+      "maps": {
+        "genres": {
+          "2": "African", "3": "Blues", "4": "Classical", "5": "Contemporary", "6": "Disco", "7": "Electronica", "8": "Funk",
+          "9": "Holiday", "10": "Horror", "11": "Jazz", "12": "Latin", "13": "Modern", "14": "Musical", "15": "Polka",
+          "16": "Pop", "18": "Reggae", "19": "Rock", "20": "Silent Film", "21": "Ska", "22": "Soundtrack", "23": "Stings",
+          "24": "Unclassifiable", "25": "World", "26": "Urban"
+        },
+        "zh": {
+          "African": "非洲", "Blues": "布鲁斯", "Classical": "古典", "Contemporary": "当代", "Disco": "迪斯科", "Electronica": "电子",
+          "Funk": "放克", "Holiday": "节日", "Horror": "恐怖", "Jazz": "爵士", "Latin": "拉丁", "Modern": "现代", "Musical": "音乐剧",
+          "Polka": "波尔卡", "Pop": "流行", "Reggae": "雷鬼", "Rock": "摇滚", "Silent Film": "默片", "Ska": "斯卡", "Soundtrack": "配乐",
+          "Stings": "短音效", "Unclassifiable": "其他", "World": "世界", "Urban": "都市",
+          "Dark": "暗黑", "Grooving": "律动", "Relaxed": "放松", "Bright": "明亮", "Calming": "平静", "Bouncy": "轻快",
+          "Driving": "动感", "Mysterious": "神秘", "Intense": "紧张", "Eerie": "诡异", "Unnerving": "不安", "Somber": "忧郁",
+          "Mystical": "奇幻", "Uplifting": "励志", "Humorous": "幽默", "Epic": "史诗", "Action": "动作", "Suspenseful": "悬疑",
+          "Aggressive": "激烈"
+        }
+      }
+    },
+    {
+      "id": "openverse",
+      "name": "Openverse",
+      "kind": "music",
+      "note": {
+        "en": "CC0 / CC BY music from Openverse, free for commercial use · required credits are written on export",
+        "zh": "来自 Openverse 的 CC0 / CC BY 音乐，可商用 · 需要的署名在导出时自动写入"
+      },
+      "request": {
+        "url": "https://api.openverse.org/v1/audio/",
+        "params": {
+          "q": "{$query}",
+          "license": "cc0,by",
+          "source": "jamendo,ccmixter,wikimedia_audio",
+          "page_size": "{$limit}",
+          "page": "{$page}"
+        }
+      },
+      "results": "results",
+      "pages": "page_count",
+      "fields": {
+        "id": "{id}",
+        "title": "{title}",
+        "artist": "{creator}",
+        "genre": "{genres|join: · }",
+        "mood": "{source}",
+        "duration": "{duration}",
+        "durationUnit": "milliseconds",
+        "url": "{url}",
+        "ext": "{url|ext}",
+        "license": "CC {license|upper} {license_version}",
+        "credit": "{attribution}",
+        "page": "{foreign_landing_url}"
+      },
+      "rules": [{"if": "{license}", "matches": "cc0", "set": {"license": "CC0", "credit": ""}}]
+    },
+    {
+      "id": "ccmixter",
+      "name": "ccMixter",
+      "kind": "music",
+      "note": {"en": "CC BY music from ccMixter · credits are written on export", "zh": "来自 ccMixter 的 CC BY 音乐 · 导出时自动写入署名"},
+      "request": {
+        "url": "https://ccmixter.org/api/query",
+        "params": {
+          "f": "json",
+          "dataview": "default",
+          "lic": "by",
+          "limit": "{$fetch}",
+          "offset": "{$offset}",
+          "search": "{$query}",
+          "search_type": "{$query|ifset:all}",
+          "sort": "{$query|ifunset:rank}"
+        }
+      },
+      "let": {"file": {"from": "files", "where": {"file_format_info.media-type": "audio", "download_url": "*"}}},
+      "fields": {
+        "id": "{upload_id}",
+        "title": "{upload_name}",
+        "artist": "{user_real_name,user_name}",
+        "genre": "{upload_tags|split:,|words|drop:media,remix,attribution,audio,mp3,44k,48k,stereo,mono,cbr,vbr,original,sample,acappella|take:2|replace:_, |join: · }",
+        "mood": "ccMixter",
+        "duration": "{$let.file.file_format_info.ps}",
+        "url": "{$let.file.download_url}",
+        "referer": "{file_page_url}",
+        "ext": "{$let.file.file_format_info.default-ext}",
+        "license": "CC BY",
+        "credit": "{upload_name|quote} by {user_real_name,user_name} (ccMixter) · {license_url} · {file_page_url}",
+        "page": "{file_page_url}"
+      }
+    },
+    {
+      "id": "archive",
+      "name": "Internet Archive",
+      "kind": "music",
+      "note": {
+        "en": "CC BY and public-domain netlabel albums from the Internet Archive · credits are written on export",
+        "zh": "Internet Archive 上 CC BY 和公有领域的厂牌专辑 · 导出时自动写入署名"
+      },
+      "pageSize": 6,
+      "request": {
+        "url": "https://archive.org/advancedsearch.php",
+        "params": {
+          "q": "{$query|ifset:(%s) AND }collection:(netlabels) AND mediatype:(audio) AND licenseurl:(\"http://creativecommons.org/licenses/by/2.0/\" OR \"http://creativecommons.org/licenses/by/2.5/\" OR \"http://creativecommons.org/licenses/by/3.0/\" OR \"http://creativecommons.org/licenses/by/4.0/\" OR \"https://creativecommons.org/licenses/by/4.0/\" OR \"http://creativecommons.org/publicdomain/zero/1.0/\" OR \"https://creativecommons.org/publicdomain/zero/1.0/\" OR \"http://creativecommons.org/publicdomain/mark/1.0/\")",
+          "fl[]": ["identifier", "title", "creator", "licenseurl"],
+          "rows": "{$limit}",
+          "page": "{$page}",
+          "output": "json",
+          "sort[]": "{$query|ifunset:downloads desc}"
+        }
+      },
+      "results": "response.docs",
+      "total": "response.numFound",
+      "error": "error",
+      "expand": {
+        "url": "https://archive.org/metadata/{identifier|path}",
+        "cacheHours": 168,
+        "results": "files",
+        "where": {"name": "*.mp3"},
+        "limit": 4
+      },
+      "fields": {
+        "id": "{$parent.identifier}/{name}",
+        "title": "{title,name|unsuffix:.mp3}",
+        "artist": "{$doc.metadata.creator,$parent.creator|first}",
+        "genre": "{$doc.metadata.title|first}",
+        "mood": "Internet Archive",
+        "duration": "{length}",
+        "url": "https://archive.org/download/{$parent.identifier|path}/{name|path}",
+        "ext": "mp3",
+        "license": "CC BY",
+        "credit": "{title,name|unsuffix:.mp3|quote} by {$doc.metadata.creator,$parent.creator|first}, from {$doc.metadata.title|first|quote} (Internet Archive) · {$parent.licenseurl} · https://archive.org/details/{$parent.identifier}",
+        "page": "https://archive.org/details/{$parent.identifier}"
+      },
+      "rules": [{"if": "{$parent.licenseurl}", "matches": "*publicdomain*", "set": {"license": "CC0 / public domain", "credit": ""}}]
+    },
+    {
+      "id": "freesound",
+      "name": {"en": "Effects", "zh": "音效"},
+      "kind": "effects",
+      "note": {"en": "Freesound effects (CC0 / CC BY, via Openverse)", "zh": "Freesound 音效（CC0 / CC BY，经由 Openverse）"},
+      "hint": {"en": "Search effects (e.g. whoosh, rain)", "zh": "搜索音效（如 whoosh、rain）"},
+      "request": {
+        "url": "https://api.openverse.org/v1/audio/",
+        "params": {"q": "{$query}", "license": "cc0,by", "source": "freesound", "page_size": "{$limit}", "page": "{$page}"}
+      },
+      "results": "results",
+      "pages": "page_count",
+      "fields": {
+        "id": "{id}",
+        "title": "{title}",
+        "artist": "{creator}",
+        "genre": "{genres|join: · }",
+        "mood": "{source}",
+        "duration": "{duration}",
+        "durationUnit": "milliseconds",
+        "url": "{url}",
+        "ext": "{url|ext}",
+        "license": "CC {license|upper} {license_version}",
+        "credit": "{attribution}",
+        "page": "{foreign_landing_url}"
+      },
+      "rules": [{"if": "{license}", "matches": "cc0", "set": {"license": "CC0", "credit": ""}}]
+    }
+  ]
+}

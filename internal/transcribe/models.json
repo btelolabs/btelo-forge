@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "defaultModel": "small",
+  "engines": [
+    {
+      "id": "cpu",
+      "name": "CPU",
+      "note": {"en": "Works on every computer (9 MB download)", "zh": "所有电脑都能用（下载 9 MB）"},
+      "os": ["windows"],
+      "arch": ["amd64", "arm64"],
+      "url": "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip",
+      "size": 8928640,
+      "executable": "whisper-cli.exe"
+    },
+    {
+      "id": "cuda",
+      "name": {"en": "NVIDIA GPU", "zh": "NVIDIA 显卡"},
+      "note": {"en": "Much faster on NVIDIA graphics cards (685 MB download)", "zh": "NVIDIA 显卡上快很多（下载 685 MB）"},
+      "os": ["windows"],
+      "arch": ["amd64"],
+      "url": "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-win-cuda-12.4.0-x64.zip",
+      "size": 684913404,
+      "executable": "whisper-cli.exe"
+    },
+    {
+      "id": "homebrew",
+      "name": "whisper.cpp",
+      "note": {"en": "Uses whisper-cli from Homebrew (Metal on Apple silicon)", "zh": "使用 Homebrew 安装的 whisper-cli（Apple 芯片用 Metal 加速）"},
+      "os": ["darwin"],
+      "commands": ["whisper-cli", "whisper-cpp"],
+      "paths": ["/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"],
+      "install": "brew install whisper-cpp"
+    }
+  ],
+  "models": [
+    {
+      "id": "tiny",
+      "name": "Tiny",
+      "note": {"en": "fastest, rough", "zh": "最快，较粗糙"},
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+      "size": 77691713
+    },
+    {
+      "id": "base",
+      "name": "Base",
+      "note": {"en": "fast", "zh": "快"},
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+      "size": 147951465
+    },
+    {
+      "id": "small",
+      "name": "Small",
+      "note": {"en": "good balance", "zh": "速度和准确度均衡"},
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+      "size": 487601967
+    },
+    {
+      "id": "large-v3-turbo-q5_0",
+      "name": {"en": "Turbo (compact)", "zh": "Turbo（精简）"},
+      "note": {"en": "accurate, smaller download", "zh": "准确，下载更小"},
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+      "size": 574041195
+    },
+    {
+      "id": "medium",
+      "name": "Medium",
+      "note": {"en": "accurate, slow", "zh": "准确，较慢"},
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
+      "size": 1533763059
+    },
+    {
+      "id": "large-v3-turbo",
+      "name": "Turbo",
+      "note": {"en": "most accurate", "zh": "最准确"},
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+      "size": 1624555275
+    }
+  ],
+  "languages": [
+    {"code": "auto", "name": {"en": "Detect", "zh": "自动识别"}},
+    {"code": "zh", "name": "中文", "prompt": "以下是普通话的句子，使用简体中文。"},
+    {"code": "en", "name": "English"},
+    {"code": "ja", "name": "日本語"},
+    {"code": "ko", "name": "한국어"},
+    {"code": "es", "name": "Español"},
+    {"code": "fr", "name": "Français"},
+    {"code": "de", "name": "Deutsch"},
+    {"code": "ru", "name": "Русский"},
+    {"code": "pt", "name": "Português"},
+    {"code": "it", "name": "Italiano"},
+    {"code": "ar", "name": {"en": "Arabic", "zh": "阿拉伯语"}},
+    {"code": "hi", "name": {"en": "Hindi", "zh": "印地语"}},
+    {"code": "vi", "name": "Tiếng Việt"},
+    {"code": "th", "name": {"en": "Thai", "zh": "泰语"}},
+    {"code": "id", "name": "Indonesia"}
+  ],
+  "arguments": ["-m", "{model}", "-f", "{audio}", "-l", "{language}", "-oj", "-of", "{output}", "-pp", "-np", "-t", "{threads}"],
+  "promptArguments": ["--prompt", "{prompt}"],
+  "progress": "progress =\\s*(\\d+)%"
+}

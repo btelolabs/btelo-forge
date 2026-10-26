@@ -1,0 +1,34 @@
+btelo Cut License
+
+Copyright (c) 2026 btelolabs. All rights reserved.
+
+1. Use. You may download, install and use btelo Cut ("the Software") free of charge, on any number of your own
+   devices, for any purpose, including making videos for commercial use. Videos and other works you create with the
+   Software belong to you.
+
+2. Source code. You may read and study the source code and modify it for your own use.
+
+3. Not permitted. Without prior written permission from the copyright holder you may not:
+   a. redistribute the Software or its source code, in original or modified form, by any means, except forking the
+      repository on GitHub as GitHub's Terms of Service allow;
+   b. sell, rent, lease or sublicense the Software, or any copy or modified version of it, or charge for it in any
+      way, including bundling it with a paid product or offering it as a paid service;
+   c. remove or change this licence or any copyright notice.
+
+4. Third-party components. Components made by others keep their own licences, listed in THIRD_PARTY_NOTICES.md.
+   Music, sound effects, speech models and tools that the Software downloads at your request are provided under
+   their authors' licences; following those licences (for example crediting music under CC BY) is your
+   responsibility, and the Software writes the credits it knows of next to each export to help with that.
+
+5. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+   LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+   SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+   CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+   IN THE SOFTWARE.
+
+---
+
+中文说明（以上英文条款为准）：btelo 剪辑可以免费使用，包括制作商业用途的视频，用它做出的视频归你所有；可以阅读源代码并修改后
+自己使用。未经版权方书面许可，禁止以任何方式再分发本软件或其源代码（在 GitHub 上按其服务条款 fork 除外），禁止出售、出租、
+再授权或以任何方式收费（包括捆绑在收费产品里或作为收费服务），禁止删除或修改本许可与版权声明。第三方组件、以及软件按你的
+要求下载的音乐、音效、语音模型和工具，各自遵循其作者的许可。本软件按“现状”提供，不作任何保证。

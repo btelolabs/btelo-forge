@@ -1,0 +1,6 @@
+*.exe
+*.cut.mp4
+*.cut-*.mp4
+*.credits.txt
+/dist/
+/build/
