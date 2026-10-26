@@ -15,31 +15,31 @@ func goPointer(x, y C.double, right, down, twice C.int) {
 	if w == nil {
 		return
 	}
-	w.input.X, w.input.Y = float32(x), float32(y)
+	w.input.next.X, w.input.next.Y = float32(x), float32(y)
 	if right == 0 {
-		w.input.Down = down != 0
+		w.input.next.Down = down != 0
 	}
-	w.input.Pointer = append(w.input.Pointer, PointerEvent{X: float32(x), Y: float32(y), Right: right != 0, Down: down != 0, Double: twice != 0})
+	w.input.next.Pointer = append(w.input.next.Pointer, PointerEvent{X: float32(x), Y: float32(y), Right: right != 0, Down: down != 0, Double: twice != 0})
 }
 
 //export goMove
 func goMove(x, y C.double) {
 	if w := current; w != nil {
-		w.input.X, w.input.Y = float32(x), float32(y)
+		w.input.next.X, w.input.next.Y = float32(x), float32(y)
 	}
 }
 
 //export goWheel
 func goWheel(dy C.double, mods C.int) {
 	if w := current; w != nil {
-		w.input.Wheel += float32(dy)
-		w.input.Ctrl, w.input.Shift = mods&1 != 0, mods&2 != 0
+		w.input.next.Wheel += float32(dy)
+		w.input.next.Ctrl, w.input.next.Shift = mods&1 != 0, mods&2 != 0
 	}
 }
 
 func (w *Window) key(vk uint16, mods int) {
-	w.input.Ctrl, w.input.Shift = mods&1 != 0, mods&2 != 0
-	w.input.Keys = append(w.input.Keys, KeyEvent{VK: vk, Ctrl: mods&1 != 0, Shift: mods&2 != 0, Alt: mods&4 != 0})
+	w.input.next.Ctrl, w.input.next.Shift = mods&1 != 0, mods&2 != 0
+	w.input.next.Keys = append(w.input.next.Keys, KeyEvent{VK: vk, Ctrl: mods&1 != 0, Shift: mods&2 != 0, Alt: mods&4 != 0})
 }
 
 //export goKey
@@ -68,7 +68,7 @@ func goTyped(text *C.char) {
 	}
 	for _, r := range C.GoString(text) {
 		if r >= 0x20 && r != 0x7f {
-			w.input.Typed = append(w.input.Typed, r)
+			w.input.next.Typed = append(w.input.next.Typed, r)
 		}
 	}
 }
@@ -77,7 +77,7 @@ func goTyped(text *C.char) {
 func goDrop(path *C.char) {
 	if w := current; w != nil {
 		if p := strings.TrimSpace(C.GoString(path)); p != "" {
-			w.input.Dropped = append(w.input.Dropped, p)
+			w.input.next.Dropped = append(w.input.next.Dropped, p)
 		}
 	}
 }

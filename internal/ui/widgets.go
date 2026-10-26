@@ -150,6 +150,32 @@ func (u *ctx) chips(id string, r gfx.Rect, options []string, selected int, enabl
 	return selected
 }
 
+// tabs is a row of page names over a rule, the open one underlined; it returns the chosen index. Unlike chips it
+// reads as navigation rather than as buttons that do something.
+func (u *ctx) tabs(id string, r gfx.Rect, names []string, selected int) int {
+	u.c.Fill(gfx.Rect{X: r.X, Y: r.Bottom() - max(1, u.px(1)), W: r.W, H: max(1, u.px(1))}, colBorder)
+	w := r.W / float32(len(names))
+	for i, name := range names {
+		tr := gfx.Rect{X: r.X + float32(i)*w, Y: r.Y, W: w, H: r.H}
+		tid := id + "/" + name
+		hot := u.hover(tid, tr)
+		f, fg := u.face(13), colDim
+		switch {
+		case i == selected:
+			f, fg = u.bold(13), colText
+			u.c.RoundRect(gfx.Rect{X: tr.X + u.px(8), Y: tr.Bottom() - u.px(2.5), W: tr.W - u.px(16), H: u.px(2.5)}, u.px(1.25), colAccent)
+		case hot:
+			fg = colText
+			u.cursor = CursorHand
+		}
+		u.label(f, gfx.Rect{X: tr.X, Y: tr.Y, W: tr.W, H: tr.H - u.px(3)}, name, fg, 0.5)
+		if u.clicked(tid, tr) {
+			selected = i
+		}
+	}
+	return selected
+}
+
 // slider edits value in [lo, hi]; changed is true while it moves, done once when the drag ends.
 func (u *ctx) slider(id string, r gfx.Rect, value *float64, lo, hi float64, enabled bool) (changed, done bool) {
 	track := gfx.Rect{X: r.X + u.px(7), Y: r.Y + r.H/2 - u.px(2), W: r.W - u.px(14), H: u.px(4)}

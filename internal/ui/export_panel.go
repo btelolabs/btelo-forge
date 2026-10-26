@@ -94,7 +94,34 @@ func (a *App) drawExportPanel(r gfx.Rect) float32 {
 		y = a.drawTargetSize(r, y, e, set)
 	}
 	y = a.drawExportDetails(r, y, e, set)
+	y += u.px(4)
+	u.label(u.face(11), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(18)}, u.t("These settings are remembered for your next edits"), colFaint, 0)
+	return y + u.px(18)
+}
 
+// drawExportTab draws the export settings scrolling above a footer, pinned to the bottom, with what will be made
+// and the export button, so exporting never needs a scroll.
+func (a *App) drawExportTab(r gfx.Rect) {
+	u := &a.u
+	info := a.exportSummary(r.W)
+	footerH := float32(len(info))*u.px(20) + u.px(14+42)
+	footer := gfx.Rect{X: r.X, Y: r.Bottom() - footerH, W: r.W, H: footerH}
+	a.scrolled(gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: max(footer.Y-r.Y-u.px(10), 0)}, a.drawExportPanel)
+	u.c.Fill(gfx.Rect{X: r.X, Y: footer.Y - u.px(6), W: r.W, H: max(1, u.px(1))}, colBorder)
+	y := footer.Y + u.px(4)
+	for _, l := range info {
+		u.label(u.face(12), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(20)}, l, colDim, 0)
+		y += u.px(20)
+	}
+	if u.button("export/go", gfx.Rect{X: r.X, Y: footer.Bottom() - u.px(42), W: r.W, H: u.px(42)}, icExport, u.t("Export video (Ctrl+E)"), primary, a.export == nil) {
+		a.startExport()
+	}
+}
+
+// exportSummary describes the file the current settings make, wrapped to width.
+func (a *App) exportSummary(width float32) []string {
+	u := &a.u
+	e := a.p.Export
 	w, h := render.OutputSize(a.p.Canvas, e.Height)
 	encoder := codecShortNames[e.Codec]
 	if a.encoders != nil {
@@ -110,19 +137,11 @@ func (a *App) drawExportPanel(r gfx.Rect) float32 {
 		}
 		info = append(info, line)
 	}
+	var lines []string
 	for _, l := range info {
-		for _, wl := range u.face(12).Wrap(l, r.W) {
-			u.label(u.face(12), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(20)}, wl, colDim, 0)
-			y += u.px(20)
-		}
+		lines = append(lines, u.face(12).Wrap(l, width)...)
 	}
-	y += u.px(12)
-	if u.button("export/go", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(42)}, icExport, u.t("Export video (Ctrl+E)"), primary, a.export == nil) {
-		a.startExport()
-	}
-	y += u.px(52)
-	u.label(u.face(11), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(18)}, u.t("These settings are remembered for your next edits"), colFaint, 0)
-	return y + u.px(18)
+	return lines
 }
 
 // withoutHardware compares presets on what they choose; the graphics card is a separate switch.

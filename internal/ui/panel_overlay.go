@@ -27,7 +27,7 @@ func (a *App) drawPanel(r gfx.Rect) {
 	u.c.Fill(r, colPanel)
 	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y, W: max(1, u.px(1)), H: r.H}, colBorder)
 	in := gfx.Rect{X: r.X + u.px(16), Y: r.Y + u.px(12), W: r.W - u.px(32), H: r.H - u.px(24)}
-	if pick := u.chips("panel/tabs", gfx.Rect{X: in.X, Y: in.Y, W: in.W, H: u.px(30)}, u.ts(panelTabs), a.tab, true); pick != a.tab {
+	if pick := u.tabs("panel/tabs", gfx.Rect{X: in.X, Y: in.Y, W: in.W, H: u.px(32)}, u.ts(panelTabs), a.tab); pick != a.tab {
 		a.tab = pick
 	}
 	body := gfx.Rect{X: in.X, Y: in.Y + u.px(44), W: in.W, H: in.H - u.px(44)}
@@ -43,7 +43,7 @@ func (a *App) drawPanel(r gfx.Rect) {
 	case tabSubtitles:
 		a.scrolled(body, a.drawSubtitlePanel)
 	case tabExport:
-		a.scrolled(body, a.drawExportPanel)
+		a.drawExportTab(body)
 	}
 }
 

@@ -25,36 +25,9 @@ import (
 
 func init() { runtime.LockOSThread() }
 
-// PointerEvent is a button transition.
-type PointerEvent struct {
-	X, Y   float32
-	Right  bool
-	Down   bool
-	Double bool
-}
-
-// KeyEvent is a key press translated to a Windows virtual-key code; Command counts as Control.
-type KeyEvent struct {
-	VK               uint16
-	Ctrl, Shift, Alt bool
-}
-
-// Input holds the state at the last Poll and the events since the Poll before it.
-type Input struct {
-	X, Y    float32
-	Down    bool
-	Pointer []PointerEvent
-	Wheel   float32
-	Ctrl    bool
-	Shift   bool
-	Keys    []KeyEvent
-	Typed   []rune
-	Dropped []string
-}
-
 // Window is the one application window.
 type Window struct {
-	input   Input
+	input   inputQueue
 	typing  bool
 	refresh func()
 }
@@ -76,11 +49,12 @@ func Open(title string, width, height int, background bool) (*Window, error) {
 	return current, nil
 }
 
-// Poll clears the last frame's events and collects new ones; it returns false once the window is closed.
+// Poll dispatches pending events and makes everything collected since the previous Poll, including during Wait, the
+// current input; it returns false once the window is closed.
 func (w *Window) Poll() bool {
-	w.input.Pointer, w.input.Keys, w.input.Typed, w.input.Dropped = w.input.Pointer[:0], w.input.Keys[:0], w.input.Typed[:0], w.input.Dropped[:0]
-	w.input.Wheel = 0
-	return C.bvc_poll() != 0
+	open := C.bvc_poll() != 0
+	w.input.flip()
+	return open
 }
 
 // Wait blocks until an event arrives, Wake is called, or timeout passes.
@@ -90,7 +64,7 @@ func (w *Window) Wait(timeout time.Duration) { C.bvc_wait(C.double(timeout.Secon
 func (w *Window) Wake() { C.bvc_wake() }
 
 // Input returns the events collected by the last Poll.
-func (w *Window) Input() *Input { return &w.input }
+func (w *Window) Input() *Input { return &w.input.last }
 
 // Size is the content area in pixels.
 func (w *Window) Size() (int, int) {
@@ -226,7 +200,7 @@ func (w *Window) panel(title, exts string, multiple, folders bool) []string {
 	if folders {
 		f = 1
 	}
-	w.input.Down = false
+	w.input.last.Down, w.input.next.Down = false, false
 	if s := takeString(C.bvc_open_panel(t, e, m, f)); s != "" {
 		return strings.Split(s, "\n")
 	}
