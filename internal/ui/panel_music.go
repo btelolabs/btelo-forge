@@ -158,8 +158,8 @@ func (a *App) ensureCatalog() {
 	if s := a.currentSource(); s != nil && s.Mode == library.ModeCatalog && m.catalogs[s.ID] == nil && !m.loading[s.ID] && m.failed == "" {
 		m.loading[s.ID] = true
 		config, id := a.lib.Config(), s.ID
-		go func() {
-			tracks, err := a.lib.Catalog(context.Background(), id)
+		a.background(func(ctx context.Context) {
+			tracks, err := a.lib.Catalog(ctx, id)
 			a.post(func() {
 				delete(m.loading, id)
 				if a.lib.Config() != config {
@@ -173,7 +173,7 @@ func (a *App) ensureCatalog() {
 				m.shown.tracks = nil
 				a.rememberTracks(tracks)
 			})
-		}()
+		})
 	}
 	if a.remote() {
 		key := fmt.Sprintf("%s|%s", m.source, strings.TrimSpace(m.asked))
@@ -195,8 +195,8 @@ func (a *App) runSearch(key string, page int) {
 	m := &a.music
 	m.busy, m.failed, m.partial = true, "", ""
 	source, query, config := m.source, strings.TrimSpace(m.asked), a.lib.Config()
-	go func() {
-		res, err := a.searchSource(context.Background(), source, query, page)
+	a.background(func(ctx context.Context) {
+		res, err := a.searchSource(ctx, source, query, page)
 		a.post(func() {
 			m.busy = false
 			if a.lib.Config() != config {
@@ -218,7 +218,7 @@ func (a *App) runSearch(key string, page int) {
 			m.page, m.pages = page, res.Pages
 			a.rememberTracks(res.Tracks)
 		})
-	}()
+	})
 }
 
 func (a *App) drawMusicPanel(r gfx.Rect) {
@@ -482,12 +482,12 @@ func (a *App) auditionTrack(t library.Track) {
 		return
 	}
 	a.audition.Play(key, t.URL, t.Referer)
-	go func() {
-		if _, err := a.lib.Download(context.Background(), t); err != nil {
+	a.background(func(ctx context.Context) {
+		if _, err := a.lib.Download(ctx, t); err != nil {
 			a.post(func() { a.toast(t.Title+" "+err.Error(), true) })
 		}
 		a.host.Wake()
-	}()
+	})
 }
 
 // addTrack places t at the playhead, downloading it into the cache first when needed.
@@ -498,8 +498,8 @@ func (a *App) addTrack(t library.Track) {
 	}
 	key := t.Key()
 	a.music.adding[key] = true
-	go func() {
-		path, err := a.lib.Download(context.Background(), t)
+	a.background(func(ctx context.Context) {
+		path, err := a.lib.Download(ctx, t)
 		a.post(func() {
 			delete(a.music.adding, key)
 			if err != nil {
@@ -508,7 +508,7 @@ func (a *App) addTrack(t library.Track) {
 			}
 			a.placeTrack(t, path)
 		})
-	}()
+	})
 }
 
 // drawSelectedMusic edits the selected clip and returns the y below it.

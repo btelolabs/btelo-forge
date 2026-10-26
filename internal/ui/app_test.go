@@ -19,7 +19,7 @@ func TestEditorCutsSpeedsCaptionsAndExports(t *testing.T) {
 	x := newHarness(t)
 	x.frame(Input{})
 	x.shot("01-empty")
-	src := fixture(t)
+	src := x.fixture()
 	x.open(src)
 	x.shot("02-opened")
 	l := x.a.layout()
@@ -94,7 +94,7 @@ func TestEditorCutsSpeedsCaptionsAndExports(t *testing.T) {
 
 func TestAppendingStackingAndTrackVolume(t *testing.T) {
 	x := newHarness(t)
-	dir := t.TempDir()
+	dir := x.mediaDir()
 	x.open(clipFile(t, dir, "a.mp4", "testsrc2=size=640x360", "4"))
 	x.frame(Input{Dropped: []string{clipFile(t, dir, "b.mp4", "color=c=blue:size=360x360", "2")}})
 	x.settle(30 * time.Second)
@@ -144,7 +144,7 @@ func TestAppendingStackingAndTrackVolume(t *testing.T) {
 
 func TestPastedImagesAndTabs(t *testing.T) {
 	x := newHarness(t)
-	x.open(fixture(t))
+	x.open(x.fixture())
 	img := image.NewRGBA(image.Rect(0, 0, 200, 100))
 	for i := range img.Pix {
 		img.Pix[i] = 255
@@ -172,7 +172,7 @@ func TestPastedImagesAndTabs(t *testing.T) {
 	if len(x.a.docs) != 2 || x.a.p != nil {
 		t.Fatal("Ctrl+T should open an empty tab")
 	}
-	x.open(clipFile(t, t.TempDir(), "other.mp4", "testsrc2=size=320x240", "3"))
+	x.open(clipFile(t, x.mediaDir(), "other.mp4", "testsrc2=size=320x240", "3"))
 	if x.a.docs[0].p == x.a.docs[1].p || x.a.p.Canvas.Width != 320 {
 		t.Fatal("the new tab should have its own edit")
 	}
@@ -200,4 +200,24 @@ func (x *harness) chipRect(r gfx.Rect, label string) gfx.Rect {
 	}
 	x.t.Fatalf("no chip %q", label)
 	return gfx.Rect{}
+}
+
+func TestClosingStopsBackgroundDecoders(t *testing.T) {
+	x := newHarness(t)
+	dir := x.mediaDir()
+	path := clipFile(t, dir, "long.mp4", "testsrc2=size=1280x720", "60")
+	x.frame(Input{Dropped: []string{path}})
+	x.pump(20*time.Second, func() bool { return x.a.p != nil })
+	if x.a.media.settled(x.a.p) {
+		t.Skip("the thumbnails were already decoded; nothing left to stop")
+	}
+	start := time.Now()
+	x.a.Close()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("a decoder still holds the video after Close: %v", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("Close took %v", took)
+	}
+	x.a.Close()
 }

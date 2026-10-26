@@ -166,10 +166,10 @@ func (a *App) startExport() (string, error) {
 			return "", err
 		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(a.life)
 	job := &exportJob{cancel: cancel, out: out, started: time.Now()}
 	a.export = job
-	go func() {
+	a.background(func(_ context.Context) {
 		err := a.encode(ctx, snapshot, out, func(f float64) { a.post(func() { job.progress = f }) })
 		a.post(func() {
 			a.export = nil
@@ -190,7 +190,7 @@ func (a *App) startExport() (string, error) {
 				})
 			}
 		})
-	}()
+	})
 	return out, nil
 }
 

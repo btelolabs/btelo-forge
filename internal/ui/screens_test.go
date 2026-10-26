@@ -12,7 +12,7 @@ func TestScreens(t *testing.T) {
 		t.Skip("set BVC_SHOTS to a folder to render the screens")
 	}
 	x := newHarness(t)
-	x.open(fixture(t))
+	x.open(x.fixture())
 	x.a.services.mcpURL = "http://127.0.0.1:38471/mcp"
 	for _, lang := range []Language{English, Chinese} {
 		x.a.u.lang = lang

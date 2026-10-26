@@ -171,6 +171,10 @@ static int modifierBits(NSEventModifierFlags f) {
 	    {"moveDown:", 0x28, 0},        {"moveToBeginningOfLine:", 0x24, 0}, {"moveToEndOfLine:", 0x23, 0},
 	    {"moveLeftAndModifySelection:", 0x25, 2}, {"moveRightAndModifySelection:", 0x27, 2},
 	    {"moveToBeginningOfLineAndModifySelection:", 0x24, 2}, {"moveToEndOfLineAndModifySelection:", 0x23, 2},
+	    {"moveUpAndModifySelection:", 0x26, 2}, {"moveDownAndModifySelection:", 0x28, 2},
+	    {"pageUp:", 0x21, 0}, {"pageDown:", 0x22, 0}, {"scrollPageUp:", 0x21, 0}, {"scrollPageDown:", 0x22, 0},
+	    {"moveToBeginningOfDocument:", 0x24, 1}, {"moveToEndOfDocument:", 0x23, 1},
+	    {"moveToBeginningOfDocumentAndModifySelection:", 0x24, 3}, {"moveToEndOfDocumentAndModifySelection:", 0x23, 3},
 	};
 	const char *name = sel_getName(sel);
 	for (size_t i = 0; i < sizeof commands / sizeof commands[0]; i++) {

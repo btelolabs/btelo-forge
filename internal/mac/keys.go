@@ -8,7 +8,7 @@ import (
 // specialKeys maps macOS virtual key codes to Windows virtual-key codes.
 var specialKeys = map[int]uint16{
 	36: 0x0d, 76: 0x0d, 48: 0x09, 49: 0x20, 51: 0x08, 53: 0x1b, 117: 0x2e, 115: 0x24, 119: 0x23,
-	123: 0x25, 124: 0x27, 125: 0x28, 126: 0x26,
+	123: 0x25, 124: 0x27, 125: 0x28, 126: 0x26, 116: 0x21, 121: 0x22,
 }
 
 // keyVK translates a key press: special keys by code, letters and digits by the character they type.

@@ -131,7 +131,7 @@ func TestMCPToolsAreAllListed(t *testing.T) {
 func TestAnAIEditsAndExportsThroughMCP(t *testing.T) {
 	x := newHarness(t)
 	s := connectMCP(t, x)
-	dir := t.TempDir()
+	dir := x.mediaDir()
 	a := clipFile(t, dir, "a.mp4", "testsrc2=size=640x360", "4")
 	b := clipFile(t, dir, "b.mp4", "color=c=blue:size=640x360", "2")
 

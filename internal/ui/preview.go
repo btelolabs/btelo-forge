@@ -88,8 +88,8 @@ func (a *App) fetchFrame(v gfx.Rect) {
 	}
 	a.shown.busy, a.shown.stale = true, false
 	d := a.doc
-	go func() {
-		img, err := media.Frame(context.Background(), want.path, want.at, want.size.X, want.size.Y)
+	a.background(func(ctx context.Context) {
+		img, err := media.Frame(ctx, want.path, want.at, want.size.X, want.size.Y)
 		a.post(func() {
 			d.shown.busy = false
 			if err != nil {
@@ -98,7 +98,7 @@ func (a *App) fetchFrame(v gfx.Rect) {
 			}
 			d.shown.img, d.shown.key, d.shown.full, d.shown.failed = img, want, false, frameKey{}
 		})
-	}()
+	})
 }
 
 func (a *App) play(from float64) {

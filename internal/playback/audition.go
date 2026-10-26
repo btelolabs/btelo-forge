@@ -22,6 +22,7 @@ type Audition struct {
 	out     *wave.Output
 	started time.Time
 	err     error
+	running sync.WaitGroup
 }
 
 // NewAudition returns an idle audition that calls wake when playback ends.
@@ -35,7 +36,9 @@ func (a *Audition) Play(key, source, referer string) {
 	a.mu.Lock()
 	a.key, a.cancel, a.err, a.started = key, cancel, nil, time.Now()
 	a.mu.Unlock()
+	a.running.Add(1)
 	go func() {
+		defer a.running.Done()
 		err := a.play(ctx, key, source, referer)
 		a.mu.Lock()
 		if a.key == key && a.cancel != nil && ctx.Err() == nil {
@@ -130,3 +133,6 @@ func (a *Audition) Stop() {
 		cancel()
 	}
 }
+
+// Wait returns once every stopped audition has let go of its decoder and sound device.
+func (a *Audition) Wait() { a.running.Wait() }

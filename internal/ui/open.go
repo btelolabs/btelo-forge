@@ -87,8 +87,8 @@ func (a *App) openVideo(path string, upper bool) {
 		return
 	}
 	d.opening = path
-	go func() {
-		info, err := media.Probe(context.Background(), path)
+	a.background(func(ctx context.Context) {
+		info, err := media.Probe(ctx, path)
 		a.post(func() {
 			d.opening = ""
 			if err != nil {
@@ -121,7 +121,7 @@ func (a *App) openVideo(path string, upper bool) {
 				d.dirty = true
 			}
 		})
-	}()
+	})
 }
 
 func (a *App) load(d *doc, src project.Source) {
@@ -192,10 +192,10 @@ func (m *mediaCache) start(a *App, src project.Source) {
 	var next sync.Mutex
 	pos := 0
 	for worker := 0; worker < 4; worker++ {
-		go func() {
+		a.background(func(ctx context.Context) {
 			for {
 				next.Lock()
-				if pos >= len(order) {
+				if pos >= len(order) || ctx.Err() != nil {
 					next.Unlock()
 					return
 				}
@@ -203,9 +203,9 @@ func (m *mediaCache) start(a *App, src project.Source) {
 				pos++
 				next.Unlock()
 				at := (float64(i) + 0.5) * sm.thumbStep
-				img, err := media.Thumbnail(context.Background(), src.Path, at, sm.thumbW, sm.thumbH)
-				if err != nil {
-					img, err = media.Frame(context.Background(), src.Path, at, sm.thumbW, sm.thumbH)
+				img, err := media.Thumbnail(ctx, src.Path, at, sm.thumbW, sm.thumbH)
+				if err != nil && ctx.Err() == nil {
+					img, err = media.Frame(ctx, src.Path, at, sm.thumbW, sm.thumbH)
 				}
 				a.post(func() {
 					if err == nil {
@@ -214,18 +214,18 @@ func (m *mediaCache) start(a *App, src project.Source) {
 					sm.thumbsLeft--
 				})
 			}
-		}()
+		})
 	}
 	if src.HasAudio {
-		go func() {
-			peaks, err := media.Peaks(context.Background(), src.Path, peaksPerSecond)
+		a.background(func(ctx context.Context) {
+			peaks, err := media.Peaks(ctx, src.Path, peaksPerSecond)
 			a.post(func() {
 				sm.peaks, sm.peaksDone = normalized(peaks), true
-				if err != nil {
+				if err != nil && ctx.Err() == nil {
 					a.toast(a.u.tf("The waveform could not be read: %s", a.describe(err)), true)
 				}
 			})
-		}()
+		})
 	}
 }
 
@@ -268,14 +268,14 @@ func (a *App) musicPeaks(path string) []float32 {
 	}
 	if !m.musicBusy[path] {
 		m.musicBusy[path] = true
-		go func() {
-			peaks, err := media.Peaks(context.Background(), path, peaksPerSecond)
+		a.background(func(ctx context.Context) {
+			peaks, err := media.Peaks(ctx, path, peaksPerSecond)
 			a.post(func() {
 				if err == nil {
 					m.musicPeaks[path] = normalized(peaks)
 				}
 			})
-		}()
+		})
 	}
 	return nil
 }
@@ -284,9 +284,9 @@ func (a *App) musicPeaks(path string) []float32 {
 // playhead.
 func (a *App) importAudio(paths []string, place bool) {
 	d := a.doc
-	go func() {
+	a.background(func(ctx context.Context) {
 		for _, path := range paths {
-			info, err := media.Probe(context.Background(), path)
+			info, err := media.Probe(ctx, path)
 			if err != nil || !info.HasAudio {
 				a.post(func() { a.toast(a.u.tf("Cannot read the sound file %s", filepath.Base(path)), true) })
 				continue
@@ -303,7 +303,7 @@ func (a *App) importAudio(paths []string, place bool) {
 				}
 			})
 		}
-	}()
+	})
 }
 
 // placeTrack puts a downloaded or local sound on the timeline at the playhead and selects it.
@@ -321,11 +321,11 @@ func (a *App) placeTrack(t library.Track, path string) {
 	a.tab = tabMusic
 	if t.Duration <= 0 {
 		d := a.doc
-		go func() {
-			if info, err := media.Probe(context.Background(), path); err == nil {
+		a.background(func(ctx context.Context) {
+			if info, err := media.Probe(ctx, path); err == nil {
 				a.post(func() { a.fixMusicLength(d, path, info.Duration) })
 			}
-		}()
+		})
 	}
 }
 

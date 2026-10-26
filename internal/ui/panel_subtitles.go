@@ -208,12 +208,12 @@ func (a *App) generateSubtitles() error {
 		return errors.New(a.u.t("No speech engine in the subtitle models configuration runs on this computer; add one in Settings → Extensions"))
 	}
 	config, model, language := s.config, a.subtitleModel(), a.subtitleLanguage()
-	ctx, stop := context.WithCancel(context.Background())
+	ctx, stop := context.WithCancel(a.life)
 	job := &subtitleJob{stop: stop, doc: a.doc, stage: "engine"}
 	s.job, s.lastErr = job, ""
 	snapshot := speechOnly(a.p.Clone())
 	report := func(stage string, f float64) { a.post(func() { job.stage, job.fraction = stage, f }) }
-	go func() {
+	a.background(func(_ context.Context) {
 		lines, err := a.recognise(ctx, config, snapshot, model, language, engine, report)
 		a.post(func() {
 			s.job = nil
@@ -248,7 +248,7 @@ func (a *App) generateSubtitles() error {
 				d.dirty = true
 			}
 		})
-	}()
+	})
 	return nil
 }
 

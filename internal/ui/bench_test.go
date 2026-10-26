@@ -11,7 +11,7 @@ func BenchmarkFrame(b *testing.B) {
 	x := newHarness(b)
 	x.c.Resize(1800, 1125)
 	x.scale = 1.25
-	src := fixture(b)
+	src := x.fixture()
 	x.frame(Input{Dropped: []string{src}})
 	x.settle(30 * time.Second)
 	x.a.seek(1)

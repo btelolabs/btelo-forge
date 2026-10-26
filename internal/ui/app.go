@@ -2,7 +2,9 @@
 package ui
 
 import (
+	"context"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/btelolabs/btelo-video-cut/internal/caption"
@@ -36,6 +38,10 @@ type App struct {
 	cacheDir string
 	jobs     chan func()
 
+	life     context.Context // ends when the app closes
+	stopLife context.CancelFunc
+	running  sync.WaitGroup // background work started with background
+
 	settings     settings
 	settingsOpen bool
 	tab          int
@@ -66,6 +72,7 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 		media:    newMediaCache(),
 		known:    map[string]library.Track{},
 	}
+	a.life, a.stopLife = context.WithCancel(context.Background())
 	a.u.fonts, a.u.host = fonts, host
 	a.loadSettings()
 	a.u.lang = a.settings.Language
@@ -81,10 +88,14 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	return a
 }
 
-// post runs fn on the UI goroutine at the next frame; it may be called from any goroutine.
+// post runs fn on the UI goroutine at the next frame; it may be called from any goroutine, and work posted after
+// Close is dropped.
 func (a *App) post(fn func()) {
-	a.jobs <- fn
-	a.host.Wake()
+	select {
+	case a.jobs <- fn:
+		a.host.Wake()
+	case <-a.life.Done():
+	}
 }
 
 // Frame handles input and draws everything; it returns how soon it wants to be drawn again (0 = only on input).
@@ -187,8 +198,13 @@ func (a *App) layout() layout {
 	return l
 }
 
-// Close stops playback and writes every unsaved edit.
+// Close writes every unsaved edit, stops playback, exports and other background work, and waits a moment for their
+// decoders to let go of the files.
 func (a *App) Close() {
+	if a.life.Err() != nil {
+		return
+	}
+	a.stopLife()
 	a.player.Stop()
 	a.audition.Stop()
 	if a.export != nil {
@@ -201,6 +217,30 @@ func (a *App) Close() {
 	if a.services != nil {
 		a.services.stop()
 	}
+	done := make(chan struct{})
+	go func() {
+		a.running.Wait()
+		a.player.Wait()
+		a.audition.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(closeWait):
+	}
+}
+
+// closeWait bounds how long Close waits for cancelled background work, such as an ffmpeg being stopped.
+const closeWait = 10 * time.Second
+
+// background runs work on another goroutine with a context that ends when the app closes; Close waits for it, so
+// no decoder is left holding a file.
+func (a *App) background(work func(ctx context.Context)) {
+	a.running.Add(1)
+	go func() {
+		defer a.running.Done()
+		work(a.life)
+	}()
 }
 
 // Open loads a video into the current tab as if it had been dropped on the window.

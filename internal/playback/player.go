@@ -36,6 +36,7 @@ type Player struct {
 	run     *session
 	err     error
 	stopped bool
+	running sync.WaitGroup // every session, until its decoders and sound have finished
 }
 
 // New returns a player that calls wake whenever a new frame is ready or playback ends.
@@ -85,6 +86,7 @@ func (pl *Player) begin(p *project.Project, from, end float64, w, h int) {
 	pl.mu.Lock()
 	pl.run = s
 	pl.mu.Unlock()
+	pl.running.Add(1)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -104,7 +106,9 @@ func (pl *Player) begin(p *project.Project, from, end float64, w, h int) {
 			}
 		}()
 	} else {
+		pl.running.Add(1)
 		go func() {
+			defer pl.running.Done()
 			select {
 			case <-s.ready:
 			case <-ctx.Done():
@@ -119,6 +123,7 @@ func (pl *Player) begin(p *project.Project, from, end float64, w, h int) {
 		}()
 	}
 	go func() {
+		defer pl.running.Done()
 		wg.Wait()
 		if s.audio != nil {
 			s.audio.Close()
@@ -317,7 +322,7 @@ func (pl *Player) Err() error {
 	return err
 }
 
-// Stop ends playback; it returns at once and the decoders wind down in the background.
+// Stop ends playback; it returns at once and the decoders wind down in the background (see Wait).
 func (pl *Player) Stop() {
 	pl.mu.Lock()
 	s := pl.run
@@ -327,3 +332,6 @@ func (pl *Player) Stop() {
 		s.cancel()
 	}
 }
+
+// Wait returns once every stopped session has let go of its decoders and sound device.
+func (pl *Player) Wait() { pl.running.Wait() }

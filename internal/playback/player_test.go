@@ -103,3 +103,25 @@ func TestAuditionPlaysAndStops(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWaitReturnsOnceStoppedPlaybackHasLetGo(t *testing.T) {
+	p := project.New(fixture(t), project.Export{})
+	pl := New(func() {})
+	pl.Start(p, 0, 160, 90)
+	a := NewAudition(func() {})
+	a.Play("k", p.Sources[0].Path, "")
+	time.Sleep(300 * time.Millisecond)
+	pl.Stop()
+	a.Stop()
+	done := make(chan struct{})
+	go func() {
+		pl.Wait()
+		a.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopped playback still running after 5 s")
+	}
+}

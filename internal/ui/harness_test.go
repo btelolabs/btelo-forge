@@ -186,8 +186,19 @@ func clipFile(t testing.TB, dir, name, pattern string, seconds string) string {
 	return path
 }
 
-func fixture(t testing.TB) string {
-	return clipFile(t, t.TempDir(), "clip.mp4", "testsrc2=size=640x360", "8")
+// mediaDir is a folder for test videos that is removed only after the editor has closed, since the editor's
+// decoders may still be reading them until then.
+func (x *harness) mediaDir() string {
+	x.t.Helper()
+	dir, err := os.MkdirTemp(x.dir, "media-*")
+	if err != nil {
+		x.t.Fatal(err)
+	}
+	return dir
+}
+
+func (x *harness) fixture() string {
+	return clipFile(x.t, x.mediaDir(), "clip.mp4", "testsrc2=size=640x360", "8")
 }
 
 func (x *harness) open(path string) {
