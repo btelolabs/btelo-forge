@@ -64,6 +64,11 @@ type Input struct {
 	Dropped []string
 }
 
+// acted reports whether the input carries anything the frame may act on, as opposed to only a pointer position.
+func (in Input) acted() bool {
+	return len(in.Pointer) > 0 || in.Wheel != 0 || len(in.Keys) > 0 || len(in.Typed) > 0 || len(in.Dropped) > 0
+}
+
 // Host is what the UI needs from the window it runs in.
 type Host interface {
 	Wake()

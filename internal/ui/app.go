@@ -163,15 +163,24 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) time.Duration {
 	}
 	a.host.SetCursor(u.cursor)
 	a.autosave()
-	return a.nextFrame(wait)
+	return a.nextFrame(wait, in.acted())
 }
 
-func (a *App) nextFrame(tip time.Duration) time.Duration {
+// redrawNow is the wait before drawing again at once.
+const redrawNow = time.Millisecond
+
+// nextFrame is how long the window may wait for input before drawing again; zero waits for input alone.
+func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 	next := tip
 	sooner := func(d time.Duration) {
 		if d > 0 && (next == 0 || d < next) {
 			next = d
 		}
+	}
+	// A click or key is handled where its control is drawn, after the layout and the parts above it were already
+	// drawn from the old state, so the frame does not show its result yet.
+	if acted {
+		sooner(redrawNow)
 	}
 	if a.player.Playing() {
 		sooner(time.Second / 60)
