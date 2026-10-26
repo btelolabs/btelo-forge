@@ -73,5 +73,5 @@ media work.
 
 ## Licence
 
-Free to use, including for commercial videos. The source is open to read and modify for your own use; redistribution
-and sale are not allowed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
+[Apache License 2.0](LICENSE). Third-party components keep their own licences; see
+[third-party notices](THIRD_PARTY_NOTICES.md).

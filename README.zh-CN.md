@@ -71,5 +71,4 @@ Windows 上是纯 Go 实现（Win32，不用 cgo），macOS 上使用 Cocoa；�
 
 ## 许可
 
-可以免费使用，包括制作商业视频；源代码公开，可以阅读、修改后自己使用；禁止再分发和销售。详见 [LICENSE](LICENSE)
-和[第三方声明](THIRD_PARTY_NOTICES.md)。
+[Apache License 2.0](LICENSE)。第三方组件遵循各自的许可，见[第三方声明](THIRD_PARTY_NOTICES.md)。

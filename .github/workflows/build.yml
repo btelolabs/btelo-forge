@@ -34,7 +34,7 @@ jobs:
             mkdir -p "dist/btelo-cut-windows-$arch"
             GOOS=windows GOARCH=$arch go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$version" \
               -o "dist/btelo-cut-windows-$arch/btelo-video-cut.exe" ./cmd/btelo-video-cut
-            cp LICENSE README.md README.zh-CN.md THIRD_PARTY_NOTICES.md "dist/btelo-cut-windows-$arch/"
+            cp LICENSE NOTICE README.md README.zh-CN.md THIRD_PARTY_NOTICES.md "dist/btelo-cut-windows-$arch/"
             (cd dist && 7z a -tzip "btelo-cut-windows-$arch.zip" "btelo-cut-windows-$arch" > /dev/null)
           done
       - uses: actions/upload-artifact@v4
@@ -74,7 +74,7 @@ jobs:
           done
           iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"
           codesign --force --deep --sign - "$app"
-          cp LICENSE README.md README.zh-CN.md THIRD_PARTY_NOTICES.md dist/btelo-cut-macos/
+          cp LICENSE NOTICE README.md README.zh-CN.md THIRD_PARTY_NOTICES.md dist/btelo-cut-macos/
           (cd dist && ditto -c -k --sequesterRsrc --keepParent btelo-cut-macos btelo-cut-macos.zip)
       - uses: actions/upload-artifact@v4
         with:

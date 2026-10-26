@@ -277,7 +277,7 @@ func (a *App) settingsAbout(r gfx.Rect) {
 	y += u.px(36)
 	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Licence"))
 	y += u.px(26)
-	y = a.paragraph(r.X, y, r.W, u.tf("%s is free to use, including for commercial videos. You may read the source and change it for your own use. Redistributing it, selling it, or selling copies or modified versions is not allowed. See LICENSE in the repository for the full terms.", ProductName), 12.5, colDim)
+	y = a.paragraph(r.X, y, r.W, u.tf("%s is open source under the Apache License 2.0: free to use, modify and redistribute, including commercially. See LICENSE in the repository for the full terms.", ProductName), 12.5, colDim)
 	y += u.px(14)
 	a.paragraph(r.X, y, r.W, u.t("Music from the built-in libraries keeps its own licence (CC0 or CC BY); credits for it are written next to each export."), 12, colFaint)
 }
