@@ -64,6 +64,8 @@ const (
 	icPaste    = "\ue14f"
 	icSubtitle = "\ue048"
 	icInfo     = "\ue88e"
+	icPanelOut = "\ueac9"
+	icPanelIn  = "\ueac3"
 )
 
 // textColors are the caption colour swatches.

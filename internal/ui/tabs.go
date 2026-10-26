@@ -15,8 +15,20 @@ func (a *App) drawTabs(r gfx.Rect) {
 	if u.iconButton("tabs/settings", gear, icSettings, u.t("Settings"), a.settingsOpen, a.export == nil) {
 		a.settingsOpen = true
 	}
+	end := gear.X
+	if a.p != nil {
+		toggle := gfx.Rect{X: gear.X - u.px(36), Y: gear.Y, W: gear.W, H: gear.H}
+		glyph, hint := icPanelOut, u.t("Hide the side panel")
+		if a.settings.PanelHidden {
+			glyph, hint = icPanelIn, u.t("Show the side panel")
+		}
+		if u.iconButton("tabs/panel", toggle, glyph, hint, false, true) {
+			a.setPanelHidden(!a.settings.PanelHidden)
+		}
+		end = toggle.X
+	}
 	plusW := u.px(32)
-	space := gear.X - u.px(8) - r.X - u.px(8) - plusW - u.px(4)
+	space := end - u.px(8) - r.X - u.px(8) - plusW - u.px(4)
 	w := min(u.px(220), space/float32(len(a.docs)))
 	x := r.X + u.px(8)
 	f := u.face(12.5)

@@ -327,7 +327,7 @@ func (a *App) placeTrack(t library.Track, path string) {
 	a.change(func() {
 		a.sel = selection{kind: selMusic, id: a.p.AddMusic(path, t.Title, t.Credit, total, a.playhead)}
 	})
-	a.tab = tabMusic
+	a.showPanel(tabMusic)
 	if t.Duration <= 0 {
 		d := a.doc
 		a.background(func(ctx context.Context) {

@@ -21,13 +21,14 @@ const Repository = "https://github.com/btelolabs/btelo-video-cut"
 
 // settings are the preferences kept between runs.
 type settings struct {
-	Language  Language       `json:"language"`
-	Export    project.Export `json:"export"`
-	ExportDir string         `json:"exportDir"`
-	Exported  []exportRecord `json:"exported"`
-	MCP       bool           `json:"mcp"`
-	Phone     bool           `json:"phone"`
-	PhoneKey  string         `json:"phoneKey"`
+	Language    Language       `json:"language"`
+	Export      project.Export `json:"export"`
+	ExportDir   string         `json:"exportDir"`
+	Exported    []exportRecord `json:"exported"`
+	MCP         bool           `json:"mcp"`
+	Phone       bool           `json:"phone"`
+	PhoneKey    string         `json:"phoneKey"`
+	PanelHidden bool           `json:"panelHidden"`
 
 	SubtitleModel    string `json:"subtitleModel"`
 	SubtitleLanguage string `json:"subtitleLanguage"`
@@ -110,6 +111,20 @@ func (a *App) setLanguage(l Language) {
 	a.u.lang = l
 	a.host.SetTitle(a.Title())
 	a.saveSettings()
+}
+
+// showPanel opens the side panel on a page, for actions whose result is edited there.
+func (a *App) showPanel(tab int) {
+	a.tab = tab
+	a.setPanelHidden(false)
+}
+
+// setPanelHidden collapses or expands the side panel and remembers it.
+func (a *App) setPanelHidden(hidden bool) {
+	if a.settings.PanelHidden != hidden {
+		a.settings.PanelHidden = hidden
+		a.saveSettings()
+	}
 }
 
 // Title is the window title in the current language.

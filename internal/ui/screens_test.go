@@ -30,6 +30,10 @@ func TestScreens(t *testing.T) {
 		x.a.seek(2)
 		x.a.addText()
 		x.a.selectAll()
+		x.a.settings.PanelHidden = true
+		x.frame(Input{})
+		x.shot(string(lang) + "-panel-hidden")
+		x.a.settings.PanelHidden = false
 		x.a.tab = 1
 		x.frame(Input{})
 		x.frame(Input{})

@@ -242,7 +242,7 @@ func (a *App) timelineToolbar(r gfx.Rect, t tracks) {
 		{"tl/addtext", icFont, u.t("Text"), a.addText},
 		{"tl/addimage", icImage, u.t("Image"), a.chooseImage},
 		{"tl/addvideo", icVideo, u.t("Video"), a.chooseVideo},
-		{"tl/addmusic", icMusic, u.t("Music"), func() { a.tab = tabMusic }},
+		{"tl/addmusic", icMusic, u.t("Music"), func() { a.showPanel(tabMusic) }},
 	} {
 		w := u.face(13).Measure(b.label) + u.px(44)
 		if u.button(b.id, gfx.Rect{X: x, Y: y, W: w, H: h}, b.glyph, b.label, ghost, true) {

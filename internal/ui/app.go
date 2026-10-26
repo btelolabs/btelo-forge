@@ -136,7 +136,9 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) time.Duration {
 		a.drawPreview(l.preview)
 		a.drawTransport(l.transport)
 		a.drawTimeline(l.timeline)
-		a.drawPanel(l.panel)
+		if !a.settings.PanelHidden {
+			a.drawPanel(l.panel)
+		}
 	}
 	if u.focus == "" {
 		a.shortcuts()
@@ -197,6 +199,9 @@ func (a *App) layout() layout {
 	l.tabs = gfx.Rect{X: 0, Y: 0, W: s.W, H: u.px(40)}
 	l.body = gfx.Rect{X: 0, Y: l.tabs.H, W: s.W, H: s.H - l.tabs.H}
 	panelW := min(u.px(380), s.W*0.34)
+	if a.settings.PanelHidden {
+		panelW = 0
+	}
 	// The timeline is as tall as its tracks need, between a usual height and half the window; the preview gets the rest.
 	timelineH := min(u.px(300), l.body.H*0.46)
 	if a.p != nil {
