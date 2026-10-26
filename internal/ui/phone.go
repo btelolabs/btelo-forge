@@ -11,7 +11,7 @@ import (
 
 // phoneSite is what the phone page shows and where its uploads go.
 func (a *App) phoneSite() web.Site {
-	return web.Site{Files: a.phoneFiles, Text: a.phoneText, UploadDir: a.phoneUploadDir, Received: a.phoneReceived}
+	return web.Site{Files: a.phoneFiles, Text: a.phoneText, UploadDir: a.phoneUploadDir, Received: a.phoneReceived, Logo: logoJPEG}
 }
 
 // uploadDir is where files sent from a phone are kept: the default export folder, or the user's videos folder when

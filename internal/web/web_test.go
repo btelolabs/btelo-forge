@@ -20,7 +20,7 @@ func TestPageNeedsTheKeyAndServesExports(t *testing.T) {
 	video := filepath.Join(dir, "旅行 vlog.cut.mp4")
 	os.WriteFile(video, []byte("0123456789"), 0o644)
 	files := func() []File { return []File{{Path: video, At: time.Now()}, {Path: filepath.Join(dir, "gone.mp4")}} }
-	s := httptest.NewServer(Handler("secret", Site{Files: files, Text: testText, UploadDir: func() (string, error) { return dir, nil }, Received: func([]string) {}}))
+	s := httptest.NewServer(Handler("secret", Site{Files: files, Text: testText, UploadDir: func() (string, error) { return dir, nil }, Received: func([]string) {}, Logo: []byte("jpeg")}))
 	defer s.Close()
 
 	get := func(path string, header ...string) (*http.Response, string) {
@@ -47,12 +47,20 @@ func TestPageNeedsTheKeyAndServesExports(t *testing.T) {
 		t.Fatalf("page %d %s", resp.StatusCode, body)
 	}
 	_, body = get("/list?k=secret")
-	if !strings.Contains(body, "旅行 vlog.cut.mp4") || strings.Contains(body, "gone.mp4") || !strings.Contains(body, "Download") {
+	if !strings.Contains(body, "<video controls playsinline preload=\"metadata\"") || !strings.Contains(body, "旅行 vlog.cut.mp4") || strings.Contains(body, "gone.mp4") || !strings.Contains(body, "Download") {
 		t.Fatalf("list %s", body)
 	}
 	resp, body = get("/file/0/x.mp4?k=secret", "Range", "bytes=2-4")
 	if resp.StatusCode != http.StatusPartialContent || body != "234" {
 		t.Fatalf("range %d %q", resp.StatusCode, body)
+	}
+	for _, want := range []string{`<img src="/logo.jpg"`, `rel="icon"`, `touch-action:manipulation`, `htmx:beforeSwap`} {
+		if _, page := get("/?k=secret"); !strings.Contains(page, want) {
+			t.Fatalf("page lacks %s", want)
+		}
+	}
+	if resp, logo := get("/logo.jpg"); resp.StatusCode != 200 || logo != "jpeg" || resp.Header.Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("logo %d %q", resp.StatusCode, logo)
 	}
 	if resp, _ := get("/file/7/x.mp4?k=secret"); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("missing file %d", resp.StatusCode)

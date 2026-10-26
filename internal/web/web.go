@@ -40,6 +40,7 @@ type Site struct {
 	Text      func() Text
 	UploadDir func() (string, error)
 	Received  func(paths []string)
+	Logo      []byte // a JPEG of the app's mark, shown in the page header and as its icon
 }
 
 // Handler serves site to anyone presenting key.
@@ -63,6 +64,11 @@ func Handler(key string, site Site) http.Handler {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		w.Write(htmx)
+	})
+	mux.HandleFunc("GET /logo.jpg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(site.Logo)
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		if !allowed(w, r) {
@@ -179,13 +185,15 @@ func size(n int64) string {
 }
 
 var page = template.Must(template.New("page").Parse(`<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="icon" href="/logo.jpg"><link rel="apple-touch-icon" href="/logo.jpg">
 <title>{{.Title}}</title><script src="/htmx.min.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#0f1112;--panel:#171a1c;--line:#2b3034;--text:#eceff0;--dim:#9ba3a8;--accent:#1fbf75}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+*{box-sizing:border-box}html,button,input,a{touch-action:manipulation}body{-webkit-text-size-adjust:100%;margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
 header{display:flex;align-items:center;justify-content:space-between;padding:18px 16px;border-bottom:1px solid var(--line)}
-h1{font-size:18px;margin:0}button{background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font:inherit}
+h1{font-size:18px;margin:0}.brand{display:flex;align-items:center;gap:10px;min-width:0}.brand img{width:32px;height:32px;border-radius:18%;flex:none}
+button{background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
+.refresh.flash{animation:flash .6s}@keyframes flash{from{background:var(--accent);border-color:var(--accent)}to{background:none}}
 main{padding:12px 16px;max-width:720px;margin:0 auto}.item{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}
 .name{font-weight:600;word-break:break-all}.meta{color:var(--dim);font-size:13px;margin:2px 0 10px}video{width:100%;border-radius:8px;background:#000;margin-bottom:10px}
 a.dl{display:block;text-align:center;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;border-radius:8px;padding:10px}
@@ -198,18 +206,24 @@ input[type=file]{width:100%;color:var(--dim);margin-bottom:10px}
 progress{width:100%;height:6px;margin-top:10px;accent-color:var(--accent)}progress[hidden]{display:none}
 .ok{color:var(--accent);margin-top:10px}.bad{color:#ffb4b2;margin-top:10px}
 </style></head>
-<body><header><h1>{{.Title}}</h1><button hx-get="/list" hx-target="#list">{{.Refresh}}</button></header>
+<body><header><div class="brand"><img src="/logo.jpg" alt=""><h1>{{.Title}}</h1></div><button class="refresh" type="button" hx-get="/list" hx-target="#list" hx-on::after-request="this.classList.remove('flash');void this.offsetWidth;this.classList.add('flash')">{{.Refresh}}</button></header>
 <main>
 <form class="upload" hx-post="/upload" hx-encoding="multipart/form-data" hx-target="#sent" hx-on::before-request="var p=document.getElementById('progress');p.value=0;p.hidden=false" hx-on::after-request="this.reset();document.getElementById('progress').hidden=true;htmx.trigger('#list','refresh')">
 <h1 style="font-size:16px;margin:0 0 4px">{{.Upload}}</h1><p>{{.UploadHint}}</p>
-<input type="file" name="files" multiple accept="video/*,audio/*,image/*" required>
+<input type="file" name="files" multiple accept="video/*,audio/*,image/*,image/heic,image/heif,video/quicktime,.heic,.heif,.mov" required>
 <button class="send" type="submit">{{.Send}}</button>
 <progress id="progress" max="100" value="0" hidden></progress><div id="sent"></div>
 </form>
 <h2>{{.Exports}}</h2>
 <div id="list" hx-get="/list" hx-trigger="load, every 10s, refresh"></div>
 </main>
-<script>htmx.on("htmx:xhr:progress",function(e){if(e.detail.lengthComputable){document.getElementById("progress").value=e.detail.loaded/e.detail.total*100}})</script>
+<script>
+var list=document.getElementById("list");
+// A refresh that changes nothing, or arrives while a video plays, must not rebuild the players.
+list.addEventListener("htmx:beforeSwap",function(e){
+var playing=Array.prototype.some.call(list.querySelectorAll("video"),function(v){return !v.paused&&!v.ended});
+if(e.detail.serverResponse===list.dataset.html||playing){e.detail.shouldSwap=false}else{list.dataset.html=e.detail.serverResponse}});
+htmx.on("htmx:xhr:progress",function(e){if(e.detail.lengthComputable){document.getElementById("progress").value=e.detail.loaded/e.detail.total*100}})</script>
 </body></html>`))
 
 type resultView struct{ Uploaded, Refused, Failed string }
@@ -219,7 +233,7 @@ var uploadResult = template.Must(template.New("result").Parse(`{{if .Uploaded}}<
 
 var list = template.Must(template.New("list").Parse(`{{if not .Rows}}<p class="empty">{{.Text.Empty}}</p>{{end}}
 {{range .Rows}}<div class="item"><div class="name">{{.Name}}</div><div class="meta">{{.Size}} · {{.When}}</div>
-<video controls preload="none" src="/file/{{.N}}/{{.Name}}"></video>
+<video controls playsinline preload="metadata" src="/file/{{.N}}/{{.Name}}"></video>
 <a class="dl" href="/file/{{.N}}/{{.Name}}?dl=1">{{.Download}}</a></div>{{end}}`))
 
 // LANAddresses lists the private IPv4 addresses a phone on the same network can reach.
