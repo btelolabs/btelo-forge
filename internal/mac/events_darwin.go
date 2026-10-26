@@ -10,7 +10,7 @@ import "strings"
 // The functions below are called by the Objective-C side while bvc_poll dispatches events.
 
 //export goPointer
-func goPointer(x, y C.double, right, down, double C.int) {
+func goPointer(x, y C.double, right, down, twice C.int) {
 	w := current
 	if w == nil {
 		return
@@ -19,7 +19,7 @@ func goPointer(x, y C.double, right, down, double C.int) {
 	if right == 0 {
 		w.input.Down = down != 0
 	}
-	w.input.Pointer = append(w.input.Pointer, PointerEvent{X: float32(x), Y: float32(y), Right: right != 0, Down: down != 0, Double: double != 0})
+	w.input.Pointer = append(w.input.Pointer, PointerEvent{X: float32(x), Y: float32(y), Right: right != 0, Down: down != 0, Double: twice != 0})
 }
 
 //export goMove
