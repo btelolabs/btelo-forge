@@ -31,11 +31,12 @@ jobs:
           version="${GITHUB_REF_NAME}"
           [[ "$GITHUB_REF_TYPE" == tag ]] || version="dev-${GITHUB_SHA::7}"
           for arch in amd64 arm64; do
-            mkdir -p "dist/btelo-cut-windows-$arch"
+            dir="dist/$arch/Btelo Video Cut"
+            mkdir -p "$dir"
             GOOS=windows GOARCH=$arch go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$version" \
-              -o "dist/btelo-cut-windows-$arch/btelo-video-cut.exe" ./cmd/btelo-video-cut
-            cp LICENSE NOTICE README.md README.zh-CN.md THIRD_PARTY_NOTICES.md "dist/btelo-cut-windows-$arch/"
-            (cd dist && 7z a -tzip "btelo-cut-windows-$arch.zip" "btelo-cut-windows-$arch" > /dev/null)
+              -o "$dir/Btelo Video Cut.exe" ./cmd/btelo-video-cut
+            cp LICENSE NOTICE README.md README.zh-CN.md THIRD_PARTY_NOTICES.md "$dir/"
+            (cd "dist/$arch" && 7z a -tzip "../btelo-cut-windows-$arch.zip" "Btelo Video Cut" > /dev/null)
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -61,7 +62,7 @@ jobs:
             CGO_ENABLED=1 GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$version" \
               -o "build/btelo-video-cut-$arch" ./cmd/btelo-video-cut
           done
-          app="dist/btelo-cut-macos/btelo-video-cut.app"
+          app="dist/Btelo Video Cut/Btelo Video Cut.app"
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
           lipo -create -output "$app/Contents/MacOS/btelo-video-cut" build/btelo-video-cut-arm64 build/btelo-video-cut-amd64
           sed "s/VERSION/$short/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
@@ -73,9 +74,56 @@ jobs:
             sips -z $((size * 2)) $((size * 2)) build/logo.png --out "$iconset/icon_${size}x${size}@2x.png" > /dev/null
           done
           iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"
-          codesign --force --deep --sign - "$app"
-          cp LICENSE NOTICE README.md README.zh-CN.md THIRD_PARTY_NOTICES.md dist/btelo-cut-macos/
-          (cd dist && ditto -c -k --sequesterRsrc --keepParent btelo-cut-macos btelo-cut-macos.zip)
+      - name: Sign and notarize
+        env:
+          APPLE_SIGN_P12_BASE64: ${{ secrets.APPLE_SIGN_P12_BASE64 }}
+          APPLE_SIGN_PASSPHRASE: ${{ secrets.APPLE_SIGN_PASSPHRASE }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PWD: ${{ secrets.APPLE_APP_PWD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          app="dist/Btelo Video Cut/Btelo Video Cut.app"
+          if [ -z "$APPLE_SIGN_P12_BASE64" ] || [ -z "$APPLE_SIGN_PASSPHRASE" ] || [ -z "$APPLE_ID" ] \
+             || [ -z "$APPLE_APP_PWD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            if [ "$GITHUB_REF_TYPE" = tag ]; then
+              echo "::error::A release needs the Apple signing secrets."
+              exit 1
+            fi
+            echo "No signing secrets (a pull request from a fork): ad-hoc signature only."
+            codesign --force --deep --sign - "$app"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(openssl rand -hex 16)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          echo "$APPLE_SIGN_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+          security import "$RUNNER_TEMP/sign.p12" -k "$keychain" -P "$APPLE_SIGN_PASSPHRASE" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/sign.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$keychain" | grep -m1 'Developer ID Application' | sed -E 's/.*"(.*)"/\1/')"
+          [ -n "$identity" ] || { echo "::error::No Developer ID Application certificate in the secret."; exit 1; }
+          codesign --force --options runtime --timestamp --sign "$identity" "$app"
+          codesign --verify --strict --verbose=2 "$app"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --password "$APPLE_APP_PWD" \
+            --team-id "$APPLE_TEAM_ID" --wait --timeout 30m --output-format json > "$RUNNER_TEMP/notary.json"
+          cat "$RUNNER_TEMP/notary.json"
+          if [ "$(plutil -extract status raw "$RUNNER_TEMP/notary.json")" != Accepted ]; then
+            xcrun notarytool log "$(plutil -extract id raw "$RUNNER_TEMP/notary.json")" --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_PWD" --team-id "$APPLE_TEAM_ID"
+            exit 1
+          fi
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+          security delete-keychain "$keychain"
+      - name: Package
+        run: |
+          cp LICENSE NOTICE README.md README.zh-CN.md THIRD_PARTY_NOTICES.md "dist/Btelo Video Cut/"
+          (cd dist && ditto -c -k --sequesterRsrc --keepParent "Btelo Video Cut" btelo-cut-macos.zip)
       - uses: actions/upload-artifact@v4
         with:
           name: macos

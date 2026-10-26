@@ -24,6 +24,7 @@ type fakeHost struct {
 	opened     []string
 	clip       string
 	pasteImage image.Image
+	languages  []string
 }
 
 func (h *fakeHost) Wake() {
@@ -43,6 +44,7 @@ func (h *fakeHost) OpenFiles(string, [][2]string, bool) []string { return nil }
 func (h *fakeHost) Reveal(path string) error                     { h.opened = append(h.opened, path); return nil }
 func (h *fakeHost) Launch(path string) error                     { h.opened = append(h.opened, path); return nil }
 func (h *fakeHost) LaunchURL(string) error                       { return nil }
+func (h *fakeHost) Languages() []string                          { return h.languages }
 
 // harness drives the editor headlessly with synthetic input at a fixed size.
 type harness struct {

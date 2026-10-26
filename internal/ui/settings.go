@@ -14,7 +14,7 @@ import (
 )
 
 // ProductName is the name of the app in every language.
-const ProductName = "btelo-video-cut"
+const ProductName = "Btelo Video Cut"
 
 // Repository is where the source lives.
 const Repository = "https://github.com/btelolabs/btelo-video-cut"
@@ -51,6 +51,7 @@ func (a *App) loadSettings() {
 	a.settings = defaultSettings()
 	data, err := os.ReadFile(a.settingsPath())
 	if errors.Is(err, os.ErrNotExist) {
+		a.settings.Language = systemLanguage(a.host.Languages())
 		return
 	}
 	s := defaultSettings()

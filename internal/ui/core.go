@@ -78,6 +78,7 @@ type Host interface {
 	Reveal(path string) error
 	Launch(path string) error
 	LaunchURL(url string) error
+	Languages() []string // the system's preferred languages as BCP 47 tags, most preferred first
 }
 
 // ctx is the per-frame immediate-mode state.

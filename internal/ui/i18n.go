@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/btelolabs/btelo-video-cut/internal/gfx"
@@ -23,6 +24,19 @@ var languages = []Language{English, Chinese}
 
 // languageNames are shown in each language's own words.
 var languageNames = []string{"English", "中文"}
+
+// systemLanguage is the interface language for the system's most preferred language, or English when we do not
+// have that one.
+func systemLanguage(tags []string) Language {
+	if len(tags) == 0 {
+		return English
+	}
+	primary, _, _ := strings.Cut(strings.ReplaceAll(tags[0], "_", "-"), "-")
+	if l := Language(strings.ToLower(primary)); slices.Contains(languages, l) {
+		return l
+	}
+	return English
+}
 
 // t translates a message written in English into the current language.
 func (u *ctx) t(s string) string {

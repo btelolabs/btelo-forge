@@ -323,6 +323,12 @@ static char *copyString(NSString *s) {
 	return s ? strdup(s.UTF8String) : NULL;
 }
 
+char *bvc_languages(void) {
+	@autoreleasepool {
+		return copyString([NSLocale.preferredLanguages componentsJoinedByString:@"\n"]);
+	}
+}
+
 char *bvc_clipboard_text(void) {
 	@autoreleasepool {
 		return copyString([NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString]);

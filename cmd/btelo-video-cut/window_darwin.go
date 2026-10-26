@@ -57,5 +57,6 @@ func (h macWindow) OpenFiles(title string, filter [][2]string, multiple bool) []
 func (h macWindow) Reveal(path string) error   { return mac.Reveal(path) }
 func (h macWindow) Launch(path string) error   { return mac.Launch(path) }
 func (h macWindow) LaunchURL(url string) error { return mac.LaunchURL(url) }
+func (h macWindow) Languages() []string        { return mac.Languages() }
 
 func alert(text string) { mac.Alert(text) }

@@ -67,10 +67,11 @@ func (h winWindow) OpenFiles(title string, filter [][2]string, multiple bool) []
 func (h winWindow) Reveal(path string) error   { return win.Reveal(path) }
 func (h winWindow) Launch(path string) error   { return win.Launch(path) }
 func (h winWindow) LaunchURL(url string) error { return win.LaunchURL(url) }
+func (h winWindow) Languages() []string        { return win.Languages() }
 
 func alert(text string) {
 	t, _ := syscall.UTF16PtrFromString(text)
-	caption, _ := syscall.UTF16PtrFromString("btelo-video-cut")
+	caption, _ := syscall.UTF16PtrFromString(ui.ProductName)
 	const iconError = 0x10
 	syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW").Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(caption)), iconError)
 }

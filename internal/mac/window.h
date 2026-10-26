@@ -11,6 +11,7 @@ void bvc_present(const void *rgba, int width, int height);
 void bvc_title(const char *title);
 void bvc_cursor(int kind);
 void bvc_text_input(int on, double x, double y, double height);
+char *bvc_languages(void);
 char *bvc_clipboard_text(void);
 void bvc_set_clipboard(const char *text);
 void *bvc_clipboard_png(int *length);

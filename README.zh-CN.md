@@ -1,6 +1,6 @@
-<p align="center"><img src="docs/logo.png" alt="btelo-video-cut" width="128"></p>
+<p align="center"><img src="docs/logo.png" alt="Btelo Video Cut" width="128"></p>
 
-<h1 align="center">btelo-video-cut</h1>
+<h1 align="center">Btelo Video Cut</h1>
 
 <p align="center">小而快的视频剪辑软件，支持 Windows 和 macOS。原生、离线可用，AI 可以直接操作。</p>
 
@@ -56,7 +56,7 @@
 | macOS 11 及以上，Apple 芯片与 Intel | `btelo-cut-macos.zip` |
 
 不需要另外安装任何东西：没有 ffmpeg 或版本低于 6.0 时，软件会自动下载一份静态版本到它自己的目录，只下载一次。
-macOS 版暂未公证，第一次请右键 → **打开**。macOS 上的 AI 字幕使用 Homebrew 安装的 `whisper-cli`。
+macOS 版已签名并通过 Apple 公证。macOS 上的 AI 字幕使用 Homebrew 安装的 `whisper-cli`。
 
 ## 构建
 

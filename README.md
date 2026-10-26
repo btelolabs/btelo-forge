@@ -1,6 +1,6 @@
-<p align="center"><img src="docs/logo.png" alt="btelo-video-cut" width="128"></p>
+<p align="center"><img src="docs/logo.png" alt="Btelo Video Cut" width="128"></p>
 
-<h1 align="center">btelo-video-cut</h1>
+<h1 align="center">Btelo Video Cut</h1>
 
 <p align="center">A small, fast video editor for Windows and macOS. Native, offline, and scriptable by AI.</p>
 
@@ -56,8 +56,8 @@
 | macOS 11+, Apple silicon and Intel | `btelo-cut-macos.zip` |
 
 There is nothing else to install. If ffmpeg is missing or older than 6.0, a static build is downloaded once into the
-app's own folder. The macOS build is not notarised yet; open it the first time with right-click → **Open**. On macOS,
-AI subtitles use `whisper-cli` from Homebrew.
+app's own folder. The macOS app is signed and notarised by Apple. On macOS, AI subtitles use `whisper-cli` from
+Homebrew.
 
 ## Build
 

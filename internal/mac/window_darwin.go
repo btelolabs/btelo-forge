@@ -153,6 +153,14 @@ func takeString(p *C.char) string {
 	return C.GoString(p)
 }
 
+// Languages lists the user's preferred languages as BCP 47 tags, most preferred first.
+func Languages() []string {
+	if s := takeString(C.bvc_languages()); s != "" {
+		return strings.Split(s, "\n")
+	}
+	return nil
+}
+
 func (w *Window) Clipboard() (string, error) {
 	s := takeString(C.bvc_clipboard_text())
 	if s == "" {
