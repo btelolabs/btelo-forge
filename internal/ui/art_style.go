@@ -303,7 +303,7 @@ func (a *App) drawEffectPage(f *styleDialog, r gfx.Rect) {
 		slider("angle", u.t("Angle"), &sh.Angle, -180, 180, deg)
 		slider("distance", u.t("Distance"), &sh.Distance, 0, 250, px)
 		slider("spread", u.t("Spread"), &sh.Spread, 0, 1, percent)
-		slider("size", u.t("Size"), &sh.Size, 0, 250, px)
+		slider("size", u.tc("effect", "Size"), &sh.Size, 0, 250, px)
 		sh.Angle, sh.Distance, sh.Size = math.Round(sh.Angle), math.Round(sh.Distance), math.Round(sh.Size)
 	case effectOuterGlow, effectInnerGlow:
 		g := st.OuterGlow
@@ -317,14 +317,14 @@ func (a *App) drawEffectPage(f *styleDialog, r gfx.Rect) {
 		colour(&g.Color)
 		opacity(&g.Opacity)
 		slider("spread", u.t("Spread"), &g.Spread, 0, 1, percent)
-		slider("size", u.t("Size"), &g.Size, 0, 250, px)
+		slider("size", u.tc("effect", "Size"), &g.Size, 0, 250, px)
 		g.Size = math.Round(g.Size)
 	case effectStroke:
 		o := st.Stroke
 		if o == nil {
 			o = &f.stroke
 		}
-		slider("size", u.t("Size"), &o.Size, 1, 250, px)
+		slider("size", u.tc("effect", "Size"), &o.Size, 1, 250, px)
 		o.Size = math.Round(o.Size)
 		rr := row()
 		u.label(u.face(12.5), gfx.Rect{X: rr.X, Y: rr.Y, W: u.px(100), H: rr.H}, u.t("Position"), colDim, 0)

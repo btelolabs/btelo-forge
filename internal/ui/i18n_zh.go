@@ -863,6 +863,7 @@ var zh = map[string]string{
 	"history|Perspective":                                   "透视",
 	"history|Warp":                                          "变形",
 	"Drag the handles; drag elsewhere to move it all; Enter applies, Esc cancels": "拖动控制点；在别处拖动可整体移动；Enter 应用，Esc 取消",
+	"effect|Size":       "大小",
 	"Rasterize":         "栅格化",
 	"Star":              "星形",
 	"history|Add shape": "添加形状",
