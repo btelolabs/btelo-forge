@@ -6,8 +6,8 @@ import (
 	"image/color"
 	"math"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // snap moves at to the nearest edit point within a few pixels: the playhead, the ends of the edit, or the ends of any

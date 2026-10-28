@@ -14,7 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/media"
 )
 
 // mcpSession connects a real MCP client to the editor's own server while the test keeps drawing frames.

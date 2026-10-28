@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/btelolabs/btelo-video-cut/internal/gfx"
+import "github.com/btelolabs/btelo-forge/internal/gfx"
 
 var (
 	colBackground = gfx.Hex(0x0f1112)

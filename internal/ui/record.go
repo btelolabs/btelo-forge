@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/capture"
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/capture"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // recorderHost is what a window offers beyond Host for recording the screen. A window without it, or a system the

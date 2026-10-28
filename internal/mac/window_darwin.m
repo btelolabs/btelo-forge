@@ -18,16 +18,16 @@ static int modifierBits(NSEventModifierFlags f) {
 	return m;
 }
 
-@interface BVCView : NSView <NSTextInputClient>
+@interface ForgeView : NSView <NSTextInputClient>
 @property(nonatomic) BOOL typing;
 @property(nonatomic) NSRect caret;
 @property(nonatomic, strong) NSMutableAttributedString *marked;
 @end
 
-@interface BVCDelegate : NSObject <NSWindowDelegate>
+@interface ForgeDelegate : NSObject <NSWindowDelegate>
 @end
 
-@implementation BVCDelegate
+@implementation ForgeDelegate
 - (BOOL)windowShouldClose:(NSWindow *)sender {
 	closed = 1;
 	return NO;
@@ -41,7 +41,7 @@ static int modifierBits(NSEventModifierFlags f) {
 }
 @end
 
-@implementation BVCView
+@implementation ForgeView
 - (BOOL)acceptsFirstResponder {
 	return YES;
 }
@@ -186,7 +186,7 @@ static int modifierBits(NSEventModifierFlags f) {
 }
 @end
 
-int bvc_open(const char *title, int width, int height, int background) {
+int forge_open(const char *title, int width, int height, int background) {
 	@autoreleasepool {
 		[NSApplication sharedApplication];
 		[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
@@ -205,10 +205,10 @@ int bvc_open(const char *title, int width, int height, int background) {
 		window.title = @(title);
 		window.minSize = NSMakeSize(960, 600);
 		window.releasedWhenClosed = NO;
-		static BVCDelegate *delegate;
-		delegate = [BVCDelegate new];
+		static ForgeDelegate *delegate;
+		delegate = [ForgeDelegate new];
 		window.delegate = delegate;
-		BVCView *view = [[BVCView alloc] initWithFrame:frame];
+		ForgeView *view = [[ForgeView alloc] initWithFrame:frame];
 		view.wantsLayer = YES;
 		view.layer.contentsGravity = kCAGravityResize;
 		view.layer.contentsScale = window.backingScaleFactor;
@@ -227,7 +227,7 @@ int bvc_open(const char *title, int width, int height, int background) {
 	}
 }
 
-int bvc_poll(void) {
+int forge_poll(void) {
 	@autoreleasepool {
 		for (;;) {
 			NSEvent *e = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:NSDate.distantPast inMode:NSDefaultRunLoopMode dequeue:YES];
@@ -240,36 +240,36 @@ int bvc_poll(void) {
 	return !closed;
 }
 
-void bvc_wait(double seconds) {
+void forge_wait(double seconds) {
 	@autoreleasepool {
 		NSDate *until = seconds < 0 ? [NSDate distantFuture] : [NSDate dateWithTimeIntervalSinceNow:seconds];
 		[NSApp nextEventMatchingMask:NSEventMaskAny untilDate:until inMode:NSDefaultRunLoopMode dequeue:NO];
 	}
 }
 
-int bvc_key_window(void) {
+int forge_key_window(void) {
 	return window.isKeyWindow ? 1 : 0;
 }
 
-void bvc_wake(void) {
+void forge_wake(void) {
 	@autoreleasepool {
 		NSEvent *e = [NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:nil subtype:0 data1:0 data2:0];
 		[NSApp postEvent:e atStart:NO];
 	}
 }
 
-void bvc_size(int *width, int *height) {
+void forge_size(int *width, int *height) {
 	NSSize s = window.contentView.bounds.size;
 	CGFloat k = window.backingScaleFactor;
 	*width = (int)(s.width * k);
 	*height = (int)(s.height * k);
 }
 
-double bvc_scale(void) {
+double forge_scale(void) {
 	return window.backingScaleFactor;
 }
 
-void bvc_present(const void *rgba, int width, int height) {
+void forge_present(const void *rgba, int width, int height) {
 	@autoreleasepool {
 		CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
 		CFDataRef data = CFDataCreate(NULL, rgba, (CFIndex)width * height * 4);
@@ -287,11 +287,11 @@ void bvc_present(const void *rgba, int width, int height) {
 	}
 }
 
-void bvc_title(const char *title) {
+void forge_title(const char *title) {
 	window.title = @(title);
 }
 
-void bvc_cursor(int kind) {
+void forge_cursor(int kind) {
 	switch (kind) {
 	case 1:
 		currentCursor = NSCursor.pointingHandCursor;
@@ -311,8 +311,8 @@ void bvc_cursor(int kind) {
 	[currentCursor set];
 }
 
-void bvc_text_input(int on, double x, double y, double height) {
-	BVCView *view = (BVCView *)window.contentView;
+void forge_text_input(int on, double x, double y, double height) {
+	ForgeView *view = (ForgeView *)window.contentView;
 	if (!on && view.typing) {
 		[view.inputContext discardMarkedText];
 		view.marked = nil;
@@ -328,19 +328,19 @@ static char *copyString(NSString *s) {
 	return s ? strdup(s.UTF8String) : NULL;
 }
 
-char *bvc_languages(void) {
+char *forge_languages(void) {
 	@autoreleasepool {
 		return copyString([NSLocale.preferredLanguages componentsJoinedByString:@"\n"]);
 	}
 }
 
-char *bvc_clipboard_text(void) {
+char *forge_clipboard_text(void) {
 	@autoreleasepool {
 		return copyString([NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString]);
 	}
 }
 
-void bvc_set_clipboard(const char *text) {
+void forge_set_clipboard(const char *text) {
 	@autoreleasepool {
 		NSPasteboard *pb = NSPasteboard.generalPasteboard;
 		[pb clearContents];
@@ -348,7 +348,7 @@ void bvc_set_clipboard(const char *text) {
 	}
 }
 
-void *bvc_clipboard_png(int *length) {
+void *forge_clipboard_png(int *length) {
 	@autoreleasepool {
 		NSPasteboard *pb = NSPasteboard.generalPasteboard;
 		NSData *png = [pb dataForType:NSPasteboardTypePNG];
@@ -369,7 +369,7 @@ void *bvc_clipboard_png(int *length) {
 	}
 }
 
-char *bvc_clipboard_files(void) {
+char *forge_clipboard_files(void) {
 	@autoreleasepool {
 		NSArray<NSURL *> *urls = [NSPasteboard.generalPasteboard readObjectsForClasses:@[ NSURL.class ]
 		                                                                       options:@{NSPasteboardURLReadingFileURLsOnlyKey : @YES}];
@@ -384,7 +384,7 @@ char *bvc_clipboard_files(void) {
 	}
 }
 
-char *bvc_open_panel(const char *title, const char *extensions, int multiple, int folders) {
+char *forge_open_panel(const char *title, const char *extensions, int multiple, int folders) {
 	@autoreleasepool {
 		NSOpenPanel *panel = [NSOpenPanel openPanel];
 		panel.message = @(title);
@@ -409,21 +409,21 @@ char *bvc_open_panel(const char *title, const char *extensions, int multiple, in
 	}
 }
 
-void bvc_close(void) {
+void forge_close(void) {
 	[window orderOut:nil];
 }
 
-void bvc_alert(const char *message) {
+void forge_alert(const char *message) {
 	@autoreleasepool {
 		[NSApplication sharedApplication];
 		NSAlert *alert = [NSAlert new];
-		alert.messageText = @"btelo-video-cut";
+		alert.messageText = @"Btelo Forge";
 		alert.informativeText = @(message);
 		alert.alertStyle = NSAlertStyleCritical;
 		[alert runModal];
 	}
 }
 
-void bvc_free(void *p) {
+void forge_free(void *p) {
 	free(p);
 }

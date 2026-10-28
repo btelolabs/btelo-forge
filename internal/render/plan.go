@@ -4,7 +4,7 @@ package render
 import (
 	"math"
 
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 const epsilon = 1e-3

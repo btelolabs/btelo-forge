@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // drawTabs is the browser-like strip at the top: one tab per edit, a button for a new tab, and settings at the end.

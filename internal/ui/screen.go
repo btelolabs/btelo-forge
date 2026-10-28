@@ -8,9 +8,9 @@ import (
 
 	"golang.org/x/image/draw"
 
-	"github.com/btelolabs/btelo-video-cut/internal/capture"
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/capture"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // OverlayOptions say how a window over the screen behaves.

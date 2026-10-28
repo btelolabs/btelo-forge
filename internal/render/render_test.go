@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 func TestAtempoStaysInItsCleanRange(t *testing.T) {

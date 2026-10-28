@@ -9,20 +9,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/library"
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/library"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
-// TestReadmeScreens renders the screenshots of the README from a real edit of BVC_README_VIDEO into BVC_README_OUT,
-// in English and Chinese, with BVC_README_MUSIC (Kevin MacLeod's "The Britons") as background music and
-// BVC_README_LOGO as an image overlay. The music search asks the real sites.
+// TestReadmeScreens renders the screenshots of the README from a real edit of FORGE_README_VIDEO into FORGE_README_OUT,
+// in English and Chinese, with FORGE_README_MUSIC (Kevin MacLeod's "The Britons") as background music and
+// FORGE_README_LOGO as an image overlay. The music search asks the real sites.
 func TestReadmeScreens(t *testing.T) {
-	video, out := os.Getenv("BVC_README_VIDEO"), os.Getenv("BVC_README_OUT")
+	video, out := os.Getenv("FORGE_README_VIDEO"), os.Getenv("FORGE_README_OUT")
 	if video == "" || out == "" {
-		t.Skip("set BVC_README_VIDEO to a video and BVC_README_OUT to a folder to render the README screenshots")
+		t.Skip("set FORGE_README_VIDEO to a video and FORGE_README_OUT to a folder to render the README screenshots")
 	}
-	music, logo := os.Getenv("BVC_README_MUSIC"), os.Getenv("BVC_README_LOGO")
+	music, logo := os.Getenv("FORGE_README_MUSIC"), os.Getenv("FORGE_README_LOGO")
 	for _, lang := range []Language{English, Chinese} {
 		x := newHarness(t)
 		x.c.Resize(1920, 1280)
@@ -95,9 +95,9 @@ func readmeEdit(t *testing.T, x *harness, lang Language, music, logo string) {
 		p.SplitClip(main, length*0.55)
 		p.SetSpeed(p.Video[0].Clips[1].ID, 1.5)
 	})
-	title, captions := "Spring in town", []string{"Morning wind over the meadow", "The old mill on the hill", "Clouds rolling in", "Back to the village"}
+	title, captions := "Spring in town", []string{"Morning in the village", "Red roofs in the sun", "Clouds rolling in", "Back to the square"}
 	if lang == Chinese {
-		title, captions = "小镇的春天", []string{"清晨，风吹过草地", "山坡上的老磨坊", "云慢慢压过来", "回到村子里"}
+		title, captions = "小镇的春天", []string{"清晨的村子", "阳光下的红屋顶", "云慢慢压过来", "回到小广场"}
 	}
 	a.seek(0.4)
 	a.addText()

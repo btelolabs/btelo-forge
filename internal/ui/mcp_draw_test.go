@@ -13,7 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // toolNames lists the tools a session's server offers.

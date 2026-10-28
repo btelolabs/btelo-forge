@@ -4,8 +4,8 @@ import (
 	"image"
 	"math"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // Snapping, as Affinity Designer's: a point being placed or dragged with the pen, the node tool, the shape tool or

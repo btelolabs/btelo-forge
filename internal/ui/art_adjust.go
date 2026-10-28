@@ -8,8 +8,8 @@ import (
 	"math/rand/v2"
 	"slices"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // The adjustments and filters with settings, each tried in a dialog with a live preview.

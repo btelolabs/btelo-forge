@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
-	"github.com/btelolabs/btelo-video-cut/internal/render"
-	"github.com/btelolabs/btelo-video-cut/internal/wave"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/render"
+	"github.com/btelolabs/btelo-forge/internal/wave"
 )
 
 // FPS is the preview frame rate.

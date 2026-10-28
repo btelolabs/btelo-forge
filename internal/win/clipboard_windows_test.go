@@ -8,10 +8,10 @@ import (
 )
 
 // TestClipboardImageRoundTrip puts a half-transparent picture on the clipboard and reads it back. It replaces what
-// is on the clipboard, so it runs only when BVC_CLIPBOARD_TEST is set.
+// is on the clipboard, so it runs only when FORGE_CLIPBOARD_TEST is set.
 func TestClipboardImageRoundTrip(t *testing.T) {
-	if os.Getenv("BVC_CLIPBOARD_TEST") == "" {
-		t.Skip("set BVC_CLIPBOARD_TEST to let the test replace the clipboard")
+	if os.Getenv("FORGE_CLIPBOARD_TEST") == "" {
+		t.Skip("set FORGE_CLIPBOARD_TEST to let the test replace the clipboard")
 	}
 	w, err := Open("clipboard test", 100, 100, Background)
 	if err != nil {

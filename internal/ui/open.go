@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/library"
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/library"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // videoExtensions are offered in the open dialog; any file ffprobe understands can still be dropped.

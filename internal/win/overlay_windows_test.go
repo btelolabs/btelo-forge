@@ -47,10 +47,10 @@ func pump(w *Window, d time.Duration) {
 }
 
 // TestOverlayShowsBlendsAndPassesClicks puts a half-transparent overlay on the screen, reads the screen back and
-// clicks it. It moves the mouse, so it runs only when BVC_OVERLAY_TEST is set.
+// clicks it. It moves the mouse, so it runs only when FORGE_OVERLAY_TEST is set.
 func TestOverlayShowsBlendsAndPassesClicks(t *testing.T) {
-	if os.Getenv("BVC_OVERLAY_TEST") == "" {
-		t.Skip("set BVC_OVERLAY_TEST to let the test show windows and click")
+	if os.Getenv("FORGE_OVERLAY_TEST") == "" {
+		t.Skip("set FORGE_OVERLAY_TEST to let the test show windows and click")
 	}
 	EnableDPI()
 	main, err := Open("overlay test", 200, 120, Foreground)

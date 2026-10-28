@@ -10,14 +10,14 @@ import (
 	"slices"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // ProductName is the name of the app in every language.
-const ProductName = "Btelo Video Cut"
+const ProductName = "Btelo Forge"
 
 // Repository is where the source lives.
-const Repository = "https://github.com/btelolabs/btelo-video-cut"
+const Repository = "https://github.com/btelolabs/btelo-forge"
 
 // settings are the preferences kept between runs.
 type settings struct {

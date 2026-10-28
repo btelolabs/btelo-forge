@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // Keyboard shortcuts, chosen in Settings for each kind of work on its own: the general ones (tabs, opening), video

@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/proc"
+	"github.com/btelolabs/btelo-forge/internal/proc"
 )
 
 // Manager keeps engines and models under dir.
@@ -136,7 +136,7 @@ func (m *Manager) download(ctx context.Context, url, path string, size int64, ch
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "btelo-video-cut/1.0")
+	req.Header.Set("User-Agent", "btelo-forge/1.0")
 	resp, err := m.client.Do(req)
 	if err != nil {
 		return err

@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // Destination is the file the export writes: "<name>.cut.mp4" in dir (beside the source when dir is empty),

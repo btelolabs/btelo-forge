@@ -1,6 +1,6 @@
 # Third-party notices
 
-Btelo Video Cut includes or links the following components, each under its own licence.
+Btelo Forge includes or links the following components, each under its own licence.
 
 ## Built into the program
 

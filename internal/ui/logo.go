@@ -8,7 +8,7 @@ import (
 	"image/jpeg"
 	"sync"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 //go:embed assets/logo.jpg

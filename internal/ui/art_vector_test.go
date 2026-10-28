@@ -5,9 +5,9 @@ import (
 	"math"
 	"testing"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // clickCanvas clicks canvas point (cx, cy), a double-click when double.

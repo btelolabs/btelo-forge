@@ -6,8 +6,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/btelolabs/btelo-video-cut/internal/project"
-	"github.com/btelolabs/btelo-video-cut/internal/render"
+	"github.com/btelolabs/btelo-forge/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/render"
 )
 
 // exportSettings are the export settings as the MCP tools read and write them.

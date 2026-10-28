@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/btelolabs/btelo-video-cut/internal/library"
-	"github.com/btelolabs/btelo-video-cut/internal/web"
+	"github.com/btelolabs/btelo-forge/internal/library"
+	"github.com/btelolabs/btelo-forge/internal/web"
 )
 
 // phoneSite is what the phone page shows and where its uploads go.

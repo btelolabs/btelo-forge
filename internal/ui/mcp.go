@@ -10,7 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // The MCP server comes in one piece for each kind of work, so an AI is told only about what it is asked to do: video
@@ -148,9 +148,9 @@ var Version = "dev"
 // mcpServerName is the name a domain's server is added to an AI under.
 func mcpServerName(domain int) string {
 	if p := mcpDomainPaths[domain]; p != "" {
-		return "btelo-cut-" + p[1:]
+		return "btelo-forge-" + p[1:]
 	}
-	return "btelo-cut"
+	return "btelo-forge"
 }
 
 // mcpTasks say what an AI is asked to do with each domain's server.

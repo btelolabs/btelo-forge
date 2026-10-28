@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/locale"
-	"github.com/btelolabs/btelo-video-cut/internal/proc"
+	"github.com/btelolabs/btelo-forge/internal/locale"
+	"github.com/btelolabs/btelo-forge/internal/proc"
 )
 
 // DefaultToolsJSON is the built-in description of where ffmpeg is downloaded from.
@@ -309,7 +309,7 @@ func fetch(ctx context.Context, client *http.Client, a Archive, dest string, pro
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "btelo-video-cut")
+	req.Header.Set("User-Agent", "btelo-forge")
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

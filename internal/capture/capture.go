@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/media"
 )
 
 // Errors a recording can fail with, for the interface to explain.

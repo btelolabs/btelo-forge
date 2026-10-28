@@ -3,8 +3,8 @@ package ui
 import (
 	"fmt"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // The retouching tools, in Photoshop's places: blur, sharpen and smudge share one, dodge, burn and sponge another.

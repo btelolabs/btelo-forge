@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 func TestCanvasArtboards(t *testing.T) {

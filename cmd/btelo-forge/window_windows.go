@@ -6,8 +6,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/btelolabs/btelo-video-cut/internal/ui"
-	"github.com/btelolabs/btelo-video-cut/internal/win"
+	"github.com/btelolabs/btelo-forge/internal/ui"
+	"github.com/btelolabs/btelo-forge/internal/win"
 )
 
 // winWindow adapts the Win32 window to the editor.

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/capture"
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/capture"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // recordingHarness is an editor that can record the screen, saving into a test folder; it skips where there is no

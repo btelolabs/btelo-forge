@@ -18,7 +18,7 @@ func BenchmarkFrame(b *testing.B) {
 	x.key('T', false)
 	x.frame(Input{Keys: []Key{{Code: keyEscape}}})
 	x.settle(30 * time.Second)
-	if path := os.Getenv("BVC_PROFILE"); path != "" {
+	if path := os.Getenv("FORGE_PROFILE"); path != "" {
 		f, _ := os.Create(path)
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()

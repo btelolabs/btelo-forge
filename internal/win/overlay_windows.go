@@ -22,7 +22,7 @@ var (
 	setWindowPos          = user32.NewProc("SetWindowPos")
 	overlayClassOnce      sync.Once
 	overlayClassErr       error
-	overlayClass, _       = syscall.UTF16PtrFromString("BteloVideoCutOverlay")
+	overlayClass, _       = syscall.UTF16PtrFromString("BteloForgeOverlay")
 	mainWindow            atomic.Uintptr // the first window Open made, which overlays pass requests to close to
 )
 

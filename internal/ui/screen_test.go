@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // overlayHarness is a recording harness whose window can open overlays.
@@ -24,7 +24,7 @@ func overlayHarness(t *testing.T) *harness {
 
 // shotOverlay saves what an overlay shows, for looking at.
 func (x *harness) shotOverlay(o *fakeOverlay, name string) {
-	dir := os.Getenv("BVC_SHOTS")
+	dir := os.Getenv("FORGE_SHOTS")
 	if dir == "" || o.shown == nil {
 		return
 	}

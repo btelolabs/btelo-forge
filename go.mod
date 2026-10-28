@@ -1,4 +1,4 @@
-module github.com/btelolabs/btelo-video-cut
+module github.com/btelolabs/btelo-forge
 
 go 1.27.1
 

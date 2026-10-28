@@ -6,10 +6,10 @@ import (
 	"image"
 	"math"
 
-	"github.com/btelolabs/btelo-video-cut/internal/caption"
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/caption"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // shownFrame is the picture in the preview. While paused it is the top clip's source frame, fetched one at a time

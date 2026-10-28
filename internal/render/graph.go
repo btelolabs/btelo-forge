@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // Overlay is a pre-rendered caption or image placed at (X, Y) of the output frame between Start and End.

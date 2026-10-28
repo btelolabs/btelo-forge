@@ -11,16 +11,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/media"
 )
 
 // TestSoundStaysOnThePicture plays a clip whose screen flashes white exactly as it beeps, records it with a pause in
 // the middle, and checks that every flash in the recording comes with its beep. It needs speakers (or any output
-// device) and ffplay, so it runs only when BVC_SYNC_CLIP names such a clip.
+// device) and ffplay, so it runs only when FORGE_SYNC_CLIP names such a clip.
 func TestSoundStaysOnThePicture(t *testing.T) {
-	clip := os.Getenv("BVC_SYNC_CLIP")
+	clip := os.Getenv("FORGE_SYNC_CLIP")
 	if clip == "" {
-		t.Skip("set BVC_SYNC_CLIP to a clip that flashes and beeps together")
+		t.Skip("set FORGE_SYNC_CLIP to a clip that flashes and beeps together")
 	}
 	d, e := recordable(t)
 	r, err := Start(Options{Display: d, FPS: 60, SystemAudio: true, Encoder: e, Path: t.TempDir() + "/sync.mp4"})

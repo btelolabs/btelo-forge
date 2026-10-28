@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // Hotkey is a key combination that works system-wide; Key is a Windows virtual-key code, 0 for none.

@@ -7,13 +7,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/caption"
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/library"
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
-	"github.com/btelolabs/btelo-video-cut/internal/playback"
-	"github.com/btelolabs/btelo-video-cut/internal/transcribe"
+	"github.com/btelolabs/btelo-forge/internal/caption"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/library"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/playback"
+	"github.com/btelolabs/btelo-forge/internal/transcribe"
 )
 
 const (

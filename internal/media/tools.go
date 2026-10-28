@@ -12,7 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/btelolabs/btelo-video-cut/internal/proc"
+	"github.com/btelolabs/btelo-forge/internal/proc"
 )
 
 // ErrMissingTool means no usable ffmpeg and ffprobe were found or installed.

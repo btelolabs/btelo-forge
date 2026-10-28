@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
-	"github.com/btelolabs/btelo-video-cut/internal/render"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/render"
 )
 
 type exportJob struct {
@@ -99,7 +99,7 @@ func (a *App) startExport() (string, error) {
 }
 
 func (a *App) encode(ctx context.Context, p *project.Project, out string, progress func(float64)) error {
-	tmp, err := os.MkdirTemp("", "btelo-video-cut-*")
+	tmp, err := os.MkdirTemp("", "btelo-forge-*")
 	if err != nil {
 		return err
 	}

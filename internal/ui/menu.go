@@ -3,7 +3,7 @@ package ui
 import (
 	"fmt"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // menuItem is a line of a popup menu: a command with its shortcut, a submenu, or a separator.

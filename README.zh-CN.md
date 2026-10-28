@@ -1,11 +1,11 @@
-<p align="center"><img src="docs/logo.png" alt="Btelo Video Cut" width="128"></p>
+<p align="center"><img src="docs/logo.png" alt="Btelo Forge" width="128"></p>
 
-<h1 align="center">Btelo Video Cut</h1>
+<h1 align="center">Btelo Forge</h1>
 
-<p align="center">小而快的视频剪辑软件，支持 Windows 和 macOS。原生、离线可用，AI 可以直接操作。</p>
+<p align="center">小而快的创作工具，支持 Windows 和 macOS：视频剪辑、位图与矢量绘图、录屏。原生、离线可用，AI 可以直接操作。</p>
 
 <p align="center">
-  <a href="https://github.com/btelolabs/btelo-video-cut/releases/latest"><b>下载</b></a> ·
+  <a href="https://github.com/btelolabs/btelo-forge/releases/latest"><b>下载</b></a> ·
   <a href="README.md">English</a> · <b>中文</b>
 </p>
 
@@ -67,19 +67,22 @@
 
 | 系统 | 文件 |
 | --- | --- |
-| Windows 10 / 11，x64 | `btelo-cut-windows-amd64.zip` |
-| Windows ARM 版 | `btelo-cut-windows-arm64.zip` |
-| macOS 11 及以上，Apple 芯片与 Intel | `btelo-cut-macos.zip` |
+| Windows 10 / 11，x64 | `btelo-forge-windows-amd64.zip` |
+| Windows ARM 版 | `btelo-forge-windows-arm64.zip` |
+| macOS 11 及以上，Apple 芯片与 Intel | `btelo-forge-macos.zip` |
 
 不需要另外安装任何东西：没有 ffmpeg 或版本低于 6.0 时，软件会自动下载一份静态版本到它自己的目录，只下载一次。
 macOS 版已签名并通过 Apple 公证。macOS 上的 AI 字幕使用 Homebrew 安装的 `whisper-cli`。
+
+Btelo Forge 原名 Btelo Video Cut。第一次运行 Btelo Forge 时，原来的设置、未完成的剪辑和已下载的内容会自动迁移过来。
+macOS 上软件换了新的身份标识，所以会重新请求录屏权限。
 
 ## 构建
 
 需要 Go 1.27。Windows 不需要别的；macOS 需要 Xcode 命令行工具。
 
 ```
-go build ./cmd/btelo-video-cut
+go build ./cmd/btelo-forge
 go test ./...
 ```
 

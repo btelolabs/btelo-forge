@@ -10,7 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/btelolabs/btelo-video-cut/internal/web"
+	"github.com/btelolabs/btelo-forge/internal/web"
 )
 
 // The services listen on these ports, or the next free one within a few.

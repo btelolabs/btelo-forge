@@ -16,8 +16,8 @@ import (
 	"golang.org/x/image/draw"
 	"golang.org/x/image/math/f64"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // artTool is what a press on the canvas does.

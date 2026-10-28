@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 func TestCanvasAdjustmentLayers(t *testing.T) {

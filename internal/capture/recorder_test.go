@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/media"
 )
 
 // recordable finds a display and a working encoder, or skips: build machines often have no desktop to grab.

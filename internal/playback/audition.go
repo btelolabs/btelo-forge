@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/wave"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/wave"
 )
 
 // Audition plays one sound file or URL for previewing a library track.
@@ -73,7 +73,7 @@ func (a *Audition) play(ctx context.Context, key, source, referer string) error 
 	}()
 	args := []string{"-v", "error", "-nostdin"}
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		args = append(args, "-reconnect", "1", "-reconnect_streamed", "1", "-user_agent", "btelo-video-cut/1.0")
+		args = append(args, "-reconnect", "1", "-reconnect_streamed", "1", "-user_agent", "btelo-forge/1.0")
 		if referer != "" {
 			args = append(args, "-referer", referer)
 		}

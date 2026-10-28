@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/library"
-	"github.com/btelolabs/btelo-video-cut/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/library"
+	"github.com/btelolabs/btelo-forge/internal/media"
 )
 
 type fakeHost struct {
@@ -180,7 +180,7 @@ func (x *harness) drag(fromX, fromY, toX, toY float32) {
 func (x *harness) key(code uint16, ctrl bool) { x.frame(Input{Keys: []Key{{Code: code, Ctrl: ctrl}}}) }
 
 func (x *harness) shot(name string) {
-	dir := os.Getenv("BVC_SHOTS")
+	dir := os.Getenv("FORGE_SHOTS")
 	if dir == "" {
 		return
 	}

@@ -3,7 +3,7 @@ package ui
 import (
 	"fmt"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // historyNames are the names the picture gives its steps, which the History panel shows translated;

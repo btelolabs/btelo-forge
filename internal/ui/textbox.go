@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // editor is the text and caret of the focused text box; anchor marks the other end of a selection.

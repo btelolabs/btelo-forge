@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // selectionCard reports whether the panel shows the card that edits the selection: for several items at once, or for

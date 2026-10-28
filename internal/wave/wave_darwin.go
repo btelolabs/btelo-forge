@@ -19,7 +19,7 @@ var (
 func sharedContext() (*oto.Context, error) {
 	contextOnce.Do(func() {
 		var ready chan struct{}
-		context, ready, contextErr = oto.NewContext(&oto.NewContextOptions{SampleRate: Rate, ChannelCount: 2, Format: oto.FormatSignedInt16LE, ApplicationName: "btelo-video-cut"})
+		context, ready, contextErr = oto.NewContext(&oto.NewContextOptions{SampleRate: Rate, ChannelCount: 2, Format: oto.FormatSignedInt16LE, ApplicationName: "btelo-forge"})
 		if contextErr == nil {
 			<-ready
 		}

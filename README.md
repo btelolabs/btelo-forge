@@ -1,11 +1,11 @@
-<p align="center"><img src="docs/logo.png" alt="Btelo Video Cut" width="128"></p>
+<p align="center"><img src="docs/logo.png" alt="Btelo Forge" width="128"></p>
 
-<h1 align="center">Btelo Video Cut</h1>
+<h1 align="center">Btelo Forge</h1>
 
-<p align="center">A small, fast video editor for Windows and macOS. Native, offline, and scriptable by AI.</p>
+<p align="center">A small, fast studio for Windows and macOS: video editing, painting and vector drawing, and screen recording. Native, offline, and scriptable by AI.</p>
 
 <p align="center">
-  <a href="https://github.com/btelolabs/btelo-video-cut/releases/latest"><b>Download</b></a> ·
+  <a href="https://github.com/btelolabs/btelo-forge/releases/latest"><b>Download</b></a> ·
   <b>English</b> · <a href="README.zh-CN.md">中文</a>
 </p>
 
@@ -67,20 +67,23 @@
 
 | System | File |
 | --- | --- |
-| Windows 10 / 11, x64 | `btelo-cut-windows-amd64.zip` |
-| Windows on ARM | `btelo-cut-windows-arm64.zip` |
-| macOS 11+, Apple silicon and Intel | `btelo-cut-macos.zip` |
+| Windows 10 / 11, x64 | `btelo-forge-windows-amd64.zip` |
+| Windows on ARM | `btelo-forge-windows-arm64.zip` |
+| macOS 11+, Apple silicon and Intel | `btelo-forge-macos.zip` |
 
 There is nothing else to install. If ffmpeg is missing or older than 6.0, a static build is downloaded once into the
 app's own folder. The macOS app is signed and notarised by Apple. On macOS, AI subtitles use `whisper-cli` from
 Homebrew.
+
+Btelo Forge was called Btelo Video Cut. Its settings, unfinished edits and downloads move over the first time Btelo
+Forge runs. On macOS the app has a new identity, so it asks again for permission to record the screen.
 
 ## Build
 
 Requires Go 1.27. Windows needs nothing else; macOS needs the Xcode command-line tools.
 
 ```
-go build ./cmd/btelo-video-cut
+go build ./cmd/btelo-forge
 go test ./...
 ```
 

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // overlayRect is where overlay id is drawn on the timeline now.

@@ -6,10 +6,10 @@ import (
 	"time"
 )
 
-// TestScreens renders every panel and settings page in both languages into BVC_SHOTS, for looking at the design.
+// TestScreens renders every panel and settings page in both languages into FORGE_SHOTS, for looking at the design.
 func TestScreens(t *testing.T) {
-	if os.Getenv("BVC_SHOTS") == "" {
-		t.Skip("set BVC_SHOTS to a folder to render the screens")
+	if os.Getenv("FORGE_SHOTS") == "" {
+		t.Skip("set FORGE_SHOTS to a folder to render the screens")
 	}
 	x := newHarness(t)
 	x.open(x.fixture())

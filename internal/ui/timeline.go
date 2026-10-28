@@ -5,7 +5,7 @@ import (
 	"math"
 	"slices"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // timelineView is the visible part of the timeline: pixels per second (0 fits the whole edit), the time at the left

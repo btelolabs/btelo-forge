@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // Cursor is the pointer shape the UI asks for.

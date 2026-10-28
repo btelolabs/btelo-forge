@@ -47,7 +47,7 @@ type Track struct {
 // Key identifies the track across providers.
 func (t Track) Key() string { return string(t.Provider) + ":" + t.ID }
 
-const userAgent = "btelo-video-cut/1.0 (+https://github.com/btelolabs/btelo-video-cut)"
+const userAgent = "btelo-forge/1.0 (+https://github.com/btelolabs/btelo-forge)"
 
 // Library is safe for concurrent use.
 type Library struct {

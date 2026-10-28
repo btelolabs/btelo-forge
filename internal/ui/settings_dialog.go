@@ -7,7 +7,7 @@ import (
 
 	"rsc.io/qr"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 var settingsPages = msgs("General", "AI (MCP)", "Phone", "Hotkeys", "Extensions", "About")

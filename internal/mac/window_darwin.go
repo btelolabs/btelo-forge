@@ -42,7 +42,7 @@ func Open(title string, width, height int, background bool) (*Window, error) {
 	if background {
 		bg = 1
 	}
-	if C.bvc_open(t, C.int(width), C.int(height), bg) == 0 {
+	if C.forge_open(t, C.int(width), C.int(height), bg) == 0 {
 		return nil, errors.New("the window could not be created")
 	}
 	current = &Window{}
@@ -52,16 +52,16 @@ func Open(title string, width, height int, background bool) (*Window, error) {
 // Poll dispatches pending events and makes everything collected since the previous Poll, including during Wait, the
 // current input; it returns false once the window is closed.
 func (w *Window) Poll() bool {
-	open := C.bvc_poll() != 0
+	open := C.forge_poll() != 0
 	w.input.flip()
 	return open
 }
 
 // Wait blocks until an event arrives, Wake is called, or timeout passes.
-func (w *Window) Wait(timeout time.Duration) { C.bvc_wait(C.double(timeout.Seconds())) }
+func (w *Window) Wait(timeout time.Duration) { C.forge_wait(C.double(timeout.Seconds())) }
 
 // Wake makes a pending Wait return; it is safe to call from any goroutine.
-func (w *Window) Wake() { C.bvc_wake() }
+func (w *Window) Wake() { C.forge_wake() }
 
 // Input returns the events collected by the last Poll.
 func (w *Window) Input() *Input { return &w.input.last }
@@ -69,15 +69,15 @@ func (w *Window) Input() *Input { return &w.input.last }
 // Size is the content area in pixels.
 func (w *Window) Size() (int, int) {
 	var width, height C.int
-	C.bvc_size(&width, &height)
+	C.forge_size(&width, &height)
 	return int(width), int(height)
 }
 
 // Scale is the display's pixels per point.
-func (w *Window) Scale() float32 { return float32(C.bvc_scale()) }
+func (w *Window) Scale() float32 { return float32(C.forge_scale()) }
 
 // Focused reports whether the window has the keyboard focus.
-func (w *Window) Focused() bool { return C.bvc_key_window() != 0 }
+func (w *Window) Focused() bool { return C.forge_key_window() != 0 }
 
 // Present shows an RGBA image of the content size.
 func (w *Window) Present(rgba []byte, width, height int) error {
@@ -87,7 +87,7 @@ func (w *Window) Present(rgba []byte, width, height int) error {
 	if len(rgba) < width*height*4 {
 		return errors.New("present: image smaller than its size")
 	}
-	C.bvc_present(unsafe.Pointer(&rgba[0]), C.int(width), C.int(height))
+	C.forge_present(unsafe.Pointer(&rgba[0]), C.int(width), C.int(height))
 	runtime.KeepAlive(rgba)
 	return nil
 }
@@ -98,7 +98,7 @@ func (w *Window) SetRefresh(f func()) { w.refresh = f }
 func (w *Window) SetTitle(title string) {
 	t := C.CString(title)
 	defer C.free(unsafe.Pointer(t))
-	C.bvc_title(t)
+	C.forge_title(t)
 }
 
 // Cursor kinds understood by SetCursor.
@@ -110,7 +110,7 @@ const (
 	Move
 )
 
-func (w *Window) SetCursor(kind int) { C.bvc_cursor(C.int(kind)) }
+func (w *Window) SetCursor(kind int) { C.forge_cursor(C.int(kind)) }
 
 // TextInput turns text entry on or off, placing input-method windows at the caret (pixels).
 func (w *Window) TextInput(on bool, x, y, height float32) {
@@ -119,27 +119,27 @@ func (w *Window) TextInput(on bool, x, y, height float32) {
 		v = 1
 	}
 	w.typing = on
-	C.bvc_text_input(v, C.double(x), C.double(y), C.double(height))
+	C.forge_text_input(v, C.double(x), C.double(y), C.double(height))
 }
 
 func takeString(p *C.char) string {
 	if p == nil {
 		return ""
 	}
-	defer C.bvc_free(unsafe.Pointer(p))
+	defer C.forge_free(unsafe.Pointer(p))
 	return C.GoString(p)
 }
 
 // Languages lists the user's preferred languages as BCP 47 tags, most preferred first.
 func Languages() []string {
-	if s := takeString(C.bvc_languages()); s != "" {
+	if s := takeString(C.forge_languages()); s != "" {
 		return strings.Split(s, "\n")
 	}
 	return nil
 }
 
 func (w *Window) Clipboard() (string, error) {
-	s := takeString(C.bvc_clipboard_text())
+	s := takeString(C.forge_clipboard_text())
 	if s == "" {
 		return "", errors.New("clipboard has no text")
 	}
@@ -149,21 +149,21 @@ func (w *Window) Clipboard() (string, error) {
 func (w *Window) SetClipboard(text string) error {
 	t := C.CString(text)
 	defer C.free(unsafe.Pointer(t))
-	C.bvc_set_clipboard(t)
+	C.forge_set_clipboard(t)
 	return nil
 }
 
 // Paste reads an image, copied files, or text from the clipboard.
 func (w *Window) Paste() (image.Image, []string, string) {
 	var n C.int
-	if p := C.bvc_clipboard_png(&n); p != nil {
+	if p := C.forge_clipboard_png(&n); p != nil {
 		data := C.GoBytes(p, n)
-		C.bvc_free(p)
+		C.forge_free(p)
 		if img, err := png.Decode(bytes.NewReader(data)); err == nil {
 			return img, nil, ""
 		}
 	}
-	if files := takeString(C.bvc_clipboard_files()); files != "" {
+	if files := takeString(C.forge_clipboard_files()); files != "" {
 		return nil, strings.Split(files, "\n"), ""
 	}
 	text, _ := w.Clipboard()
@@ -204,14 +204,14 @@ func (w *Window) panel(title, exts string, multiple, folders bool) []string {
 		f = 1
 	}
 	w.input.last.Down, w.input.next.Down = false, false
-	if s := takeString(C.bvc_open_panel(t, e, m, f)); s != "" {
+	if s := takeString(C.forge_open_panel(t, e, m, f)); s != "" {
 		return strings.Split(s, "\n")
 	}
 	return nil
 }
 
 // Close hides the window.
-func (w *Window) Close() { C.bvc_close() }
+func (w *Window) Close() { C.forge_close() }
 
 // Reveal shows path in Finder.
 func Reveal(path string) error { return exec.Command("open", "-R", path).Start() }
@@ -226,5 +226,5 @@ func LaunchURL(url string) error { return exec.Command("open", url).Start() }
 func Alert(message string) {
 	m := C.CString(message)
 	defer C.free(unsafe.Pointer(m))
-	C.bvc_alert(m)
+	C.forge_alert(m)
 }

@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // codeView is what a code editor keeps between frames: where it is scrolled to and its undo history.

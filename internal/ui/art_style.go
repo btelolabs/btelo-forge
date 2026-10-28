@@ -6,8 +6,8 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // The Layer Style dialog, as Photoshop's: the effects listed on the left, each turned on with its box, and the

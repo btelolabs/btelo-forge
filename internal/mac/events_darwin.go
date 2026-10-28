@@ -7,7 +7,7 @@ import "C"
 
 import "strings"
 
-// The functions below are called by the Objective-C side while bvc_poll dispatches events.
+// The functions below are called by the Objective-C side while forge_poll dispatches events.
 
 //export goPointer
 func goPointer(x, y C.double, right, down, twice C.int) {

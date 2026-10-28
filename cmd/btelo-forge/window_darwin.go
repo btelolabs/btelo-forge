@@ -4,8 +4,8 @@ import (
 	"image"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/mac"
-	"github.com/btelolabs/btelo-video-cut/internal/ui"
+	"github.com/btelolabs/btelo-forge/internal/mac"
+	"github.com/btelolabs/btelo-forge/internal/ui"
 )
 
 // macWindow adapts the Cocoa window to the editor.

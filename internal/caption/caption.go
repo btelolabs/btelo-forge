@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/image/draw"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // Image is a drawn caption and where its top-left corner sits in the frame.

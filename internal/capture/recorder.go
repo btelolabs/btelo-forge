@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/media"
 )
 
 // Status is how a recording is going.

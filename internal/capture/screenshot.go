@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/media"
 )
 
 // Screenshot saves the display, or a region of it (empty for all), as it is now to a PNG at path, grabbed through

@@ -40,7 +40,7 @@ var (
 	windows          sync.Map
 	classOnce        sync.Once
 	classErr         error
-	className, _     = syscall.UTF16PtrFromString("BteloVideoCutWindow")
+	className, _     = syscall.UTF16PtrFromString("BteloForgeWindow")
 	windowCallback   = syscall.NewCallback(windowProc)
 )
 

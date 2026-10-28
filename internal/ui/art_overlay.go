@@ -15,9 +15,9 @@ import (
 
 	xdraw "golang.org/x/image/draw"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // A drawing on the video is an image overlay the size of the frame whose picture is exported from a canvas: it is

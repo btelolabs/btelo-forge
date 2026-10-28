@@ -1,9 +1,9 @@
 ﻿<#
 .SYNOPSIS
-  Builds Btelo Video Cut from the working tree and opens it: a development run without a release.
+  Builds Btelo Forge from the working tree and opens it: a development run without a release.
 
 .DESCRIPTION
-  Compiles ./cmd/btelo-video-cut the way the release does on Windows (a GUI program, no console), stamped
+  Compiles ./cmd/btelo-forge the way the release does on Windows (a GUI program, no console), stamped
   dev-<commit>[-dirty], into build\dev, then starts it. Go's build cache keeps a rebuild to a few seconds. A build
   error is shown in a message box, since the script normally runs with no window.
 
@@ -22,11 +22,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $out = Join-Path $repo 'build\dev'
-$exe = Join-Path $out 'Btelo Video Cut.exe'
+$exe = Join-Path $out 'Btelo Forge.exe'
 
 function Show-Error([string]$text) {
     Add-Type -AssemblyName System.Windows.Forms
-    [void][System.Windows.Forms.MessageBox]::Show($text, 'Btelo Video Cut（开发版）',
+    [void][System.Windows.Forms.MessageBox]::Show($text, 'Btelo Forge（开发版）',
         [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
 }
 
@@ -46,7 +46,7 @@ function Build {
     $next = Join-Path $out 'next.exe'
     $log = Join-Path $out 'build.log'
     $ldflags = "-H windowsgui -X main.version=$(Get-Version)"
-    $go = Start-Process go -ArgumentList 'build', '-ldflags', "`"$ldflags`"", '-o', "`"$next`"", './cmd/btelo-video-cut' `
+    $go = Start-Process go -ArgumentList 'build', '-ldflags', "`"$ldflags`"", '-o', "`"$next`"", './cmd/btelo-forge' `
         -WorkingDirectory $repo -NoNewWindow -Wait -PassThru -RedirectStandardError $log
     if ($go.ExitCode -ne 0) {
         $errors = (Get-Content $log -Encoding UTF8 -TotalCount 40) -join "`n"
@@ -62,21 +62,25 @@ function Build {
     }
     Move-Item $next $exe
     Get-ChildItem $out -Filter 'old-*.exe' | Remove-Item -Force -ErrorAction SilentlyContinue
+    # The build from before the app was renamed, once it is no longer running.
+    Remove-Item (Join-Path $out 'Btelo Video Cut.exe') -Force -ErrorAction SilentlyContinue
 }
 
 try {
     Build
     if ($InstallShortcut) {
-        $link = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Btelo Video Cut（开发版）.lnk'
+        $link = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Btelo Forge（开发版）.lnk'
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($link)
         $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`""
         $shortcut.WorkingDirectory = $repo
         $shortcut.IconLocation = "$exe,0"
-        $shortcut.Description = '从源码编译并打开 Btelo Video Cut'
+        $shortcut.Description = '从源码编译并打开 Btelo Forge'
         $shortcut.WindowStyle = 7
         $shortcut.Save()
+        # The shortcut from before the app was renamed, which this one replaces.
+        Remove-Item (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Btelo Video Cut（开发版）.lnk') -Force -ErrorAction SilentlyContinue
         Write-Host "桌面快捷方式已创建：$link"
         return
     }

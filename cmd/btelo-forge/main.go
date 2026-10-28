@@ -1,5 +1,6 @@
-// Command btelo-video-cut is a desktop video editor: drop videos in, cut, speed up, stack tracks, add music, text,
-// images and AI subtitles, and export a compressed "<name>.cut.mp4".
+// Command btelo-forge is Btelo Forge, a desktop app for making videos and pictures: a video editor (cut, speed up,
+// stack tracks, add music, text, images and AI subtitles, and export a compressed "<name>.cut.mp4"), a layered
+// canvas for painting and vector drawing, and screen recording and screenshots, all of it also driven by AI over MCP.
 package main
 
 import (
@@ -10,8 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/ui"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/ui"
 )
 
 // version is set by the release build.
@@ -60,7 +61,16 @@ func run(background bool, capture string, deadline time.Duration, files []string
 		return err
 	}
 	defer w.Close()
-	app := ui.New(w, fonts, filepath.Join(cache, "btelo-video-cut"), filepath.Join(config, "btelo-video-cut"))
+	// The data folders under the app's current name, moved from its old one on the first run.
+	cacheDir, moves := dataDir(cache)
+	stateDir, stateMoves := dataDir(config)
+	for old, now := range stateMoves {
+		moves[old] = now
+	}
+	// An edit whose paths could not be rewritten still opens, its moved pictures and music shown as missing, so a
+	// failure here does not stop the app.
+	_ = rewritePaths(filepath.Join(stateDir, "edits"), moves)
+	app := ui.New(w, fonts, cacheDir, stateDir)
 	defer app.Close()
 	for _, f := range files {
 		app.Open(f)

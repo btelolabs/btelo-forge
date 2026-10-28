@@ -3,7 +3,7 @@ package ui
 import (
 	"time"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 type toastAction struct {

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/btelolabs/btelo-video-cut/internal/locale"
+	"github.com/btelolabs/btelo-forge/internal/locale"
 )
 
 func TestParseSkipsNonSpeechAndConvertsTimes(t *testing.T) {
@@ -71,12 +71,12 @@ func TestArgumentsFillTheirPlaceholders(t *testing.T) {
 	}
 }
 
-// TestRunTranscribesSpeech uses a whisper-cli and model already on disk (BVC_WHISPER_CLI, BVC_WHISPER_MODEL and a
-// speech WAV in BVC_WHISPER_WAV); it is skipped otherwise, since the engine is a large download.
+// TestRunTranscribesSpeech uses a whisper-cli and model already on disk (FORGE_WHISPER_CLI, FORGE_WHISPER_MODEL and a
+// speech WAV in FORGE_WHISPER_WAV); it is skipped otherwise, since the engine is a large download.
 func TestRunTranscribesSpeech(t *testing.T) {
-	cli, model, wav := os.Getenv("BVC_WHISPER_CLI"), os.Getenv("BVC_WHISPER_MODEL"), os.Getenv("BVC_WHISPER_WAV")
+	cli, model, wav := os.Getenv("FORGE_WHISPER_CLI"), os.Getenv("FORGE_WHISPER_MODEL"), os.Getenv("FORGE_WHISPER_WAV")
 	if cli == "" || model == "" || wav == "" {
-		t.Skip("set BVC_WHISPER_CLI, BVC_WHISPER_MODEL and BVC_WHISPER_WAV to run")
+		t.Skip("set FORGE_WHISPER_CLI, FORGE_WHISPER_MODEL and FORGE_WHISPER_WAV to run")
 	}
 	copyWav := filepath.Join(t.TempDir(), "speech.wav")
 	data, err := os.ReadFile(wav)

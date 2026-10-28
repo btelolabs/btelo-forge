@@ -7,11 +7,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
-	"github.com/btelolabs/btelo-video-cut/internal/render"
-	"github.com/btelolabs/btelo-video-cut/internal/transcribe"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/render"
+	"github.com/btelolabs/btelo-forge/internal/transcribe"
 )
 
 // subtitlePanel is the state of the AI subtitles tab and its running job.

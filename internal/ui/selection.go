@@ -3,7 +3,7 @@ package ui
 import (
 	"slices"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 // The selection is a.sel, the item last picked (or a whole track), plus a.picked: further items picked with

@@ -12,11 +12,11 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/btelolabs/btelo-video-cut/internal/library"
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/project"
-	"github.com/btelolabs/btelo-video-cut/internal/render"
-	"github.com/btelolabs/btelo-video-cut/internal/transcribe"
+	"github.com/btelolabs/btelo-forge/internal/library"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/render"
+	"github.com/btelolabs/btelo-forge/internal/transcribe"
 )
 
 // rememberTracks keeps search results so a tool can add one by its key later.

@@ -6,12 +6,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/btelolabs/btelo-video-cut/internal/capture"
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/media"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
-	"github.com/btelolabs/btelo-video-cut/internal/render"
-	"github.com/btelolabs/btelo-video-cut/internal/transcribe"
+	"github.com/btelolabs/btelo-forge/internal/capture"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/render"
+	"github.com/btelolabs/btelo-forge/internal/transcribe"
 )
 
 // Language is an interface language; the source strings are English.

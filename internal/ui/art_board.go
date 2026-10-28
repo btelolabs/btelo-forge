@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/btelolabs/btelo-video-cut/internal/gfx"
-	"github.com/btelolabs/btelo-video-cut/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
 // The artboard tool, as Affinity Designer's: a drag on the canvas makes an artboard, a fixed-size area exported as

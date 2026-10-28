@@ -13,7 +13,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/btelolabs/btelo-video-cut/internal/locale"
+	"github.com/btelolabs/btelo-forge/internal/locale"
 )
 
 // DefaultJSON is the built-in list of speech engines, models and languages.

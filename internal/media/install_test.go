@@ -18,7 +18,7 @@ import (
 )
 
 // The test binary stands in for ffmpeg: started with fakeVersion set, it prints that version and exits.
-const fakeVersion = "BVC_FAKE_FFMPEG_VERSION"
+const fakeVersion = "FORGE_FAKE_FFMPEG_VERSION"
 
 func TestMain(m *testing.M) {
 	if v := os.Getenv(fakeVersion); v != "" {
