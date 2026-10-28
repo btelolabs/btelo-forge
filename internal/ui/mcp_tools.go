@@ -41,7 +41,7 @@ func (a *App) edit(fn func(p *project.Project) error) error {
 
 func (a *App) addEditTools(s *mcp.Server) {
 	type openIn struct {
-		Path      string  `json:"path" jsonschema:"absolute path of the video file"`
+		Path      string  `json:"path" jsonschema:"absolute path of the video file, or of a .btcut edit file (which always opens in a tab of its own)"`
 		Placement string  `json:"placement,omitempty" jsonschema:"new_tab (default when the active tab is empty), append (end of the main track) or upper (over the picture from at)"`
 		At        float64 `json:"at,omitempty" jsonschema:"start time for placement upper"`
 	}
@@ -68,6 +68,10 @@ func (a *App) addEditTools(s *mcp.Server) {
 				}
 				if a.opening != "" {
 					return nil, errors.New("another file is still opening")
+				}
+				if isEditFile(in.Path) {
+					a.openEditFile(in.Path)
+					return nil, nil
 				}
 				a.openVideo(in.Path, in.Placement == "upper")
 				return nil, nil

@@ -420,13 +420,22 @@ func (d *Doc) drawStyled(dst *image.RGBA, n *Node, r image.Rectangle, l int) {
 	pad := int(math.Ceil(float64(st.reach())*scale)) + 2
 	wide := r.Inset(-pad)
 	content := readLayer(n, wide, l)
-	if n.activeMask() != nil {
-		// The mask shapes the layer, and so its effects, as Photoshop's does by default.
-		m := n.Mask.ReadLevel(l, wide)
-		for i := 0; i < len(content.Pix); i += 4 {
-			k := uint32(m.Pix[i/4])
-			for c := range 4 {
-				content.Pix[i+c] = uint8(mul8(uint32(content.Pix[i+c]), k))
+	if n.activeMask() != nil || n.Clip != nil {
+		// The masks shape the layer, and so its effects, as Photoshop's do by default.
+		in, m, fill, hidden := shapeAt(n, wide, l)
+		for y := wide.Min.Y; y < wide.Max.Y; y++ {
+			for x := wide.Min.X; x < wide.Max.X; x++ {
+				k := uint32(fill)
+				switch {
+				case hidden:
+					k = 0
+				case (image.Point{x, y}).In(in) && m != nil:
+					k = uint32(m.Pix[m.PixOffset(x, y)])
+				}
+				i := content.PixOffset(x, y)
+				for c := range 4 {
+					content.Pix[i+c] = uint8(mul8(uint32(content.Pix[i+c]), k))
+				}
 			}
 		}
 	}

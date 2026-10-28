@@ -26,7 +26,7 @@ func (v Vector) ToCurve() Vector {
 func cloneSubpaths(in []Subpath) []Subpath {
 	out := make([]Subpath, len(in))
 	for i, s := range in {
-		out[i] = Subpath{Nodes: append([]PathNode(nil), s.Nodes...), Closed: s.Closed}
+		out[i] = Subpath{Nodes: append([]PathNode(nil), s.Nodes...), Closed: s.Closed, Op: s.Op}
 	}
 	return out
 }
@@ -208,7 +208,11 @@ func (v Vector) DeleteNodes(refs []NodeRef) Vector {
 		gone[r] = true
 	}
 	var paths []Subpath
+	op := OpJoin // the operation of a shape whose first subpath went, which the next of it takes on
 	for si, s := range res.Path {
+		if s.Op != OpJoin {
+			op = s.Op
+		}
 		var kept []PathNode
 		for ni, n := range s.Nodes {
 			if !gone[NodeRef{si, ni}] {
@@ -216,8 +220,12 @@ func (v Vector) DeleteNodes(refs []NodeRef) Vector {
 			}
 		}
 		if len(kept) >= 2 {
-			paths = append(paths, Subpath{Nodes: kept, Closed: s.Closed})
+			paths = append(paths, Subpath{Nodes: kept, Closed: s.Closed, Op: op})
+			op = OpJoin
 		}
+	}
+	if len(paths) > 0 {
+		paths[0].Op = OpJoin
 	}
 	res.Path = paths
 	return res

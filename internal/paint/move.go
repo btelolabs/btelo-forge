@@ -16,10 +16,17 @@ type MoveSession struct {
 	sel    *Mask       // the selection when the move began
 
 	vector *Vector // a vector layer's object as it was, moved whole whatever is selected
+	clip   *Vector // the layer's vector mask as it was, moved with the whole layer
+	group  *Node   // a group, or smart object, as it was, moved whole with everything in it
 }
 
 // BeginMove starts moving the chosen layer, or the selected part of it when something is selected.
 func (d *Doc) BeginMove() (*MoveSession, error) {
+	if g := d.Node(d.Active); g != nil && g.IsGroup() {
+		// A group moves whole, whatever is selected: a smart object so goes to another place, its layers the same,
+		// and an artboard with what is in it.
+		return &MoveSession{d: d, l: g, mark: d.Mark(), group: snapshotTree(g)}, nil
+	}
 	l, err := d.ActiveLayer()
 	if err != nil {
 		return nil, err
@@ -27,7 +34,7 @@ func (d *Doc) BeginMove() (*MoveSession, error) {
 	if l.Adjust != nil {
 		return nil, ErrAdjustmentLayer
 	}
-	m := &MoveSession{d: d, l: l, mark: d.Mark(), vector: l.Vector}
+	m := &MoveSession{d: d, l: l, mark: d.Mark(), vector: l.Vector, clip: l.Clip}
 	if d.Selection == nil || l.Vector != nil {
 		return m, nil // a whole layer, a text layer as text, moves by shifting it
 	}
@@ -84,6 +91,21 @@ func (m *MoveSession) To(dx, dy int) image.Rectangle {
 	prev := m.off
 	m.off = off
 	l := m.l
+	if m.group != nil {
+		before, bounded := contentReach(l)
+		moved := snapshotTree(m.group)
+		moveNode(moved, dx, dy)
+		*l = *moved
+		after, _ := contentReach(l)
+		if !bounded {
+			return everywhere // an adjustment in it changes all under it
+		}
+		return before.Union(after)
+	}
+	if m.clip != nil && (m.vector != nil || m.sel == nil) {
+		// It goes with the whole layer; what it shows lies within the layer's reach, which is redrawn.
+		l.Clip = m.clip.Transformed(Translate(float64(dx), float64(dy)))
+	}
 	if m.vector != nil {
 		before := reachOfNode(l)
 		l.Vector = m.vector
@@ -115,8 +137,12 @@ func (m *MoveSession) End() {
 		d.restore(m.mark.s) // nothing moved: not even the text became pixels
 		return
 	}
-	if m.sel == nil {
+	if m.sel == nil && m.group == nil {
 		shiftText(l, m.off.X, m.off.Y)
 	}
-	d.Commit("Move", m.mark)
+	name := "Move"
+	if l.IsBoard() {
+		name = "Move artboard"
+	}
+	d.Commit(name, m.mark)
 }

@@ -53,6 +53,17 @@ func goKey(code C.int, chars *C.char, mods C.int) {
 	}
 }
 
+//export goKeyUp
+func goKeyUp(code C.int, chars *C.char) {
+	w := current
+	if w == nil {
+		return
+	}
+	if vk, ok := keyVK(int(code), C.GoString(chars)); ok {
+		w.input.next.Up = append(w.input.next.Up, vk)
+	}
+}
+
 //export goKeyCode
 func goKeyCode(vk, mods C.int) {
 	if w := current; w != nil {

@@ -182,7 +182,7 @@ func (a *App) drawBox(ad *artDoc, vp gfx.Rect, b xbox, centre bool) {
 	}
 	if centre {
 		x, y := ad.toScreen(vp, [2]float64{b.cx, b.cy})
-		u.c.RoundOutline(gfx.Rect{X: x - s, Y: y - s, W: 2 * s, H: 2 * s}, s, w, colWhite)
+		u.c.Outline(gfx.Rect{X: x - s, Y: y - s, W: 2 * s, H: 2 * s}, w, colWhite)
 		u.c.Line(x-s*1.6, y, x+s*1.6, y, w, colWhite)
 		u.c.Line(x, y-s*1.6, x, y+s*1.6, w, colWhite)
 	}
@@ -219,7 +219,7 @@ func (a *App) beginTransform(ad *artDoc) {
 	}
 	s, err := ad.d.BeginTransform()
 	if err != nil {
-		a.toast(a.describe(err), true)
+		a.artFailed(ad, err)
 		return
 	}
 	b := boxOf(s.Bounds())
@@ -313,7 +313,7 @@ func (a *App) showTransform(ad *artDoc) {
 		xf.shownQuad, xf.shownWarp = xf.quad, xf.warp
 		changed, err := xf.s.SetMesh(xf.meshOf(), xfSteps[xf.mode])
 		if err != nil {
-			a.toast(a.describe(err), true)
+			a.artFailed(ad, err)
 			return
 		}
 		ad.touched(changed)
@@ -448,198 +448,6 @@ func (a *App) transformFields(ad *artDoc, x float32, r gfx.Rect, scaleW, scaleH 
 		x += u.px(32)
 	}
 	return x
-}
-
-// ---- The crop tool
-
-// cropRatios are the crop tool's proportions; 0 is free and -1 the picture's own.
-var (
-	cropRatios     = []float64{0, -1, 1, 4.0 / 3, 3.0 / 2, 16.0 / 9, 9.0 / 16}
-	cropRatioNames = msgs("Free", "Original ratio", "1:1 (square)", "4:3", "3:2", "16:9", "9:16")
-)
-
-// cropEdit is the crop tool's box, which starts on the whole picture.
-type cropEdit struct {
-	box, start xbox
-	grab       int
-	from       [2]float64
-	frame      image.Rectangle // the frame the box was made for
-}
-
-// cropRatio is the proportion the crop box keeps, or 0.
-func (a *App) cropRatio(ad *artDoc) float64 {
-	i := a.settings.Paint.CropRatio
-	if i <= 0 || i >= len(cropRatios) {
-		return 0
-	}
-	if cropRatios[i] < 0 {
-		e := cropExtent(ad)
-		return float64(e.Dx()) / float64(e.Dy())
-	}
-	return cropRatios[i]
-}
-
-// cropExtent is what the crop box starts on: the frame, or else what is painted, or else what is on screen.
-func cropExtent(ad *artDoc) image.Rectangle {
-	if r := ad.d.Frame; !r.Empty() {
-		return r
-	}
-	if r := ad.d.Bounds(); !r.Empty() {
-		return r
-	}
-	return ad.d.View
-}
-
-// syncCrop gives the crop tool its box: the frame, again whenever the frame changed.
-func (a *App) syncCrop(ad *artDoc) {
-	if ad.crop != nil && ad.crop.frame == ad.d.Frame {
-		return
-	}
-	ad.crop = &cropEdit{box: boxOf(cropExtent(ad)), grab: grabNone, frame: ad.d.Frame}
-	a.fitCropRatio(ad)
-}
-
-// fitCropRatio shrinks the crop box about its middle to the chosen proportion.
-func (a *App) fitCropRatio(ad *artDoc) {
-	ratio := a.cropRatio(ad)
-	if ratio == 0 || ad.crop == nil {
-		return
-	}
-	b := &ad.crop.box
-	if math.Abs(b.w)/math.Abs(b.h) > ratio {
-		b.w = math.Copysign(math.Abs(b.h)*ratio, b.w)
-	} else {
-		b.h = math.Copysign(math.Abs(b.w)/ratio, b.h)
-	}
-}
-
-// cropPointer drags the crop box: its handles, the inside to move it, or a new box from outside it; a double
-// click inside crops.
-func (a *App) cropPointer(ad *artDoc, vp gfx.Rect) {
-	u := &a.u
-	const id = "art/view"
-	c := ad.crop
-	ratio := a.cropRatio(ad)
-	if u.hover(id, vp) {
-		u.cursor = grabCursor(a.boxGrab(ad, vp, c.box, false))
-	}
-	if u.press(id, vp) {
-		g := a.boxGrab(ad, vp, c.box, false)
-		if g == grabMove && u.double {
-			u.active = ""
-			a.applyCrop(ad)
-			return
-		}
-		if g == grabNone {
-			g = grabNew
-		}
-		c.grab, c.start, c.from = g, c.box, ad.cursor
-	}
-	if u.dragging(id) {
-		p := ad.cursor
-		switch g := c.grab; g {
-		case grabMove:
-			c.box.cx, c.box.cy = c.start.cx+p[0]-c.from[0], c.start.cy+p[1]-c.from[1]
-		case grabNew:
-			w, h := p[0]-c.from[0], p[1]-c.from[1]
-			if ratio > 0 {
-				h = math.Copysign(math.Abs(w)/ratio, h)
-			} else if u.shift {
-				h = math.Copysign(math.Abs(w), h)
-			}
-			c.box = xbox{cx: c.from[0] + w/2, cy: c.from[1] + h/2, w: atLeast(math.Abs(w), 1), h: atLeast(math.Abs(h), 1)}
-		case grabNone:
-		default:
-			corner := boxHandles[g][0] != 0 && boxHandles[g][1] != 0
-			b := c.start.resize(g, p, u.alt, ratio > 0 || corner && u.shift)
-			b.w, b.h = math.Abs(b.w), math.Abs(b.h) // a crop box is never mirrored
-			c.box = b
-		}
-	}
-	if u.letGo(id) {
-		if c.grab == grabNew && !u.drag.moved {
-			c.box = c.start // a click outside the box leaves it
-		}
-		c.grab = grabNone
-	}
-}
-
-// applyCrop crops the picture to the box.
-func (a *App) applyCrop(ad *artDoc) {
-	if ad.crop == nil {
-		return
-	}
-	r := ad.crop.box.rect()
-	if r == ad.d.Frame {
-		return
-	}
-	a.artRun(ad, func() error { return ad.d.Crop(r, !a.settings.Paint.CropKeep) })
-	ad.crop = nil
-	ad.fitView()
-}
-
-// cropKeys are the crop tool's keys: Enter crops, Esc puts the box back on the whole picture.
-func (a *App) cropKeys(ad *artDoc, k Key) bool {
-	switch k.Code {
-	case keyEnter:
-		a.applyCrop(ad)
-	case keyEscape:
-		ad.crop = nil
-	default:
-		return false
-	}
-	return true
-}
-
-// drawCropOverlay darkens what the crop will remove and shows the box with a rule of thirds.
-func (a *App) drawCropOverlay(ad *artDoc, vp gfx.Rect) {
-	u := &a.u
-	b := ad.crop.box
-	x0, y0 := ad.toScreen(vp, b.at(-1, -1))
-	x1, y1 := ad.toScreen(vp, b.at(1, 1))
-	x0, x1 = min(x0, x1), max(x0, x1)
-	y0, y1 = min(y0, y1), max(y0, y1)
-	shade := gfx.Alpha(colBlack, 0.55)
-	u.c.Fill(gfx.Rect{X: vp.X, Y: vp.Y, W: vp.W, H: max(0, y0-vp.Y)}, shade)
-	u.c.Fill(gfx.Rect{X: vp.X, Y: y1, W: vp.W, H: max(0, vp.Bottom()-y1)}, shade)
-	u.c.Fill(gfx.Rect{X: vp.X, Y: y0, W: max(0, x0-vp.X), H: y1 - y0}, shade)
-	u.c.Fill(gfx.Rect{X: x1, Y: y0, W: max(0, vp.Right()-x1), H: y1 - y0}, shade)
-	third := gfx.Alpha(colWhite, 0.35)
-	for i := float32(1); i < 3; i++ {
-		u.c.Fill(gfx.Rect{X: x0 + (x1-x0)*i/3, Y: y0, W: max(1, u.px(1)), H: y1 - y0}, third)
-		u.c.Fill(gfx.Rect{X: x0, Y: y0 + (y1-y0)*i/3, W: x1 - x0, H: max(1, u.px(1))}, third)
-	}
-	a.drawBox(ad, vp, b, false)
-}
-
-// drawCropOptions is the crop tool's options bar: the proportion, the size, whether cropped pixels are deleted,
-// and reset, cancel and crop.
-func (a *App) drawCropOptions(ad *artDoc, r gfx.Rect) {
-	u := &a.u
-	p := &a.settings.Paint
-	x := r.X
-	a.dropdown("art/crop/ratio", gfx.Rect{X: x, Y: r.Y, W: u.px(140), H: r.H}, u.ts(cropRatioNames), p.CropRatio, nil, func(i int) {
-		p.CropRatio = i
-		a.saveSettings()
-		a.fitCropRatio(ad)
-	})
-	x += u.px(150)
-	cr := ad.crop.box.rect()
-	u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: u.px(120), H: r.H}, fmt.Sprintf("%d × %d px", cr.Dx(), cr.Dy()), colText, 0)
-	x += u.px(124)
-	if on := u.checkbox("art/crop/delete", gfx.Rect{X: x, Y: r.Y, W: u.px(190), H: r.H}, u.t("Delete cropped pixels"), !p.CropKeep); on == p.CropKeep {
-		p.CropKeep = !on
-		a.saveSettings()
-	}
-	if u.iconButton("art/crop/reset", gfx.Rect{X: r.Right() - u.px(100), Y: r.Y, W: u.px(30), H: r.H}, icReset, u.t("Reset the crop box"), false, true) {
-		ad.crop = nil
-	}
-	if u.iconButton("art/crop/cancel", gfx.Rect{X: r.Right() - u.px(66), Y: r.Y, W: u.px(30), H: r.H}, icCancel, withKey(u.t("Cancel the crop"), "Esc"), false, true) {
-		ad.crop = nil
-	}
-	if u.iconButton("art/crop/apply", gfx.Rect{X: r.Right() - u.px(32), Y: r.Y, W: u.px(30), H: r.H}, icCheck, withKey(u.t("Crop"), "Enter"), true, true) {
-		a.applyCrop(ad)
-	}
 }
 
 // ---- The Image menu's dialogs and Select › Feather
@@ -793,11 +601,11 @@ func (a *App) drawAnchor(r gfx.Rect) {
 		bg := colSurface
 		switch {
 		case i == f.anchor:
-			bg = colAccent
+			bg = colPrimary
 		case u.hover(id, c):
 			bg = colSurfaceHi
 		}
-		u.c.RoundRect(c, u.px(4), bg)
+		u.c.Fill(c, bg)
 		if u.clicked(id, c) {
 			f.anchor = i
 		}

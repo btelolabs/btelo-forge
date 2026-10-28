@@ -224,6 +224,9 @@ func (a *App) addMediaTools(s *mcp.Server) {
 
 	tool(s, a, "export_status", "Progress of the running export, or the outcome of the last one.", func(none) (any, error) {
 		if j := a.export; j != nil {
+			if j.progress == render.Analysing {
+				return map[string]any{"running": true, "output": j.out, "progress": 0, "stage": "choosing the GIF's colours"}, nil
+			}
 			return map[string]any{"running": true, "output": j.out, "progress": j.progress}, nil
 		}
 		st := map[string]any{"running": false, "output": a.last.out}

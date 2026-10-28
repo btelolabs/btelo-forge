@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -118,6 +119,42 @@ func TestEveryMessageIsTranslated(t *testing.T) {
 	for s, z := range zh {
 		if strings.Count(s, "%") != strings.Count(z, "%") {
 			t.Errorf("%q and its translation %q have different format verbs", s, z)
+			continue
+		}
+		// Filled in with values of the kinds the English asks for, the translation must format cleanly, also where
+		// it takes them in another order.
+		if args := sampleArgs(s); len(args) > 0 {
+			if out := fmt.Sprintf(z, args...); strings.Contains(out, "%!") {
+				t.Errorf("the translation %q of %q formats as %q", z, s, out)
+			}
 		}
 	}
+}
+
+// sampleArgs are values of the kinds a format's verbs take, in order.
+func sampleArgs(format string) []any {
+	var args []any
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			continue
+		}
+		j := i + 1
+		for j < len(format) && strings.IndexByte("+-# 0123456789.[]*", format[j]) >= 0 {
+			j++
+		}
+		if j >= len(format) {
+			break
+		}
+		switch format[j] {
+		case '%':
+		case 'd', 'x', 'c':
+			args = append(args, 1)
+		case 'f', 'g', 'e':
+			args = append(args, 1.5)
+		default:
+			args = append(args, "x")
+		}
+		i = j
+	}
+	return args
 }

@@ -27,7 +27,8 @@ var (
 // Use makes every command run the given programs.
 func Use(t Tools) { chosen.Store(&t) }
 
-// tool is the path of ffmpeg or ffprobe: the pair given to Use, or else whatever is next to the program or on PATH.
+// tool is the path of ffmpeg or ffprobe: the pair given to Use, or else, before the app has chosen (in tests and
+// tools), whatever is next to the program or on PATH.
 func tool(name string) (string, error) {
 	if t := chosen.Load(); t != nil {
 		if name == "ffprobe" {
@@ -37,7 +38,7 @@ func tool(name string) (string, error) {
 	}
 	searchOnce.Do(func() {
 		searched = map[string]string{}
-		for _, t := range candidates(&ToolsConfig{}, "") {
+		for _, t := range candidates(&ToolsConfig{System: true}, "") {
 			if fileExists(t.FFmpeg) && fileExists(t.FFprobe) {
 				searched["ffmpeg"], searched["ffprobe"] = t.FFmpeg, t.FFprobe
 				return
@@ -63,6 +64,8 @@ func Command(ctx context.Context, name string, args ...string) (*exec.Cmd, error
 	}
 	cmd := exec.CommandContext(ctx, path, args...)
 	proc.Hide(cmd)
+	// Cancelling ends whatever the program started too, should it be a launcher.
+	cmd.Cancel = func() error { return proc.KillTree(cmd.Process) }
 	return cmd, nil
 }
 

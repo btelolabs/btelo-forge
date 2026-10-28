@@ -38,9 +38,11 @@ type Input struct {
 	Pointer  []PointerEvent
 	Wheel    float32
 	Keys     []KeyEvent
+	Up       []uint16 // the keys let go, as virtual-key codes; modifiers alone are not reported
 	Typed    []rune
 	Dropped  []string
-	Hotkeys  []int // indexes, in the list given to SetHotkeys, of the hotkeys pressed
+	Opened   []string // files another start of the app handed over (TakeFiles)
+	Hotkeys  []int    // indexes, in the list given to SetHotkeys, of the hotkeys pressed
 	Woken    bool
 	Inactive bool // the window does not have the keyboard focus
 	Ctrl     bool
@@ -112,7 +114,10 @@ func (w *Window) mouse(msg uint32, wp, lp uintptr) bool {
 func (w *Window) key(msg uint32, wp uintptr) bool {
 	switch msg {
 	case 0x0100, 0x0104: // WM_KEYDOWN / WM_SYSKEYDOWN
-	case 0x0101, 0x0105:
+	case 0x0101, 0x0105: // WM_KEYUP / WM_SYSKEYUP
+		if vk := uint16(wp); vk != 0xe5 && vk != 0x12 && vk != 0x10 && vk != 0x11 {
+			w.input.Up = append(w.input.Up, vk)
+		}
 		return msg == 0x0101
 	default:
 		return false
@@ -239,12 +244,13 @@ func (w *Window) TextInput(on bool, x, y, height float32) {
 type Cursor uintptr
 
 const (
-	Arrow   Cursor = 32512
-	IBeam   Cursor = 32513
-	Wait    Cursor = 32514
-	SizeWE  Cursor = 32644
-	SizeAll Cursor = 32646
-	Hand    Cursor = 32649
+	Arrow    Cursor = 32512
+	IBeam    Cursor = 32513
+	Wait     Cursor = 32514
+	SizeNWSE Cursor = 32642
+	SizeWE   Cursor = 32644
+	SizeAll  Cursor = 32646
+	Hand     Cursor = 32649
 )
 
 // SetCursor changes the cursor shown over the client area.

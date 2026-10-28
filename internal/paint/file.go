@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"io"
 	"slices"
+	"strings"
 )
 
 // Ext is the extension of a saved picture with its layers.
@@ -23,13 +24,29 @@ var ErrNotACanvas = errors.New("not a canvas file")
 // all losslessly compressed. Versions 1 and 2 had a picture of a fixed size, whose layers were rectangles in
 // layer-<id>.rgba, masks in mask-<id>.a and the selection, the picture's size, in selection.a (version 1 had no
 // masks and a rectangular selection); they are still read, their size becoming the frame. Version 4 added the
-// artboards, version 5 adjustment layers; older files are read the same way, without them.
-const fileVersion = 5
+// artboards, version 5 adjustment layers, version 6 vector masks and made the artboards groups (versions 4 and 5
+// listed them apart from the layers; each becomes a group of the top-level layers lying wholly on it); older files
+// are read the same way, without what they lack.
+const fileVersion = 6
 
-// fileBoard is an artboard: its rectangle and its background as R, G, B, A.
+// fileBoard is an artboard of versions 4 and 5: its rectangle and its background as R, G, B, A.
 type fileBoard struct {
 	ID   int      `json:"id"`
 	Name string   `json:"name"`
+	Rect [4]int   `json:"rect"`
+	Fill [4]uint8 `json:"fill"`
+}
+
+// fileSmart is what makes a group a smart object: its link id, its offset and its shared layers' version. Its
+// layers are saved as any group's, so a file always holds what its smart objects show.
+type fileSmart struct {
+	ID      string `json:"id"`
+	Offset  [2]int `json:"offset,omitempty"`
+	Version int64  `json:"version"`
+}
+
+// fileFrame is what makes a group an artboard: its rectangle and its background as R, G, B, A.
+type fileFrame struct {
 	Rect [4]int   `json:"rect"`
 	Fill [4]uint8 `json:"fill"`
 }
@@ -55,6 +72,9 @@ type fileNode struct {
 	MaskTiles *filePlane  `json:"maskTiles,omitempty"`
 	MaskOff   bool        `json:"maskOff,omitempty"`
 	Text      *Text       `json:"text,omitempty"` // a text layer's words; its pixels are saved as for any layer
+	Clip      *Vector     `json:"clip,omitempty"`
+	Board     *fileFrame  `json:"board,omitempty"`
+	Smart     *fileSmart  `json:"smart,omitempty"`
 	Group     bool        `json:"group,omitempty"`
 	Open      bool        `json:"open,omitempty"`
 	Children  []fileNode  `json:"children,omitempty"`
@@ -73,8 +93,11 @@ type fileDoc struct {
 	Active   int         `json:"active"`
 	NextID   int         `json:"nextId"`
 	EditMask bool        `json:"editMask,omitempty"`
-	Sel      *filePlane  `json:"selectionTiles,omitempty"`
-	Layers   []fileNode  `json:"layers"`
+	// A smart object's own file: its link, its top level being the smart object, and its name.
+	Smart     *fileSmart `json:"smart,omitempty"`
+	SmartName string     `json:"smartName,omitempty"`
+	Sel       *filePlane `json:"selectionTiles,omitempty"`
+	Layers    []fileNode `json:"layers"`
 
 	// Versions 1 and 2.
 	W         int     `json:"width,omitempty"`
@@ -116,7 +139,13 @@ func (d *Doc) Snapshot() Snapshot {
 	var conv func(n *Node) fileNode
 	conv = func(n *Node) fileNode {
 		f := fileNode{ID: n.ID, Name: n.Name, Visible: n.Visible, Opacity: n.Opacity, Blend: n.Blend, LockAlpha: n.LockAlpha,
-			Group: n.IsGroup(), Open: n.Open, Text: n.Text, MaskOff: n.MaskOff, Style: n.Style}
+			Group: n.IsGroup(), Open: n.Open, Text: n.Text, MaskOff: n.MaskOff, Style: n.Style, Clip: n.Clip}
+		if s := n.Smart; s != nil {
+			f.Smart = &fileSmart{ID: s.ID, Offset: [2]int{s.Offset.X, s.Offset.Y}, Version: s.Version}
+		}
+		if b := n.Board; b != nil {
+			f.Board = &fileFrame{Rect: *rectOf(b.Rect), Fill: [4]uint8{b.Fill.R, b.Fill.G, b.Fill.B, b.Fill.A}}
+		}
 		if n.Mask != nil {
 			f.MaskTiles = s.planeOf(fmt.Sprintf("mask-%d", n.ID), n.Mask.Snapshot().p)
 		}
@@ -140,8 +169,8 @@ func (d *Doc) Snapshot() Snapshot {
 	if !d.Frame.Empty() {
 		s.doc.Frame = rectOf(d.Frame)
 	}
-	for _, b := range d.Boards {
-		s.doc.Boards = append(s.doc.Boards, fileBoard{ID: b.ID, Name: b.Name, Rect: *rectOf(b.Rect), Fill: [4]uint8{b.Fill.R, b.Fill.G, b.Fill.B, b.Fill.A}})
+	if sm := d.Root.Smart; sm != nil {
+		s.doc.Smart, s.doc.SmartName = &fileSmart{ID: sm.ID, Version: sm.Version}, d.Root.Name
 	}
 	if d.Selection != nil {
 		s.doc.Sel = s.planeOf("selection", d.Selection.Snapshot().p)
@@ -271,7 +300,9 @@ func Load(r io.ReaderAt, size int64) (*Doc, error) {
 	var conv func(f fileNode) (*Node, error)
 	conv = func(f fileNode) (*Node, error) {
 		if seen[f.ID] || f.ID <= 0 || f.Blend < 0 || f.Blend >= blendCount || !f.Group && f.Pixels == nil && f.Vector == nil && f.Adjust == nil ||
-			f.Vector != nil && !f.Vector.valid() || f.Adjust != nil && !f.Adjust.valid() || f.Style != nil && !f.Style.valid() {
+			f.Vector != nil && !f.Vector.valid() || f.Adjust != nil && !f.Adjust.valid() || f.Style != nil && !f.Style.valid() ||
+			f.Clip != nil && !f.Clip.valid() || f.Board != nil && !f.Group ||
+			f.Smart != nil && (!f.Group || f.Board != nil || !validLinkID(strings.ToUpper(f.Smart.ID)) || abs(f.Smart.Offset[0]) > maxTileReach*TileSize || abs(f.Smart.Offset[1]) > maxTileReach*TileSize) {
 			return nil, fmt.Errorf("%w: layer %d", ErrNotACanvas, f.ID)
 		}
 		seen[f.ID] = true
@@ -281,7 +312,17 @@ func Load(r io.ReaderAt, size int64) (*Doc, error) {
 		if !f.Group && f.Adjust == nil && !f.Style.empty() {
 			n.Style = f.Style
 		}
-		n.Text = checkedText(f)
+		n.Text, n.Clip = checkedText(f), f.Clip
+		if s := f.Smart; s != nil {
+			n.Smart = &SmartLink{ID: strings.ToUpper(s.ID), Offset: image.Pt(s.Offset[0], s.Offset[1]), Version: s.Version}
+		}
+		if fb := f.Board; fb != nil {
+			r, err := boardRect(fb.Rect)
+			if err != nil {
+				return nil, fmt.Errorf("%w: artboard %d", ErrNotACanvas, f.ID)
+			}
+			n.Board = &BoardFrame{Rect: r, Fill: color.NRGBA{fb.Fill[0], fb.Fill[1], fb.Fill[2], fb.Fill[3]}}
+		}
 		if f.MaskTiles != nil {
 			p, err := loadPlane(fmt.Sprintf("mask-%d", f.ID), f.MaskTiles, 1)
 			if err != nil {
@@ -318,17 +359,30 @@ func Load(r io.ReaderAt, size int64) (*Doc, error) {
 	if err := d.loadTree(fd, conv); err != nil {
 		return nil, err
 	}
+	if !d.boardsAtTop() {
+		return nil, fmt.Errorf("%w: an artboard inside a group", ErrNotACanvas)
+	}
+	if s := fd.Smart; s != nil {
+		id := strings.ToUpper(s.ID)
+		if !validLinkID(id) || len(d.Boards()) > 0 || len(fd.Boards) > 0 {
+			return nil, fmt.Errorf("%w: a smart object's file", ErrNotACanvas)
+		}
+		d.Root.Smart, d.Root.Name = &SmartLink{ID: id, Version: s.Version}, fd.SmartName
+	}
 	if len(fd.Boards) > maxBoards {
 		return nil, fmt.Errorf("%w: %d artboards", ErrNotACanvas, len(fd.Boards))
 	}
-	for _, fb := range fd.Boards {
-		r, err := validBoard(rectFrom(&fb.Rect))
-		if seen[fb.ID] || fb.ID <= 0 || err != nil || abs(r.Min.X) > maxTileReach*TileSize || abs(r.Min.Y) > maxTileReach*TileSize {
+	for i := len(fd.Boards) - 1; i >= 0; i-- { // versions 4 and 5 list them bottom first; each goes under the rest
+		fb := fd.Boards[i]
+		r, err := boardRect(fb.Rect)
+		if seen[fb.ID] || fb.ID <= 0 || err != nil {
 			return nil, fmt.Errorf("%w: artboard %d", ErrNotACanvas, fb.ID)
 		}
 		seen[fb.ID] = true
 		d.nextID = max(d.nextID, fb.ID)
-		d.Boards = append(d.Boards, Board{ID: fb.ID, Name: fb.Name, Rect: r, Fill: color.NRGBA{fb.Fill[0], fb.Fill[1], fb.Fill[2], fb.Fill[3]}})
+		n := &Node{ID: fb.ID, Name: fb.Name, Visible: true, Opacity: 1, Blend: BlendPassThrough, Open: true, Children: []*Node{},
+			Board: &BoardFrame{Rect: r, Fill: color.NRGBA{fb.Fill[0], fb.Fill[1], fb.Fill[2], fb.Fill[3]}}}
+		d.placeBoard(n, true) // its background was drawn under every layer
 	}
 	if fd.Sel != nil {
 		p, err := loadPlane("selection", fd.Sel, 1)
@@ -337,8 +391,18 @@ func Load(r io.ReaderAt, size int64) (*Doc, error) {
 		}
 		d.Selection = &Mask{p: p}
 	}
+	d.settleSmart()
 	d.settleLoaded()
 	return d, nil
+}
+
+// boardRect is an artboard's rectangle read from a file, when it makes sense.
+func boardRect(a [4]int) (image.Rectangle, error) {
+	r, err := validBoard(rectFrom(&a))
+	if err == nil && (abs(r.Min.X) > maxTileReach*TileSize || abs(r.Min.Y) > maxTileReach*TileSize) {
+		err = ErrTooBig
+	}
+	return r, err
 }
 
 // checkedText is a layer's text when it makes sense; otherwise the layer is left as the pixels it was drawn as.
@@ -370,7 +434,7 @@ func (d *Doc) loadTree(fd fileDoc, conv func(fileNode) (*Node, error)) error {
 // settleLoaded chooses a layer that exists and leaves mask editing only for a layer with a mask.
 func (d *Doc) settleLoaded() {
 	if d.Node(d.Active) == nil {
-		d.Active = d.Layers()[0].ID
+		d.Active = d.someNode()
 	}
 	if n := d.Node(d.Active); n == nil || n.Mask == nil {
 		d.EditMask = false

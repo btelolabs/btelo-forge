@@ -9,17 +9,20 @@ import (
 // historyNames are the names the picture gives its steps, which the History panel shows translated;
 // TestEveryHistoryStepIsNamed keeps the list complete.
 var historyNames = msgsIn("history",
-	"Add artboard", "Add layer mask", "Add node", "Add noise", "Add shape", "Adjustment", "Apply layer mask",
-	"Artboard", "Blend mode", "Blur", "Boolean", "Brightness/Contrast", "Brush", "Burn", "Canvas size", "Clear",
-	"Clone stamp", "Convert to curves", "Crop", "Curves", "Cut", "Delete artboard", "Delete layer", "Delete layer mask",
-	"Delete node", "Desaturate", "Deselect", "Disable layer mask", "Distort", "Dodge", "Duplicate layer", "Edit text",
-	"Eraser", "Feather", "Fill", "Flatten", "Flip", "Flip canvas", "Free transform", "Gaussian blur", "Gradient",
-	"Group", "Hue/Saturation", "Image size", "Inverse", "Invert", "Layer opacity", "Layer style", "Levels",
-	"Lock transparent pixels", "Merge down", "Merge group", "Mosaic", "Move", "Move artboard", "Move handle",
-	"Move layer", "Move node", "New adjustment layer", "New group", "New layer", "Paint bucket", "Paste", "Pen",
-	"Pencil", "Perspective", "Posterize", "Rasterize", "Rasterize type", "Rename layer", "Reselect", "Reveal all",
-	"Rotate", "Rotate canvas", "Select", "Sharp node", "Sharpen", "Show or hide layer", "Skew", "Smooth node", "Smudge",
-	"Sponge", "Stroke", "Text", "Threshold", "Ungroup", "Unsharp mask", "Warp")
+	"Add artboard", "Add layer mask", "Add node", "Add noise", "Add shape", "Add vector mask", "Adjustment",
+	"Apply layer mask", "Artboard", "Blend mode", "Blur", "Boolean", "Break the link", "Brightness/Contrast", "Brush",
+	"Burn", "Canvas size", "Clear", "Clone stamp", "Combine shapes", "Convert to curves", "Convert to group", "Convert to smart object",
+	"Crop", "Curves", "Cut", "Delete artboard", "Delete layer", "Delete layer mask", "Delete node",
+	"Delete vector mask", "Desaturate", "Deselect", "Disable layer mask", "Distort", "Dodge", "Duplicate layer",
+	"Edit text", "Eraser", "Exclude shape", "Expand shapes", "Feather", "Fill", "Flatten", "Flip", "Flip canvas",
+	"Free transform", "Gaussian blur", "Gradient", "Group", "Hue/Saturation", "Image size", "Intersect shape",
+	"Inverse", "Invert", "Layer opacity", "Layer style", "Levels", "Lock transparent pixels", "Mark as slice", "Mask gradient",
+	"Merge down", "Merge group", "Mosaic", "Move", "Move artboard", "Move handle", "Move layer", "Move node",
+	"New adjustment layer", "New group", "New layer", "New vector layer", "Paint bucket", "Paste", "Pen", "Pencil", "Perspective",
+	"Posterize", "Rasterize", "Rasterize type", "Rasterize vector mask", "Rename layer", "Reselect", "Reveal all",
+	"Rotate", "Rotate canvas", "Select", "Shape operation", "Sharp node", "Sharpen", "Show or hide layer", "Skew",
+	"Smooth node", "Smudge", "Sponge", "Stroke", "Subtract shape", "Swap fill and stroke", "Text", "Threshold",
+	"Ungroup", "Unmark as slice", "Unsharp mask", "Update smart object", "Warp")
 
 // The side panel's lower pages, as Photoshop's Layers and History panels sharing a place.
 const (
@@ -41,7 +44,7 @@ func (a *App) drawSideTabs(r gfx.Rect) float32 {
 		switch {
 		case a.sidePage == i:
 			col = colText
-			u.c.Fill(gfx.Rect{X: tr.X + u.px(4), Y: tr.Bottom() - u.px(2), W: tr.W - u.px(8), H: u.px(2)}, colAccent)
+			u.c.Fill(gfx.Rect{X: tr.X + u.px(4), Y: tr.Bottom() - u.px(2), W: tr.W - u.px(8), H: u.px(2)}, colText)
 		case u.hover(id, tr):
 			col = colText
 			u.cursor = CursorHand
@@ -62,7 +65,7 @@ func (a *App) drawHistory(ad *artDoc, r gfx.Rect) {
 	steps, done := ad.d.History()
 	rowH := u.px(28)
 	area := gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}
-	u.c.RoundRect(area, u.px(8), colBackground)
+	u.c.Fill(area, colBackground)
 	rows := len(steps) + 1
 	// Keep the current step in view.
 	visible := max(int(area.H/rowH), 1)
@@ -79,14 +82,14 @@ func (a *App) drawHistory(ad *artDoc, r gfx.Rect) {
 		col := colText
 		switch {
 		case i == done:
-			u.c.RoundRect(row, u.px(6), gfx.Mix(colSurface, colAccent, 0.45))
+			u.c.Fill(row, colSelected)
 		case i > done:
 			col = colFaint
 			if u.hover(id, row) {
-				u.c.RoundRect(row, u.px(6), colSurface)
+				u.c.Fill(row, colSurface)
 			}
 		case u.hover(id, row):
-			u.c.RoundRect(row, u.px(6), colSurface)
+			u.c.Fill(row, colSurface)
 		}
 		if u.hover(id, row) {
 			u.cursor = CursorHand

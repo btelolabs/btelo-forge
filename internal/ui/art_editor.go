@@ -52,43 +52,57 @@ type imageClipboard interface {
 }
 
 // artTools are the tool box, in Photoshop's order, with Photoshop's keys. Tools with the same key share a place,
-// as Photoshop's do: the key picks the one last used there and Shift with it goes to the next. The eraser's icon is
+// as Photoshop's do: the key picks the one last used there and Shift with it goes to the next. A place left unbound
+// keeps its tools together without a key, which then does something else (R names the layer). The eraser's icon is
 // drawn.
 var artTools = []struct {
-	tool  artTool
-	glyph string
-	key   uint16
+	tool    artTool
+	glyph   string
+	key     uint16
+	unbound bool
 }{
-	{toolMove, icMoveTool, 'V'},
-	{toolBoard, icBoard, 'V'},
-	{toolMarquee, icRectSel, 'M'},
-	{toolLasso, icLasso, 'L'},
-	{toolWand, icWand, 'W'},
-	{toolCrop, icCrop, 'C'},
-	{toolPicker, icPicker, 'I'},
-	{toolBrush, icBrush, 'B'},
-	{toolClone, icClone, 'S'},
-	{toolEraser, "", 'E'},
-	{toolBlur, icBlurTool, 'R'},
-	{toolSharpen, icSharpenTool, 'R'},
-	{toolSmudge, icSmudge, 'R'},
-	{toolDodge, icDodge, 'O'},
-	{toolBurn, icBurn, 'O'},
-	{toolSponge, icSponge, 'O'},
-	{toolGradient, icGradient, 'G'},
-	{toolBucket, icFill, 'G'},
-	{toolText, icText, 'T'},
-	{toolShape, icShapes, 'U'},
-	{toolPen, icPen, 'P'},
-	{toolPencil, icPencil, 'N'},
-	{toolNode, icNodeTool, 'A'},
-	{toolHand, icHand, 'H'},
-	{toolZoom, icZoomTool, 'Z'},
+	{toolMove, icMoveTool, 'V', false},
+	{toolMarquee, icRectSel, 'M', false},
+	{toolLasso, icLasso, 'L', false},
+	{toolWand, icWand, 'W', false},
+	{toolPen, icPen, 'C', false},
+	{toolBoard, icBoard, 'J', false},
+	{toolPicker, icPicker, 'I', false},
+	{toolBrush, icBrush, 'B', false},
+	{toolClone, icClone, 'S', false},
+	{toolEraser, "", 'E', false},
+	{toolBlur, icBlurTool, 'R', true},
+	{toolSharpen, icSharpenTool, 'R', true},
+	{toolSmudge, icSmudge, 'R', true},
+	{toolDodge, icDodge, 'O', false},
+	{toolBurn, icBurn, 'O', false},
+	{toolSponge, icSponge, 'O', false},
+	{toolGradient, icGradient, 'G', false},
+	{toolBucket, icFill, 'G', false},
+	{toolMaskGradient, icMaskGradient, 'Y', false},
+	{toolText, icText, 'T', false},
+	{toolShape, icShapes, 'U', false},
+	{toolPencil, icVectorBrush, 'P', false},
+	{toolNode, icNodeTool, 'A', false},
+	{toolHand, icHand, 'H', false},
+	{toolZoom, icZoomTool, 'Z', false},
 }
 
 // artToolNames name the tools, by artTool.
-var artToolNames = msgs("Move", "Rectangular marquee", "Lasso", "Magic wand", "Crop", "Eyedropper", "Brush", "Eraser", "Hand", "Zoom",
-	"Clone stamp", "Gradient", "Paint bucket", "Shape", "Text", "Pen", "Node", "Artboard", "Pencil", "Dodge", "Burn", "Sponge", "Blur", "Sharpen", "Smudge")
+var artToolNames = msgs("Move", "Rectangular marquee", "Lasso", "Magic wand", "Eyedropper", "Brush", "Eraser", "Hand", "Zoom",
+	"Clone stamp", "Gradient", "Paint bucket", "Shape", "Text", "Pen", "Node", "Artboard", "Vector brush", "Dodge", "Burn", "Sponge", "Blur", "Sharpen", "Smudge",
+	"Mask gradient")
+
+// toolDefaultKeys are the keys that pick tool t before others are chosen in Settings: its place's, unless the place
+// is unbound.
+func toolDefaultKeys(t artTool) []Key {
+	for _, e := range artTools {
+		if e.tool == t && !e.unbound {
+			return keys(key(e.key, ""))
+		}
+	}
+	return nil
+}
 
 // toolPlace is the place of a tool in the tool box, named by the key it has by default.
 func toolPlace(t artTool) uint16 {
@@ -172,6 +186,9 @@ func (a *App) drawArt(r gfx.Rect) {
 	ad := a.art
 	l := a.artLayout(r)
 	u.c.Fill(r, colPanel)
+	if ad == nil {
+		return // the tab strip above closed this tab, or switched from it, in this frame
+	}
 	// Free Transform, typing and the pen's curve end, kept, when anything but the canvas, its options and the menus
 	// is pressed.
 	if u.pressed && !u.blocked && !l.view.Contains(u.pressX, u.pressY) && !l.bar.Contains(u.pressX, u.pressY) &&
@@ -181,9 +198,6 @@ func (a *App) drawArt(r gfx.Rect) {
 		a.finishPen(ad)
 	}
 	a.textTick(ad)
-	if a.artTool == toolCrop && ad.xf == nil {
-		a.syncCrop(ad)
-	}
 	a.drawView(ad, l.view)
 	a.artPointer(ad, l.view)
 	a.drawArtOverlay(ad, l.view)
@@ -195,6 +209,8 @@ func (a *App) drawArt(r gfx.Rect) {
 	if u.focus == "" && a.menu == nil && !u.blocked { // a dialog takes the keys
 		a.artKeys(ad, l.view)
 	}
+	a.releaseNavigation()
+	a.endLiveVector(ad)
 }
 
 // selectMode is how a selection tool's new shape combines: the option bar's choice, or Shift to add, Alt to
@@ -220,25 +236,16 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 	cx, cy := ad.toCanvas(vp, u.mx, u.my)
 	ad.cursor, ad.over = [2]float64{cx, cy}, vp.Contains(u.mx, u.my)
 	at := image.Pt(int(math.Floor(cx)), int(math.Floor(cy)))
-	if u.hover(id, vp) && u.wheel != 0 {
-		switch {
-		case u.ctrl || u.alt:
-			ad.zoomAt(vp, u.mx, u.my, ad.zoom*math.Pow(1.2, float64(u.wheel)))
-		case u.shift:
-			ad.panX -= float64(u.wheel) * 60 / ad.zoom
-			ad.fit = false
-		default:
-			ad.panY -= float64(u.wheel) * 60 / ad.zoom
-			ad.fit = false
-		}
-		u.wheel = 0
+	if a.navigate(ad, vp) {
+		return
+	}
+	ad.noteBoardLayer()
+	if u.pressedIn(vp) && !u.isHeld(keySpace) && a.zoomHeld == nil {
+		a.targetBoardAt(ad, at)
 	}
 	switch {
 	case ad.xf != nil:
 		a.transformPointer(ad, vp)
-		return
-	case a.artTool == toolCrop && ad.crop != nil:
-		a.cropPointer(ad, vp)
 		return
 	case a.artTool == toolText:
 		a.textPointer(ad, vp)
@@ -247,7 +254,7 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 		a.penPointer(ad, vp)
 		return
 	case a.artTool == toolPencil:
-		a.pencilPointer(ad, vp)
+		a.vectorBrushPointer(ad, vp)
 		return
 	case a.artTool == toolNode:
 		a.nodePointer(ad, vp)
@@ -256,10 +263,12 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 		a.boardPointer(ad, vp)
 		return
 	}
+	if n, p, ok := a.gradientEdited(ad); ok {
+		a.vectorGradientPointer(ad, vp, n, *p)
+		return
+	}
 	if u.hover(id, vp) {
 		switch a.artTool {
-		case toolHand:
-			u.cursor = CursorMove
 		case toolMove:
 			u.cursor = CursorMove
 		default:
@@ -270,9 +279,13 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 		ad.mode = a.selectMode()
 		switch a.artTool {
 		case toolBrush, toolEraser:
-			s, changed, err := ad.d.BeginStroke(a.brush, a.artTool == toolEraser, cx, cy)
+			b := a.brush
+			if a.artTool == toolBrush {
+				b.Opacity *= float64(b.Color.A) / 255 // a colour's transparency is the paint's
+			}
+			s, changed, err := ad.d.BeginStroke(b, a.artTool == toolEraser, cx, cy)
 			if err != nil {
-				a.toast(a.describe(err), true)
+				a.artFailed(ad, err)
 				u.active = ""
 				return
 			}
@@ -281,7 +294,7 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 		case toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge:
 			s, changed, err := ad.d.BeginRetouch(a.brush, a.retouch(), cx, cy)
 			if err != nil {
-				a.toast(a.describe(err), true)
+				a.artFailed(ad, err)
 				u.active = ""
 				return
 			}
@@ -294,27 +307,26 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 		case toolWand:
 			shape, err := ad.d.WandMask(at.X, at.Y, p.WandTolerance, p.WandContiguous, p.WandAllLayers)
 			if err != nil {
-				a.toast(a.describe(err), true)
+				a.artFailed(ad, err)
 			} else {
 				ad.d.SelectShape(shape, ad.mode)
 				ad.dirty = true
 			}
 		case toolMove:
+			if u.shift && !a.settings.Paint.NoAutoSelect && a.shiftPick(ad, vp, at) {
+				u.active = "" // choosing, not moving
+				return
+			}
+			if !a.settings.Paint.NoAutoSelect {
+				a.autoSelect(ad, vp, at)
+			}
 			m, err := ad.d.BeginMove()
 			if err != nil {
-				a.toast(a.describe(err), true)
+				a.artFailed(ad, err)
 				u.active = ""
 				return
 			}
 			ad.move, ad.moveFrom = m, [2]float64{cx, cy}
-		case toolHand:
-			ad.panFrom = [4]float64{float64(u.mx), float64(u.my), ad.panX, ad.panY}
-		case toolZoom:
-			z := ad.zoom * 2
-			if u.alt {
-				z = ad.zoom / 2
-			}
-			ad.zoomAt(vp, u.mx, u.my, z)
 		case toolPicker:
 			a.pickColor(ad, cx, cy)
 		case toolBucket:
@@ -322,7 +334,7 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 			a.artRun(ad, func() error {
 				return ad.d.Bucket(at.X, at.Y, a.brush.Color, p.FillOpacity, p.FillTolerance, p.FillContiguous, p.FillAllLayers)
 			})
-		case toolGradient, toolShape:
+		case toolGradient, toolShape, toolMaskGradient:
 			ad.drawing, ad.drawFrom, ad.drawTo = true, [2]float64{cx, cy}, [2]float64{cx, cy}
 			if a.artTool == toolShape {
 				ad.snapTo = ad.snapTargetsOf(0, 0, nil)
@@ -364,10 +376,6 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 				dx, dy := int(math.Round(cx-ad.moveFrom[0])), int(math.Round(cy-ad.moveFrom[1]))
 				ad.touched(ad.move.To(dx, dy))
 			}
-		case toolHand:
-			ad.panX = ad.panFrom[2] - (float64(u.mx)-ad.panFrom[0])/ad.zoom
-			ad.panY = ad.panFrom[3] - (float64(u.my)-ad.panFrom[1])/ad.zoom
-			ad.fit = false
 		case toolPicker:
 			a.pickColor(ad, cx, cy)
 		}
@@ -405,6 +413,10 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 		case ad.move != nil:
 			ad.move.End()
 			ad.move = nil
+			if !u.drag.moved && ad.descend != 0 && ad.d.Node(ad.descend) != nil {
+				ad.d.Choose(ad.descend) // a click on the chosen group goes into it
+			}
+			ad.descend = 0
 			ad.changedAll()
 		}
 	}
@@ -435,6 +447,11 @@ func (a *App) pickColor(ad *artDoc, x, y float64) {
 		return
 	}
 	c.A = 255
+	if n := ad.paintedVector(); n != nil {
+		// Straight onto the fill or the stroke being coloured, or with Alt the other.
+		a.setVectorColour(ad, n, a.pickBackground != a.u.alt, c)
+		return
+	}
 	if a.u.alt {
 		a.setBackground(c)
 		return
@@ -458,9 +475,6 @@ func (a *App) drawArtOverlay(ad *artDoc, vp gfx.Rect) {
 	case ad.xf != nil:
 		a.drawBox(ad, vp, ad.xf.box, true)
 		return
-	case a.artTool == toolCrop && ad.crop != nil:
-		a.drawCropOverlay(ad, vp)
-		return
 	}
 	a.drawSelectionOutline(ad, vp)
 	a.drawTextOverlay(ad, vp)
@@ -473,27 +487,49 @@ func (a *App) drawArtOverlay(ad *artDoc, vp gfx.Rect) {
 		x1, y1 := toScreen(float64(r.Max.X), float64(r.Max.Y))
 		box := gfx.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}
 		if a.marqueeEllipse {
-			u.c.RoundOutline(box, min(box.W, box.H)/2, max(1, u.px(1)), colWhite)
+			u.c.Outline(box, max(1, u.px(1)), colWhite)
 		}
 		drawAnts(u, box)
 	}
-	for i := 1; i < len(ad.lasso); i++ {
-		x0, y0 := toScreen(ad.lasso[i-1][0], ad.lasso[i-1][1])
-		x1, y1 := toScreen(ad.lasso[i][0], ad.lasso[i][1])
-		col := colBlack
-		if i%2 == 0 {
-			col = colWhite
+	if len(ad.lasso) > 1 {
+		pts := make([][2]float32, len(ad.lasso))
+		for i, p := range ad.lasso {
+			pts[i][0], pts[i][1] = toScreen(p[0], p[1])
 		}
-		u.c.Line(x0, y0, x1, y1, max(1, u.px(1)), col)
+		drawAntsPath(u, pts)
 	}
 	a.drawFillOverlay(ad, vp)
-	if ad.over && (a.artTool == toolBrush || a.artTool == toolEraser || a.artTool == toolClone || a.retouching()) && u.active == "" || ad.stroke != nil {
-		d := float32(a.brush.Size * ad.zoom)
-		if d >= 4 {
-			ring := gfx.Rect{X: u.mx - d/2, Y: u.my - d/2, W: d, H: d}
-			u.c.RoundOutline(ring, d/2, max(1, u.px(1)), gfx.Alpha(colBlack, 0.6))
-			u.c.RoundOutline(ring.Inset(-1), d/2+1, max(1, u.px(1)), gfx.Alpha(colWhite, 0.8))
+	a.drawVectorGradientOverlay(ad, vp)
+	if ad.over && (a.artTool == toolBrush || a.artTool == toolEraser || a.artTool == toolClone || a.artTool == toolPencil || a.retouching()) && u.active == "" ||
+		ad.stroke != nil || ad.vstroke != nil {
+		a.drawBrushOutline(ad)
+	}
+}
+
+// drawAntsPath draws a line through pts as marching ants: black, with white dashes over it measured along its
+// length, so it shows whole on any picture.
+func drawAntsPath(u *ctx, pts [][2]float32) {
+	w := max(1, u.px(1))
+	dash := max(u.px(4), 2)
+	for i := 1; i < len(pts); i++ {
+		u.c.Line(pts[i-1][0], pts[i-1][1], pts[i][0], pts[i][1], w, colBlack)
+	}
+	var along float32 // the length before this segment
+	for i := 1; i < len(pts); i++ {
+		x0, y0, x1, y1 := pts[i-1][0], pts[i-1][1], pts[i][0], pts[i][1]
+		l := float32(math.Hypot(float64(x1-x0), float64(y1-y0)))
+		if l == 0 {
+			continue
 		}
+		// Each white dash, or the part of one, on this segment.
+		for p := float32(math.Floor(float64(along/dash))) * dash; p < along+l; p += dash {
+			if int(math.Floor(float64(p/dash)))%2 == 0 {
+				continue
+			}
+			a0, a1 := (max(p, along)-along)/l, (min(p+dash, along+l)-along)/l
+			u.c.Line(x0+(x1-x0)*a0, y0+(y1-y0)*a0, x0+(x1-x0)*a1, y0+(y1-y0)*a1, w, colWhite)
+		}
+		along += l
 	}
 }
 
@@ -531,8 +567,8 @@ func (a *App) drawArtTools(r gfx.Rect) {
 			places = append(places, e.key)
 		}
 	}
-	// The places shrink to fit a short window, leaving room for the colours.
-	step := min(u.px(36), (r.H-u.px(70))/float32(len(places)))
+	// The places shrink to fit a short window.
+	step := min(u.px(36), (r.H-u.px(16))/float32(len(places)))
 	for _, place := range places {
 		t := a.slotTool(place)
 		b := gfx.Rect{X: r.X + u.px(8), Y: y, W: u.px(32), H: min(u.px(32), step-u.px(2))}
@@ -540,7 +576,7 @@ func (a *App) drawArtTools(r gfx.Rect) {
 		if t == toolMarquee && a.marqueeEllipse {
 			name = u.t("Elliptical marquee")
 		}
-		label := a.keyHint(toolID(t), keys(key(toolPlace(t), "")))
+		label := a.keyHint(toolID(t), toolDefaultKeys(t))
 		if label != "" && nextInSlot(t) != t {
 			label += ", Shift+" + label // to the next tool with the same key
 		}
@@ -558,35 +594,6 @@ func (a *App) drawArtTools(r gfx.Rect) {
 			drawEraserGlyph(u, b, a.artTool == toolEraser)
 		}
 		y += step
-	}
-	// The foreground and background colours, overlapping as in Photoshop, with swap and default.
-	y += u.px(10)
-	bg := gfx.Rect{X: r.X + u.px(18), Y: y + u.px(14), W: u.px(22), H: u.px(22)}
-	fg := gfx.Rect{X: r.X + u.px(8), Y: y + u.px(4), W: u.px(22), H: u.px(22)}
-	for _, s := range []struct {
-		id     string
-		r      gfx.Rect
-		c      color.NRGBA
-		target bool
-		hint   string
-	}{
-		{"art/bg", bg, a.backgroundColor(), true, u.t("Background colour: click to choose it")},
-		{"art/fg", fg, a.brush.Color, false, u.t("Foreground colour: click to choose it")},
-	} {
-		u.c.Fill(s.r.Inset(-max(1, u.px(1))), colWhite)
-		u.c.Fill(s.r, color.RGBA{s.c.R, s.c.G, s.c.B, 255})
-		if a.pickBackground == s.target {
-			u.c.Fill(gfx.Rect{X: s.r.X, Y: s.r.Bottom() + u.px(2), W: s.r.W, H: u.px(2)}, colAccent)
-		}
-		u.hint(s.id, s.hint, s.r)
-		if u.clicked(s.id, s.r) {
-			a.pickBackground = s.target
-			a.picker.hex = ""
-		}
-	}
-	swap := gfx.Rect{X: r.X + u.px(30), Y: y - u.px(4), W: u.px(16), H: u.px(16)}
-	if u.iconButton("art/swap", swap, icSwap, withKey(u.t("Swap the colours"), "X"), false, true) {
-		a.swapColors()
 	}
 }
 
@@ -619,7 +626,7 @@ func (a *App) setArtTool(t artTool) {
 		a.applyTransform(ad)
 		a.commitText(ad)
 		a.finishPen(ad)
-		ad.selDrag, ad.lasso, ad.crop = false, nil, nil
+		ad.selDrag, ad.lasso = false, nil
 	}
 }
 
@@ -645,9 +652,6 @@ func (a *App) drawArtBar(ad *artDoc, r, view gfx.Rect) {
 	case ad.xf != nil:
 		a.drawTransformOptions(ad, area)
 		return
-	case a.artTool == toolCrop && ad.crop != nil:
-		a.drawCropOptions(ad, area)
-		return
 	}
 	switch a.artTool {
 	case toolBrush, toolEraser:
@@ -658,28 +662,34 @@ func (a *App) drawArtBar(ad *artDoc, r, view gfx.Rect) {
 		a.drawSelectOptions(ad, area)
 	case toolBucket:
 		a.drawBucketOptions(area)
+	case toolMaskGradient:
+		a.drawMaskGradientOptions(area)
 	case toolGradient:
+		if n, p, ok := a.gradientEdited(ad); ok {
+			a.drawVectorGradientOptions(ad, n, *p, area)
+			break
+		}
 		a.drawGradientOptions(area)
 	case toolClone:
 		a.drawCloneOptions(area)
 	case toolShape:
-		a.drawShapeOptions(area)
+		a.drawShapeOptions(ad, area)
 	case toolText:
 		a.drawTextOptions(ad, area)
 	case toolPen:
-		a.drawPenOptions(area, u.t("Click for a sharp node, drag for a smooth one; click the first node to close, Enter to finish"))
+		a.drawPenOptions(ad, area, u.t("Click for a sharp node, drag for a smooth one; click the first node to close, Enter to finish"))
 	case toolPencil:
-		a.drawPenOptions(area, u.t("Draw freely: the line becomes a smooth curve; end where it began to close it"))
+		a.drawVectorBrushOptions(area)
 	case toolNode:
 		a.drawNodeOptions(ad, area)
 	case toolBoard:
 		a.drawBoardOptions(ad, view, area)
 	case toolMove:
-		u.label(u.face(12), area, u.t("Drag to move the layer, or the selected pixels; the arrow keys nudge by a pixel, with Shift by ten"), colDim, 0)
+		a.drawMoveOptions(ad, area)
 	case toolZoom:
-		u.label(u.face(12), area, u.t("Click to zoom in, Alt+click to zoom out; Ctrl+0 fits the picture to the window"), colDim, 0)
+		u.label(u.face(12), area, u.tf("Click to zoom in, Alt+click to zoom out, drag sideways to zoom; hold Z with any tool to zoom for a moment; %s fits the picture to the window", a.keyHint("draw.fit-on-screen", keys(fitKey))), colDim, 0)
 	case toolHand:
-		u.label(u.face(12), area, u.t("Drag to move around the picture; the wheel scrolls, Shift+wheel sideways, Ctrl+wheel zooms"), colDim, 0)
+		u.label(u.face(12), area, u.t("Drag to move around the picture, or hold Space with any tool; the wheel zooms, Shift+wheel scrolls sideways, Ctrl+wheel up and down"), colDim, 0)
 	case toolPicker:
 		u.label(u.face(12), area, u.t("Click to take the foreground colour from the picture, Alt+click for the background colour"), colDim, 0)
 	}
@@ -702,7 +712,9 @@ func (a *App) labelledSlider(id string, x, y, h float32, label string, value *fl
 func (a *App) drawBrushOptions(r gfx.Rect) {
 	u := &a.u
 	b := &a.brush
-	x := r.X
+	pr := gfx.Rect{X: r.X, Y: r.Y, W: u.px(46), H: r.H}
+	a.drawPresetButton(pr)
+	x := pr.Right() + u.px(10)
 	for _, tip := range paint.Tips {
 		tr := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
 		id := fmt.Sprintf("art/tip/%d", tip)
@@ -710,19 +722,22 @@ func (a *App) drawBrushOptions(r gfx.Rect) {
 		bg := colSurface
 		switch {
 		case b.Tip == tip:
-			bg = gfx.Mix(colSurface, colAccent, 0.45)
+			bg = colSelected
 		case hot:
 			bg = colSurfaceHi
 		}
-		u.c.RoundRect(tr, u.px(6), bg)
+		u.c.Fill(tr, bg)
 		drawTip(u, tip, tr, colText)
 		u.hint(id, u.t(tipNames[tip]), tr)
 		if u.clicked(id, tr) {
+			size := b.Size
 			b.Tip = tip
+			a.chosenBrush(size)
 			a.saveBrush()
 		}
 		x += tr.W + u.px(4)
 	}
+	x = a.drawTipButtons(x, r)
 	shape := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
 	if u.iconButton("art/tipshape", shape, "\ue429", u.t("Brush tip shape: angle, roundness and spacing"), a.menuOpen("art/tipshape"), true) {
 		a.openMenu("art/tipshape", shape, nil) // drawn by drawTipShape: a panel rather than a list
@@ -736,7 +751,7 @@ func (a *App) drawBrushOptions(r gfx.Rect) {
 		lo, hi    float64
 		format    func(float64) string
 	}{
-		{"size", u.t("Brush size"), &b.Size, 1, 500, func(v float64) string { return fmt.Sprintf("%.0f px", v) }},
+		{"size", u.t("Brush size"), &b.Size, 1, maxBrushSize, func(v float64) string { return fmt.Sprintf("%.0f px", v) }},
 		{"hardness", u.t("Hardness"), &b.Hardness, 0, 1, pct},
 		{"opacity", u.t("Opacity"), &b.Opacity, 0.01, 1, pct},
 		{"flow", u.t("Flow"), &b.Flow, 0.01, 1, pct},
@@ -748,6 +763,9 @@ func (a *App) drawBrushOptions(r gfx.Rect) {
 		var done bool
 		x, done = a.labelledSlider("art/"+s.id, x, r.Y, r.H, s.label, s.value, s.lo, s.hi, s.format)
 		saved = saved || done
+		if s.id == "size" {
+			x = a.drawSameSize(x, r) + u.px(16)
+		}
 	}
 	if saved {
 		a.saveBrush()
@@ -763,13 +781,13 @@ func (a *App) drawTipShape() {
 	}
 	u := &a.u
 	b := &a.brush
-	box := gfx.Rect{X: m.anchor.X, Y: m.anchor.Bottom() + u.px(4), W: u.px(300), H: u.px(200)}
-	u.c.RoundRect(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, u.px(10), gfx.Alpha(colBlack, 0.35))
-	u.c.RoundRect(box, u.px(10), colSurface)
-	u.c.RoundOutline(box, u.px(10), max(1, u.px(1)), colBorder)
+	box := gfx.Rect{X: m.anchor.X, Y: m.anchor.Bottom() + u.px(4), W: u.px(300), H: u.px(376)}
+	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, gfx.Alpha(colBlack, 0.35))
+	u.c.Fill(box, colSurface)
+	u.c.Outline(box, max(1, u.px(1)), colBorder)
 	in := box.Inset(u.px(14))
 	preview := gfx.Rect{X: in.X, Y: in.Y, W: u.px(70), H: u.px(70)}
-	u.c.RoundRect(preview, u.px(8), colBackground)
+	u.c.Fill(preview, colBackground)
 	a.drawTipPreview(preview)
 	y := in.Y
 	x0 := preview.Right() + u.px(14)
@@ -788,11 +806,34 @@ func (a *App) drawTipShape() {
 		saved = saved || done
 		y += u.px(34)
 	}
+	// Shape dynamics, under the preview.
+	y = max(y, preview.Bottom()) + u.px(10)
+	u.heading(gfx.Rect{X: in.X, Y: y, W: in.W, H: u.px(20)}, u.t("Shape dynamics"))
+	y += u.px(26)
+	for _, s := range []struct {
+		id, label string
+		value     *float64
+		hi        float64
+	}{
+		{"sizejitter", u.t("Size jitter"), &b.SizeJitter, 1},
+		{"anglejitter", u.t("Angle jitter"), &b.AngleJitter, 1},
+		{"scatter", u.t("Scatter"), &b.Scatter, 3},
+	} {
+		_, done := a.labelledSlider("art/tip/"+s.id, in.X, y, u.px(28), s.label, s.value, 0, s.hi, percent)
+		saved = saved || done
+		y += u.px(34)
+	}
+	follow := gfx.Rect{X: in.X, Y: y, W: in.W, H: u.px(28)}
+	if on := u.checkbox("art/tip/follow", follow, u.t("Turn the tip with the stroke"), b.Follow); on != b.Follow {
+		b.Follow = on
+		saved = true
+	}
 	if saved {
 		a.saveBrush()
 	}
 	if u.button("art/tip/reset", gfx.Rect{X: in.X, Y: in.Bottom() - u.px(30), W: u.px(150), H: u.px(30)}, "", u.t("Reset the tip"), ghost, true) {
 		b.Angle, b.Round, b.Spacing = 0, 1, 0.1
+		b.SizeJitter, b.AngleJitter, b.Scatter, b.Follow = 0, 0, 0, false
 		a.saveBrush()
 	}
 	// Clicks inside the panel stay with it.
@@ -939,7 +980,7 @@ func (a *App) drawArtStatus(ad *artDoc, r gfx.Rect) {
 	}
 	u.label(u.face(11.5), r.Inset(u.px(10)), strings.Join(parts, "   ·   "), colDim, 0)
 	fit := gfx.Rect{X: r.Right() - u.px(30), Y: r.Y + u.px(1), W: u.px(26), H: r.H - u.px(2)}
-	if u.iconButton("art/fit", fit, icFit, u.t("Fit the canvas to the window (Ctrl+0)"), ad.fit, true) {
+	if u.iconButton("art/fit", fit, icFit, u.tf("Fit the canvas to the window (%s)", a.keyHint("draw.fit-on-screen", keys(fitKey))), ad.fit, true) {
 		ad.fitView()
 	}
 }
@@ -963,12 +1004,18 @@ func (a *App) artShortcut(ad *artDoc, vp gfx.Rect, k Key) bool {
 	if k.Shift {
 		step = 10
 	}
+	if a.navigationKey(k) {
+		return true
+	}
 	if !k.Ctrl && !k.Alt {
 		switch {
-		case ad.xf != nil && a.transformKeys(ad, k), a.artTool == toolCrop && ad.crop != nil && a.cropKeys(ad, k),
-			a.nodeKeys(ad, k), a.boardKeys(ad, k):
+		case ad.xf != nil && a.transformKeys(ad, k), a.nodeKeys(ad, k), a.boardKeys(ad, k), a.gradientKeys(ad, k):
 			return true
 		}
+	}
+	// A command on Shift with a tool's key, as Shift+M adds a layer mask, comes before going to the next tool.
+	if k.Shift && !k.Ctrl && !k.Alt && a.runArtCommand(ad, vp, k) {
+		return true
 	}
 	if t, ok := a.toolFor(k); ok {
 		if t == toolMarquee && k.Shift {
@@ -977,7 +1024,7 @@ func (a *App) artShortcut(ad *artDoc, vp gfx.Rect, k Key) bool {
 		a.setArtTool(t)
 		return true
 	}
-	if a.drawingKey(k) {
+	if a.drawingKey(k) || a.opacityKey(ad, k) {
 		return true
 	}
 	// The arrows nudge the layer with the move tool, by a pixel or with Shift ten, as in Photoshop.
@@ -999,8 +1046,29 @@ func (a *App) artShortcut(ad *artDoc, vp gfx.Rect, k Key) bool {
 			return true
 		}
 	}
+	if a.runArtCommand(ad, vp, k) {
+		return true
+	}
+	if k == (Key{Code: keyEnter}) {
+		a.startRename(ad) // as R and a double-click on it do
+		return true
+	}
+	return false
+}
+
+// startRename puts the chosen layer's or group's name in the layers panel in a box to change it.
+func (a *App) startRename(ad *artDoc) {
+	if n := ad.d.Node(ad.d.Active); n != nil {
+		ad.renaming, ad.rename = n.ID, n.Name
+		a.u.focusEdit("art/rename", n.Name, false)
+		a.sidePage = sideLayers
+	}
+}
+
+// runArtCommand runs the canvas command bound to k, when it is enabled; it reports whether one is bound.
+func (a *App) runArtCommand(ad *artDoc, vp gfx.Rect, k Key) bool {
 	for _, c := range a.artCommands(ad, vp) {
-		if a.bound(c.id, keys(c.key, c.also), k) {
+		if a.bound(c.id, c.defaults(), k) {
 			if c.enabled == nil || c.enabled() {
 				c.run()
 			}
@@ -1008,6 +1076,16 @@ func (a *App) artShortcut(ad *artDoc, vp gfx.Rect, k Key) bool {
 		}
 	}
 	return false
+}
+
+// artFailed says why a canvas command could not be done; a pixel tool or command refused on a vector layer offers
+// to rasterize the layer there and then.
+func (a *App) artFailed(ad *artDoc, err error) {
+	if errors.Is(err, paint.ErrVectorLayer) {
+		a.toastActions(a.describe(err), true, []toastAction{{a.u.t("Rasterize"), func() { a.artRun(ad, ad.d.Rasterize) }}})
+		return
+	}
+	a.toast(a.describe(err), true)
 }
 
 // artRun runs a layer or selection command and shows why it could not be done.
@@ -1019,66 +1097,9 @@ func (a *App) artRun(ad *artDoc, fn func() error) {
 	a.commitText(ad)
 	a.finishPen(ad)
 	if err := fn(); err != nil {
-		a.toast(a.describe(err), true)
+		a.artFailed(ad, err)
 		return
 	}
-	ad.changedAll()
-}
-
-// artCopy puts the selected part of the chosen layer, or of the picture as it looks, on the clipboard.
-func (a *App) artCopy(ad *artDoc, merged bool) {
-	cb, ok := a.host.(imageClipboard)
-	if !ok {
-		a.toast(a.u.t("Pictures cannot be put on the clipboard on this system"), true)
-		return
-	}
-	img, err := ad.d.Copy(merged)
-	if err == nil {
-		err = cb.SetClipboardImage(img)
-	}
-	if err != nil {
-		a.toast(a.u.tf("Could not copy: %s", a.describe(err)), true)
-		return
-	}
-	a.toast(a.u.tf("Copied %d × %d", img.Rect.Dx(), img.Rect.Dy()), false)
-}
-
-func (a *App) artCut(ad *artDoc) {
-	cb, ok := a.host.(imageClipboard)
-	if !ok {
-		a.toast(a.u.t("Pictures cannot be put on the clipboard on this system"), true)
-		return
-	}
-	img, err := ad.d.Cut()
-	if err == nil {
-		err = cb.SetClipboardImage(img)
-	}
-	if err != nil {
-		a.toast(a.u.tf("Could not cut: %s", a.describe(err)), true)
-	}
-	ad.changedAll()
-}
-
-// artPaste puts the clipboard's picture on a new layer, at the selection's corner or in the middle.
-func (a *App) artPaste(ad *artDoc) {
-	img, files, _ := a.host.Paste()
-	if img == nil {
-		for _, f := range files {
-			if isImage(f) {
-				img, _ = loadImage(f)
-				break
-			}
-		}
-	}
-	if img == nil {
-		a.toast(a.u.t("There is no picture on the clipboard"), false)
-		return
-	}
-	var at *image.Point
-	if s := ad.d.SelectionBounds(); !s.Empty() {
-		at = &s.Min
-	}
-	ad.d.Paste(img, a.u.t("Pasted"), at)
 	ad.changedAll()
 }
 
@@ -1155,6 +1176,9 @@ func (a *App) exportPictures(ad *artDoc, pics []namedPicture) {
 
 // layerName and groupName number new layers and groups the way Photoshop does.
 func (a *App) layerName() string { return a.u.tf("Layer %d", len(a.art.d.Layers())+1) }
+
+// vectorLayerName names a new vector layer as the vector brush names the one it makes.
+func (a *App) vectorLayerName() string { return a.u.tf("Drawing %d", len(a.art.d.Layers())+1) }
 
 func (a *App) groupName() string {
 	n := 0

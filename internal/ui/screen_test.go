@@ -182,6 +182,118 @@ func TestDrawingOnTheScreen(t *testing.T) {
 	}
 }
 
+// The toolbar changes the brush's tip, colour and size while drawing on the screen, and the brush keys work over the
+// drawing, which takes the keyboard only while it takes the mouse.
+func TestScreenToolbarBrush(t *testing.T) {
+	x := overlayHarness(t)
+	a, h := x.a, x.h
+	a.brush = paint.Brush{Size: 16, Hardness: 1, Opacity: 1, Spacing: 0.1, Color: color.NRGBA{R: 255, A: 255}}
+	a.Tick(Input{Hotkeys: []int{hotkeyDraw}})
+	x.frame(Input{})
+	var canvas, bar *fakeOverlay
+	for _, o := range h.open() {
+		if o.opts.Excluded {
+			bar = o
+		} else {
+			canvas = o
+		}
+	}
+	if canvas == nil || bar == nil {
+		t.Fatalf("drawing window %+v, toolbar %+v", canvas, bar)
+	}
+	if !canvas.keyboard {
+		t.Error("the drawing does not take the keyboard while drawing")
+	}
+	frames := func(n int) {
+		for range n {
+			x.frame(Input{})
+		}
+	}
+	// D and F, as on the canvas.
+	canvas.queued = append(canvas.queued, Input{Keys: []Key{{Code: 'F'}}})
+	frames(2)
+	if a.brush.Size <= 16 {
+		t.Errorf("F left the brush at %v", a.brush.Size)
+	}
+	larger := a.brush.Size
+	canvas.queued = append(canvas.queued, Input{Keys: []Key{{Code: 'D'}}}, Input{Keys: []Key{{Code: 'D'}}})
+	frames(3)
+	if a.brush.Size >= larger || a.brush.Size >= 16 {
+		t.Errorf("D twice from %v left the brush at %v", larger, a.brush.Size)
+	}
+	if a.settings.Paint.Size != a.brush.Size {
+		t.Errorf("the size %v was not kept (%v)", a.brush.Size, a.settings.Paint.Size)
+	}
+	// The bar's parts, left to right after the grip: pen, eraser, tip, the quick colours, the colour button, size.
+	const tipX, quickX, moreX, sizeX, y = 28 + 2*barButton + 20, 28 + 3*barButton + 4, 28 + 3*barButton + 4 + 5*barSwatch + 15, 28 + 3*barButton + 4 + 5*barSwatch + 2 + 26 + 10, 26
+	height := bar.bounds.Dy()
+	bar.click(tipX, y)
+	frames(10)
+	if bar.bounds.Dy() <= height {
+		t.Fatalf("the tip panel did not open: toolbar %v", bar.bounds)
+	}
+	x.shotOverlay(bar, "overlay-toolbar-tips")
+	// The square tip, the second; then the first preset, after the plain tips.
+	bar.click(8+34+4+17, barHeight+17)
+	frames(10)
+	if a.brush.Tip != paint.TipSquare {
+		t.Errorf("the tip is %v, want square", a.brush.Tip)
+	}
+	bar.click(8+float32(len(paint.Tips))*38+38, barHeight+17)
+	frames(10)
+	if p, ok := a.chosenPreset(); !ok || p.ID != paint.Presets()[0].ID {
+		t.Errorf("the first preset was not chosen: %v %v", p.ID, ok)
+	}
+	// The colour button swaps the tips for the palette; its second colour is dark grey.
+	bar.click(moreX, y)
+	frames(10)
+	x.shotOverlay(bar, "overlay-toolbar-colours")
+	bar.click(8+barSwatch+4+12, barHeight+12)
+	frames(10)
+	if a.brush.Color != toolbarPalette[1] {
+		t.Errorf("the palette gave %v", a.brush.Color)
+	}
+	bar.click(moreX, y)
+	frames(10)
+	if bar.bounds.Dy() != height {
+		t.Errorf("closing the panel left the toolbar %v high, want %d", bar.bounds.Dy(), height)
+	}
+	bar.click(quickX+3+9, y)
+	frames(10)
+	if a.brush.Color != toolbarColors[0] {
+		t.Errorf("the quick colour gave %v", a.brush.Color)
+	}
+	// The size slider: its right end is the largest brush.
+	bar.drag(sizeX+20, y, sizeX+barSizeSlider+20, y)
+	frames(10)
+	if a.brush.Size != maxBrushSize || a.settings.Paint.Size != maxBrushSize {
+		t.Errorf("the slider's end gave %v (kept %v)", a.brush.Size, a.settings.Paint.Size)
+	}
+	// The brush's settings are there only while the pen is chosen: the eraser hides them and closes their panel.
+	width := bar.bounds.Dx()
+	bar.click(tipX, y)
+	frames(10)
+	bar.click(28+barButton+20, y)
+	frames(10)
+	if !a.over.draw.eraser || bar.bounds.Dx() >= width || bar.bounds.Dy() != height || a.over.bar.panel != barNoPanel {
+		t.Errorf("with the eraser the toolbar is %v (was %d wide), panel %v", bar.bounds, width, a.over.bar.panel)
+	}
+	x.shotOverlay(bar, "overlay-toolbar-eraser")
+	bar.click(28+20, y)
+	frames(10)
+	if a.over.draw.eraser || bar.bounds.Dx() != width {
+		t.Errorf("the pen again: eraser %v, toolbar %d wide, want %d", a.over.draw.eraser, bar.bounds.Dx(), width)
+	}
+	// The right button gives the mouse and the keyboard back; the keys then do nothing here.
+	canvas.queued = append(canvas.queued, Input{X: 10, Y: 10, Pointer: []Pointer{{X: 10, Y: 10, Right: true, Down: true}}})
+	frames(3)
+	if canvas.keyboard {
+		t.Error("the drawing kept the keyboard after drawing stopped")
+	}
+	a.closeScreenDraw()
+	frames(1)
+}
+
 func TestRecordingARegionWithTheToolbar(t *testing.T) {
 	x := overlayHarness(t)
 	a, h := x.a, x.h

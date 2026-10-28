@@ -90,7 +90,7 @@ func (a *App) settingsExtensions(r gfx.Rect) {
 	msg, col := u.t("Saving checks the JSON first and applies it at once. An AI connected over MCP can change it too (get_config, set_config)."), colFaint
 	switch {
 	case e.err[k.id] != "":
-		msg, col = e.err[k.id], gfx.Hex(0xffb4b2)
+		msg, col = e.err[k.id], colDangerText
 	case dirty:
 		msg, col = u.t("Unsaved changes"), colWarning
 	}

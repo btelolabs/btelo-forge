@@ -99,9 +99,12 @@ type layerView struct {
 	Stroke    string      `json:"stroke,omitempty"`
 	Width     float64     `json:"stroke_width,omitempty"`
 	Nodes     int         `json:"nodes,omitempty"`
-	Adjust    string      `json:"adjustment,omitempty"` // an adjustment layer's kind
-	Settings  any         `json:"settings,omitempty"`   // and its settings
-	Style     any         `json:"style,omitempty"`      // the layer's effects
+	Shapes    int         `json:"shapes,omitempty"`      // a compound object's shapes, each combining with those before it
+	Clip      bool        `json:"vector_mask,omitempty"` // a vector mask shows the layer only inside its outline
+	Link      string      `json:"link_id,omitempty"`     // a smart object's link id: those with the same one share their layers
+	Adjust    string      `json:"adjustment,omitempty"`  // an adjustment layer's kind
+	Settings  any         `json:"settings,omitempty"`    // and its settings
+	Style     any         `json:"style,omitempty"`       // the layer's effects
 	Children  []layerView `json:"children,omitempty"`
 }
 
@@ -136,14 +139,14 @@ func paintView(p paint.VectorPaint) string {
 	switch p.Kind {
 	case paint.PaintSolid:
 		return hexOf(p.Color)
-	case paint.PaintLinear, paint.PaintRadial:
+	case paint.PaintLinear, paint.PaintRadial, paint.PaintConical:
 		return "gradient"
 	}
 	return ""
 }
 
 func viewOfNode(n *paint.Node) layerView {
-	v := layerView{ID: n.ID, Name: n.Name, Visible: n.Visible, Opacity: n.Opacity, Blend: blendID(n.Blend), LockAlpha: n.LockAlpha}
+	v := layerView{ID: n.ID, Name: n.Name, Visible: n.Visible, Opacity: n.Opacity, Blend: blendID(n.Blend), LockAlpha: n.LockAlpha, Clip: n.Clip != nil}
 	if n.Mask != nil {
 		v.Mask = "on"
 		if n.MaskOff {
@@ -153,6 +156,12 @@ func viewOfNode(n *paint.Node) layerView {
 	switch {
 	case n.IsGroup():
 		v.Kind = "group"
+		if n.IsBoard() {
+			v.Kind, v.Bounds = "artboard", rectView(n.Board.Rect)
+		}
+		if n.IsSmart() {
+			v.Kind, v.Link = "smart_object", n.Smart.ID
+		}
 		for _, c := range n.Children {
 			v.Children = append(v.Children, viewOfNode(c))
 		}
@@ -163,6 +172,9 @@ func viewOfNode(n *paint.Node) layerView {
 		v.Fill, v.Stroke, v.Width = paintView(vec.Fill), paintView(vec.Stroke.Paint), vec.Stroke.Width
 		for _, s := range vec.Outline() {
 			v.Nodes += len(s.Nodes)
+		}
+		if vec.Compound() {
+			v.Shapes = len(vec.Shapes())
 		}
 	case n.Adjust != nil:
 		v.Kind, v.Adjust = "adjustment", adjustKindIDs[n.Adjust.Kind]
@@ -188,7 +200,7 @@ func (a *App) canvasView(ad *artDoc) map[string]any {
 		layers = append(layers, viewOfNode(c))
 	}
 	var boards []map[string]any
-	for _, b := range d.Boards {
+	for _, b := range d.Boards() {
 		boards = append(boards, map[string]any{"id": b.ID, "name": b.Name, "rect": rectView(b.Rect), "background": hexOf(b.Fill)})
 	}
 	steps, done := d.History()
@@ -197,8 +209,9 @@ func (a *App) canvasView(ad *artDoc) map[string]any {
 		"artboards": boards, "layers": layers, "active_layer": d.Active, "also_chosen": ad.picked,
 		"selection": rectView(d.SelectionBounds()), "history": steps, "history_done": done,
 		"foreground": hexOf(a.brush.Color), "background": hexOf(a.backgroundColor()), "tool": artToolNames[a.artTool],
-		"view": map[string]any{"zoom": ad.zoom, "visible": rectView(d.View)},
-		"note": "coordinates are canvas pixels; rectangles are [x, y, width, height]; the canvas has no edge beyond its frame or artboards",
+		"brush_presets": brushPresetIDs(),
+		"view":          map[string]any{"zoom": ad.zoom, "visible": rectView(d.View)},
+		"note":          "coordinates are canvas pixels; rectangles are [x, y, width, height]; the canvas has no edge beyond its frame or artboards",
 	}
 }
 
@@ -393,7 +406,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 				}
 				d := ad.d
 				r := d.Extent()
-				for _, b := range d.Boards {
+				for _, b := range d.Boards() {
 					if d.Frame.Empty() {
 						r = r.Union(b.Rect)
 					}
@@ -464,7 +477,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 					}
 					pics = append(pics, namedPicture{name: a.u.t("Selection"), img: img})
 				case "artboard", "artboards":
-					for _, b := range d.Boards {
+					for _, b := range d.Boards() {
 						if in.What == "artboard" && b.ID != in.Artboard {
 							continue
 						}
@@ -497,7 +510,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 		Action string `json:"action" jsonschema:"add (a pixel layer), add_group, choose, delete, duplicate, move_up, move_down, merge_down, merge_group, flatten, rasterize, convert_to_curves, group, ungroup, add_mask, apply_mask, delete_mask"`
 		ID     int    `json:"id,omitempty" jsonschema:"the layer to act on; the chosen layer when left out"`
 		Name   string `json:"name,omitempty" jsonschema:"a new layer's or group's name"`
-		Also   []int  `json:"also,omitempty" jsonschema:"for choose: more layers chosen besides id, as for boolean"`
+		Also   []int  `json:"also,omitempty" jsonschema:"for choose: more layers chosen besides id, as for boolean and group"`
 	}
 	tool(s, a, "canvas_layer", "Add, choose, delete, duplicate, reorder, merge, group, mask or rasterize layers. New layers go above the chosen one.", func(in layerIn) (any, error) {
 		return a.drawEdit(func(ad *artDoc) (any, error) {
@@ -553,7 +566,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 				if name == "" {
 					name = a.groupName()
 				}
-				_, err = d.GroupChosen(name)
+				err = a.groupChosen(ad, name)
 			case "ungroup":
 				err = d.Ungroup()
 			case "add_mask":
@@ -712,6 +725,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 		Opacity  *float64 `json:"opacity,omitempty" jsonschema:"0 to 1"`
 		Flow     *float64 `json:"flow,omitempty" jsonschema:"0 to 1"`
 		Eraser   bool     `json:"eraser,omitempty" jsonschema:"erase instead of paint"`
+		Brush    string   `json:"brush,omitempty" jsonschema:"a brush preset, its tip, spacing and shape dynamics (canvas_state lists them: pencil, charcoal, pastel, ink-pen, ink-brush, flat-bristle, round-bristle, fan, sponge, splatter, grunge, ellipse); the brush as it is when left out; in the brush's size while the options bar has every brush the same size"`
 	}
 	tool(s, a, "canvas_paint", "Paint a brush stroke (or erase) along points on the chosen pixel layer, within the selection.", func(in strokeIn) (any, error) {
 		return a.drawEdit(func(ad *artDoc) (any, error) {
@@ -719,6 +733,17 @@ func (a *App) addDrawTools(s *mcp.Server) {
 				return nil, errors.New("give the stroke's points")
 			}
 			b := a.brush
+			if in.Brush != "" {
+				p, ok := paint.PresetByID(in.Brush)
+				if !ok {
+					return nil, fmt.Errorf("unknown brush %q: the presets are %s", in.Brush, strings.Join(brushPresetIDs(), ", "))
+				}
+				b = p.Brush
+				b.Color = a.brush.Color
+				if a.settings.Paint.SameSize {
+					b.Size = a.brush.Size
+				}
+			}
 			b.Smooth = 0 // the points are exact: no trailing
 			if in.Color != "" {
 				c, err := nrgba(in.Color)
@@ -882,7 +907,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 	}
 	type pathIn struct {
 		Subpaths []subpathIn `json:"subpaths" jsonschema:"one or more runs of Bézier nodes, in canvas pixels"`
-		Smooth   []ptIn      `json:"smooth,omitempty" jsonschema:"instead of subpaths: points to fit a smooth curve through, as the pencil does"`
+		Smooth   []ptIn      `json:"smooth,omitempty" jsonschema:"instead of subpaths: points to fit a smooth curve through"`
 		Closed   bool        `json:"closed,omitempty" jsonschema:"with smooth: close the curve"`
 		Name     string      `json:"name,omitempty"`
 		vectorStyleIn
@@ -1219,7 +1244,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 		Rect       []int  `json:"rect,omitempty" jsonschema:"[x, y, width, height]; for move, only x and y count"`
 		Background string `json:"background,omitempty" jsonschema:"#rrggbb, or none for transparent"`
 	}
-	tool(s, a, "canvas_artboard", "Add, change, move or delete artboards: fixed-size areas of the infinite canvas, each exported as a picture of its own.", func(in boardIn) (any, error) {
+	tool(s, a, "canvas_artboard", "Add, change, move or delete artboards: groups with a fixed-size area of the infinite canvas, which cut what is in them to it and export it as a picture of its own. A new artboard takes in the top-level layers lying wholly on it and becomes the active layer, so layers added next go into it; deleting one keeps what was in it.", func(in boardIn) (any, error) {
 		return a.drawEdit(func(ad *artDoc) (any, error) {
 			d := ad.d
 			var r image.Rectangle
@@ -1248,7 +1273,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 			case "add":
 				name := in.Name
 				if name == "" {
-					name = a.u.tf("Artboard %d", len(d.Boards)+1)
+					name = a.u.tf("Artboard %d", len(d.Boards())+1)
 				}
 				if b, err = d.AddBoard(r, name); err == nil && in.Background != "" {
 					if err = fill(&b); err == nil {

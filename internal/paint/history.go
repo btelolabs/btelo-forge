@@ -2,7 +2,6 @@ package paint
 
 import (
 	"image"
-	"slices"
 )
 
 // state is the whole picture at one moment: its frame and paper, the layer tree with snapshots of every raster and
@@ -11,7 +10,6 @@ import (
 type state struct {
 	frame    image.Rectangle
 	paper    bool
-	boards   []Board // never changed in place: a change makes a new slice
 	root     *Node
 	active   int
 	sel      *Mask
@@ -60,7 +58,7 @@ type Mark struct{ s state }
 func (d *Doc) Mark() Mark { return Mark{d.state()} }
 
 func (d *Doc) state() state {
-	s := state{frame: d.Frame, paper: d.Paper, boards: d.Boards, root: snapshotTree(d.Root), active: d.Active, editMask: d.EditMask}
+	s := state{frame: d.Frame, paper: d.Paper, root: snapshotTree(d.Root), active: d.Active, editMask: d.EditMask}
 	if d.Selection != nil {
 		s.sel = d.Selection.Snapshot()
 	}
@@ -69,6 +67,7 @@ func (d *Doc) state() state {
 
 // Commit records the change since m as one step called name; nothing is recorded when nothing changed.
 func (d *Doc) Commit(name string, m Mark) {
+	d.syncSmart() // a change in a smart object's layers is made in its copies, in the same step
 	after := d.state()
 	if sameState(m.s, after) {
 		return
@@ -141,7 +140,7 @@ func newTileBytes(before, after state) int {
 }
 
 func sameState(a, b state) bool {
-	return a.frame == b.frame && a.paper == b.paper && slices.Equal(a.boards, b.boards) && a.active == b.active && a.editMask == b.editMask &&
+	return a.frame == b.frame && a.paper == b.paper && a.active == b.active && a.editMask == b.editMask &&
 		(a.sel == nil) == (b.sel == nil) && (a.sel == nil || a.sel.Same(b.sel)) && sameTree(a.root, b.root)
 }
 
@@ -149,7 +148,7 @@ func sameTree(a, b *Node) bool {
 	if a.ID != b.ID || a.Name != b.Name || a.Visible != b.Visible || a.Opacity != b.Opacity ||
 		(a.Pixels == nil) != (b.Pixels == nil) || a.Pixels != nil && !a.Pixels.Same(b.Pixels) ||
 		(a.Mask == nil) != (b.Mask == nil) || a.Mask != nil && !a.Mask.Same(b.Mask) ||
-		a.Blend != b.Blend || a.LockAlpha != b.LockAlpha || a.MaskOff != b.MaskOff || a.Open != b.Open || a.Text != b.Text || a.Vector != b.Vector || a.Adjust != b.Adjust || a.Style != b.Style ||
+		a.Blend != b.Blend || a.LockAlpha != b.LockAlpha || a.MaskOff != b.MaskOff || a.Open != b.Open || a.Text != b.Text || a.Vector != b.Vector || a.Adjust != b.Adjust || a.Style != b.Style || a.Clip != b.Clip || a.Board != b.Board || a.Smart != b.Smart ||
 		len(a.Children) != len(b.Children) {
 		return false
 	}
@@ -215,6 +214,7 @@ func (d *Doc) Undo() {
 	h.done = h.done[:len(h.done)-1]
 	d.restore(e.before)
 	h.undone = append(h.undone, e)
+	d.syncSmart()
 }
 
 // Redo does the last undone step again.
@@ -227,11 +227,12 @@ func (d *Doc) Redo() {
 	h.undone = h.undone[:len(h.undone)-1]
 	d.restore(e.after)
 	h.done = append(h.done, e)
+	d.syncSmart()
 }
 
 // restore puts a kept state back as a fresh snapshot, so later changes do not alter the history.
 func (d *Doc) restore(s state) {
-	d.Frame, d.Paper, d.Boards = s.frame, s.paper, s.boards
+	d.Frame, d.Paper = s.frame, s.paper
 	d.Root, d.Active, d.EditMask = snapshotTree(s.root), s.active, s.editMask
 	d.Selection = nil
 	if s.sel != nil {

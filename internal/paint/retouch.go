@@ -199,7 +199,7 @@ func boxBlur3(src *image.RGBA, rad int) *image.RGBA {
 // what is there for the next, as Photoshop's smudge does.
 func (s *Stroke) smudgeDab(cx, cy float64) image.Rectangle {
 	b := s.brush
-	r := b.Size/2 + 1
+	r := b.reach()
 	box := image.Rect(int(math.Floor(cx-r)), int(math.Floor(cy-r)), int(math.Ceil(cx+r)), int(math.Ceil(cy+r))).Intersect(s.clip)
 	if box.Empty() {
 		return box

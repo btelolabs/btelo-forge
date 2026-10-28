@@ -96,6 +96,7 @@ type Overlay struct {
 	Box     bool
 	Image   string
 	Canvas  string  `json:",omitempty"` // for a drawing: the layered canvas file the image is exported from
+	Smart   string  `json:",omitempty"` // for a smart object: its link id, whose picture the image is and follows
 	Aspect  float64 // image width over height
 	Opacity float64 // 1 is solid
 }

@@ -13,7 +13,7 @@ type Encoders map[string]bool
 // Software encoders are listed by ffmpeg; hardware encoders are listed whenever ffmpeg was built with them, so they
 // are tried on a few frames to find out whether the graphics card and driver can run them.
 var (
-	softwareEncoders = []string{"libx264", "libx265", "libsvtav1", "libaom-av1"}
+	softwareEncoders = []string{"libx264", "libx265", "libsvtav1", "libaom-av1", "gif", "libwebp_anim", "libwebp"}
 	hardwareEncoders = []string{"h264_nvenc", "hevc_nvenc", "av1_nvenc"}
 )
 

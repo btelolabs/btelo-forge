@@ -386,7 +386,7 @@ func (a *App) drawTrackList(r gfx.Rect) {
 	if content > r.H {
 		h := max(r.H*r.H/content, u.px(24))
 		y := r.Y + (r.H-h)*m.scroll/(content-r.H)
-		u.c.RoundRect(gfx.Rect{X: r.Right() - u.px(4), Y: y, W: u.px(3), H: h}, u.px(1.5), colSurfaceHi)
+		u.c.Fill(gfx.Rect{X: r.Right() - u.px(4), Y: y, W: u.px(3), H: h}, colSurfaceHi)
 	}
 }
 
@@ -398,20 +398,20 @@ func (a *App) drawTrackRow(r gfx.Rect, t library.Track) {
 	if hot {
 		bg = colSurfaceHi
 	}
-	u.c.RoundRect(r, u.px(8), bg)
+	u.c.Fill(r, bg)
 	playing, heard := a.audition.Playing()
 	pb := gfx.Rect{X: r.X + u.px(8), Y: r.Y + (r.H-u.px(34))/2, W: u.px(34), H: u.px(34)}
 	glyph := icPlay
 	if playing == key {
 		glyph = icStop
 	}
-	pbg := gfx.Mix(colSurfaceHi, colAccent, 0.35)
+	pbg := colPrimary
 	if u.hover("audition/"+key, pb) {
-		pbg = colAccent
+		pbg = colPrimaryHi
 		u.cursor = CursorHand
 	}
-	u.c.RoundRect(pb, u.px(17), pbg)
-	u.icon(glyph, pb, 12, colOnAccent)
+	u.c.Fill(pb, pbg)
+	u.icon(glyph, pb, 12, colOnPrimary)
 	u.hint("audition/"+key, u.t("Preview"), pb)
 	if u.clicked("audition/"+key, pb) {
 		a.auditionTrack(t)
@@ -516,7 +516,7 @@ func (a *App) addTrack(t library.Track) {
 func (a *App) drawSelectedMusic(r gfx.Rect, m project.Music) float32 {
 	u := &a.u
 	card := gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H - u.px(12)}
-	u.c.RoundRect(card, u.px(10), gfx.Mix(colSurface, colMusic, 0.35))
+	u.c.Fill(card, gfx.Mix(colSurface, colMusic, 0.35))
 	in := card.Inset(u.px(12))
 	u.label(u.bold(13.5), gfx.Rect{X: in.X, Y: in.Y, W: in.W - u.px(40), H: u.px(20)}, m.Title, colText, 0)
 	if u.iconButton("music/del", gfx.Rect{X: in.Right() - u.px(30), Y: in.Y - u.px(5), W: u.px(30), H: u.px(30)}, icDelete, u.t("Remove from the timeline"), false, true) {

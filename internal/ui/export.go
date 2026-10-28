@@ -19,6 +19,7 @@ type exportJob struct {
 	out      string
 	progress float64
 	started  time.Time
+	measured time.Time // when the progress began to be measured, for the time left
 	stopping bool
 }
 
@@ -31,7 +32,7 @@ type lastExport struct {
 
 // destination is where the current edit exports to: the default folder from the settings, or beside the source.
 func (a *App) destination(p *project.Project) string {
-	return render.Destination(p.Sources[0].Path, a.settings.ExportDir)
+	return render.Destination(p.Sources[0].Path, a.settings.ExportDir, render.Extension(p.Export))
 }
 
 // setExport changes the edit's export settings and remembers them as the default for new edits.
@@ -71,10 +72,18 @@ func (a *App) startExport() (string, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(a.life)
-	job := &exportJob{cancel: cancel, out: out, started: time.Now()}
+	now := time.Now()
+	job := &exportJob{cancel: cancel, out: out, started: now, measured: now}
 	a.export = job
 	a.background(func(_ context.Context) {
-		err := a.encode(ctx, snapshot, out, func(f float64) { a.post(func() { job.progress = f }) })
+		err := a.encode(ctx, snapshot, out, func(f float64) {
+			a.post(func() {
+				if job.progress == render.Analysing && f >= 0 {
+					job.measured = time.Now()
+				}
+				job.progress = f
+			})
+		})
 		a.post(func() {
 			a.export = nil
 			a.last = lastExport{out: out, err: err, at: time.Now()}
@@ -143,11 +152,22 @@ func (a *App) drawExportModal() {
 	u.label(u.bold(16), gfx.Rect{X: in.X, Y: in.Y, W: in.W, H: u.px(24)}, u.t("Exporting…"), colText, 0)
 	u.label(u.face(12), gfx.Rect{X: in.X, Y: in.Y + u.px(28), W: in.W, H: u.px(20)}, filepath.Base(job.out), colDim, 0)
 	bar := gfx.Rect{X: in.X, Y: in.Y + u.px(66), W: in.W, H: u.px(10)}
-	u.c.RoundRect(bar, u.px(5), colSurface)
-	u.c.RoundRect(gfx.Rect{X: bar.X, Y: bar.Y, W: max(bar.W*float32(job.progress), bar.H), H: bar.H}, u.px(5), colAccent)
-	status := fmt.Sprintf("%d%%", int(job.progress*100))
-	if el := time.Since(job.started).Seconds(); job.progress > 0.02 {
-		status += u.tf(" · about %s left", shortClock(math.Max(el/job.progress-el, 0)))
+	u.c.Fill(bar, colSurface)
+	var status string
+	if job.progress == render.Analysing {
+		// The first pass of a GIF cannot tell how far it is: a block sweeps the bar while it runs.
+		const period = 1.6
+		phase := math.Mod(time.Since(job.started).Seconds(), period) / period
+		w := bar.W / 4
+		x := bar.X - w + (bar.W+w)*float32(phase)
+		u.c.Fill(gfx.Rect{X: max(x, bar.X), Y: bar.Y, W: min(x+w, bar.Right()) - max(x, bar.X), H: bar.H}, colAccent)
+		status = u.t("Choosing the colours…")
+	} else {
+		u.c.Fill(gfx.Rect{X: bar.X, Y: bar.Y, W: max(bar.W*float32(job.progress), bar.H), H: bar.H}, colAccent)
+		status = fmt.Sprintf("%d%%", int(job.progress*100))
+		if el := time.Since(job.measured).Seconds(); job.progress > 0.02 {
+			status += u.tf(" · about %s left", shortClock(math.Max(el/job.progress-el, 0)))
+		}
 	}
 	if job.stopping {
 		status = u.t("Cancelling…")

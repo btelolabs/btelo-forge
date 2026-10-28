@@ -8,30 +8,81 @@ import (
 	"slices"
 )
 
-// Board is an artboard: a named area of the infinite canvas with a fixed size and its own background, exported as a
-// picture of its own, as Affinity Designer's artboards are. Layers are not inside a board; what lies on it is what
-// it shows.
+// Artboards are groups of a kind, as Photoshop's and Affinity Designer's are: a group with an area of the canvas, a
+// fixed size and its own background. What is in it is cut to its area and is what it exports as a picture of its
+// own; the canvas around the boards is the pasteboard, which the editor dims. Boards lie at the top level of the
+// layers, never one in another, and a picture may hold any number of them.
+
+// BoardFrame is what makes a group an artboard: its area of the canvas and its background. It is a value never
+// changed in place.
+type BoardFrame struct {
+	Rect image.Rectangle
+	Fill color.NRGBA // transparent leaves the board clear
+}
+
+// Board describes an artboard: its group's id and name, and its frame.
 type Board struct {
 	ID   int
 	Name string
 	Rect image.Rectangle
-	Fill color.NRGBA // the background; transparent leaves the board clear
+	Fill color.NRGBA
 }
 
-// ErrNoBoard means an artboard asked for is not in the picture.
-var ErrNoBoard = errors.New("there is no such artboard")
+// Errors the artboard operations can return.
+var (
+	ErrNoBoard     = errors.New("there is no such artboard")
+	ErrBoardInside = errors.New("an artboard stays at the top level of the layers, not inside another group")
+	ErrMergeBoard  = errors.New("an artboard cannot be merged; ungroup it first")
+)
 
 // minBoard is the smallest side a board can have.
 const minBoard = 1
 
-// Board finds a board by id.
-func (d *Doc) Board(id int) (Board, bool) {
-	for _, b := range d.Boards {
-		if b.ID == id {
-			return b, true
+// IsBoard reports whether n is an artboard.
+func (n *Node) IsBoard() bool { return n.Board != nil }
+
+func boardOf(n *Node) Board {
+	return Board{ID: n.ID, Name: n.Name, Rect: n.Board.Rect, Fill: n.Board.Fill}
+}
+
+// Boards lists the artboards, bottom first.
+func (d *Doc) Boards() []Board {
+	var out []Board
+	for i := len(d.Root.Children) - 1; i >= 0; i-- {
+		if c := d.Root.Children[i]; c.IsBoard() {
+			out = append(out, boardOf(c))
 		}
 	}
-	return Board{}, false
+	return out
+}
+
+// Board finds a board by id.
+func (d *Doc) Board(id int) (Board, bool) {
+	n := d.Node(id)
+	if n == nil || !n.IsBoard() {
+		return Board{}, false
+	}
+	return boardOf(n), true
+}
+
+// BoardOf is the board that n is in, or is, or 0.
+func (d *Doc) BoardOf(id int) int {
+	for _, c := range d.Root.Children {
+		if c.IsBoard() && (c.ID == id || within(c, id)) {
+			return c.ID
+		}
+	}
+	return 0
+}
+
+// within reports whether node id is somewhere inside group g.
+func within(g *Node, id int) bool {
+	for _, c := range g.Children {
+		if c.ID == id || within(c, id) {
+			return true
+		}
+	}
+	return false
 }
 
 // validBoard keeps a board's rectangle upright, at least a pixel and at most the largest picture.
@@ -46,114 +97,212 @@ func validBoard(r image.Rectangle) (image.Rectangle, error) {
 	return r, nil
 }
 
-// AddBoard adds a board over r called name, with a white background, as one step.
+// AddBoard adds a board over r called name, with a white background, and chooses it, as one step. The top-level
+// layers and groups lying wholly on r go into it, keeping their order; it takes the place of the topmost of them,
+// or else goes above the top-level node the chosen one is in.
 func (d *Doc) AddBoard(r image.Rectangle, name string) (Board, error) {
 	r, err := validBoard(r)
 	if err != nil {
 		return Board{}, err
 	}
+	if d.Root.IsSmart() {
+		return Board{}, ErrSmartBoard // its layers go into groups elsewhere, where boards cannot be
+	}
 	m := d.Mark()
-	b := Board{ID: d.newID(), Name: name, Rect: r, Fill: color.NRGBA{R: 255, G: 255, B: 255, A: 255}}
-	d.Boards = append(slices.Clone(d.Boards), b)
+	n := d.newBoard(r, name)
+	d.placeBoard(n, false)
+	d.Active = n.ID
+	d.EditMask = false
 	d.Commit("Add artboard", m)
-	return b, nil
+	return boardOf(n), nil
 }
 
-// SetBoard replaces a board, as resizing, renaming or recolouring it does, as one step called name.
+func (d *Doc) newBoard(r image.Rectangle, name string) *Node {
+	return &Node{ID: d.newID(), Name: name, Visible: true, Opacity: 1, Blend: BlendPassThrough, Open: true, Children: []*Node{},
+		Board: &BoardFrame{Rect: r, Fill: color.NRGBA{R: 255, G: 255, B: 255, A: 255}}}
+}
+
+// placeBoard puts a new board into the top level, taking in what lies wholly on it: in the place of the topmost of
+// that, or else above the top-level node the chosen one is in, or with under at the bottom, under everything.
+func (d *Doc) placeBoard(n *Node, under bool) {
+	at := -1
+	var kept []*Node
+	for _, c := range d.Root.Children {
+		reach, bounded := contentReach(c)
+		if !c.IsBoard() && bounded && !reach.Empty() && boundsOf2(c).In(n.Board.Rect) {
+			if at < 0 {
+				at = len(kept)
+			}
+			n.Children = append(n.Children, c)
+			continue
+		}
+		kept = append(kept, c)
+	}
+	switch {
+	case under:
+		at = len(kept)
+	case at < 0:
+		at = 0
+		if top := d.topLevel(d.Active); top != nil {
+			at = max(slices.Index(kept, top), 0)
+		}
+	}
+	d.Root.Children = slices.Insert(kept, at, n)
+}
+
+// boundsOf2 is where a node shows anything, exactly: a layer's bounds, a group's children's.
+func boundsOf2(n *Node) image.Rectangle {
+	if !n.IsGroup() {
+		return boundsOfNode(n)
+	}
+	var r image.Rectangle
+	for _, c := range n.Children {
+		r = r.Union(boundsOf2(c))
+	}
+	return r
+}
+
+// topLevel is the top-level node that node id is in, or is.
+func (d *Doc) topLevel(id int) *Node {
+	for _, c := range d.Root.Children {
+		if c.ID == id || within(c, id) {
+			return c
+		}
+	}
+	return nil
+}
+
+// SetBoard changes a board's name, area and background, as resizing, renaming or recolouring it does, as one step
+// called name.
 func (d *Doc) SetBoard(b Board, name string) error {
-	i := slices.IndexFunc(d.Boards, func(x Board) bool { return x.ID == b.ID })
-	if i < 0 {
+	n := d.Node(b.ID)
+	if n == nil || !n.IsBoard() {
 		return ErrNoBoard
 	}
 	r, err := validBoard(b.Rect)
 	if err != nil {
 		return err
 	}
-	b.Rect = r
 	m := d.Mark()
-	d.Boards = slices.Clone(d.Boards)
-	d.Boards[i] = b
+	n.Name, n.Board = b.Name, &BoardFrame{Rect: r, Fill: b.Fill}
 	d.Commit(name, m)
 	return nil
 }
 
-// MoveBoard moves a board by (dx, dy) with the layers that lie wholly on it, as dragging an artboard carries what
-// is drawn on it, as one step.
+// MoveBoard moves a board by (dx, dy) with everything in it, as one step.
 func (d *Doc) MoveBoard(id, dx, dy int) error {
-	i := slices.IndexFunc(d.Boards, func(x Board) bool { return x.ID == id })
-	if i < 0 {
+	n := d.Node(id)
+	if n == nil || !n.IsBoard() {
 		return ErrNoBoard
 	}
 	if dx == 0 && dy == 0 {
 		return nil
 	}
 	m := d.Mark()
-	on := d.Boards[i].Rect
-	for _, l := range d.Layers() {
-		if b := boundsOfNode(l); b.Empty() || !b.In(on) {
-			continue
-		}
-		switch {
-		case l.Vector != nil:
-			transformVector(l, Translate(float64(dx), float64(dy)))
-		case l.Pixels != nil:
-			l.Pixels = l.Pixels.Snapshot()
-			l.Pixels.Move(dx, dy)
-			shiftText(l, dx, dy)
-		}
-		if l.Mask != nil {
-			l.Mask = l.Mask.Snapshot()
-			l.Mask.Move(dx, dy)
-		}
-	}
-	d.Boards = slices.Clone(d.Boards)
-	d.Boards[i].Rect = on.Add(image.Pt(dx, dy))
+	moveNode(n, dx, dy)
 	d.Commit("Move artboard", m)
 	return nil
 }
 
-// DeleteBoard removes a board, leaving what is drawn on it, as one step.
+// moveNode moves a node's pixels, objects, text and masks, and its children's, by whole pixels.
+func moveNode(n *Node, dx, dy int) {
+	switch {
+	case n.Vector != nil:
+		transformVector(n, Translate(float64(dx), float64(dy)))
+	case n.Pixels != nil:
+		n.Pixels = n.Pixels.Snapshot()
+		n.Pixels.Move(dx, dy)
+		shiftText(n, dx, dy)
+	}
+	if n.Mask != nil {
+		n.Mask = n.Mask.Snapshot()
+		n.Mask.Move(dx, dy)
+	}
+	if n.Clip != nil {
+		n.Clip = n.Clip.Transformed(Translate(float64(dx), float64(dy)))
+	}
+	if b := n.Board; b != nil {
+		n.Board = &BoardFrame{Rect: b.Rect.Add(image.Pt(dx, dy)), Fill: b.Fill}
+	}
+	if s := n.Smart; s != nil {
+		// A smart object moved whole is a copy in another place, its shared layers the same.
+		n.Smart = &SmartLink{ID: s.ID, Offset: s.Offset.Add(image.Pt(dx, dy)), Version: s.Version}
+	}
+	for _, c := range n.Children {
+		if c.IsBoard() {
+			continue // never inside another, but a damaged file is not followed into one
+		}
+		moveNode(c, dx, dy)
+	}
+}
+
+// DeleteBoard removes a board, leaving what is in it in its place, as one step.
 func (d *Doc) DeleteBoard(id int) error {
-	i := slices.IndexFunc(d.Boards, func(x Board) bool { return x.ID == id })
-	if i < 0 {
+	n, parent, i := d.find(id)
+	if n == nil || !n.IsBoard() {
 		return ErrNoBoard
 	}
 	m := d.Mark()
-	d.Boards = slices.Delete(slices.Clone(d.Boards), i, i+1)
+	parent.Children = slices.Replace(parent.Children, i, i+1, n.Children...)
+	if d.Active == id {
+		if len(n.Children) > 0 {
+			d.Active = n.Children[0].ID
+		} else {
+			d.Active = d.someNode()
+		}
+	}
 	d.Commit("Delete artboard", m)
 	return nil
 }
 
 // BoardAt is the topmost board at canvas pixel p, or 0.
 func (d *Doc) BoardAt(p image.Point) int {
-	for i := len(d.Boards) - 1; i >= 0; i-- {
-		if p.In(d.Boards[i].Rect) {
-			return d.Boards[i].ID
+	for _, c := range d.Root.Children {
+		if c.IsBoard() && p.In(c.Board.Rect) {
+			return c.ID
 		}
 	}
 	return 0
 }
 
-// BoardPicture is a board as it is exported: its background and what is drawn on it, at its size.
+// BoardPicture is a board as it is exported: its background and what is in it, at its size.
 func (d *Doc) BoardPicture(id int) (*image.RGBA, error) {
-	b, ok := d.Board(id)
-	if !ok {
+	n := d.Node(id)
+	if n == nil || !n.IsBoard() {
 		return nil, ErrNoBoard
 	}
-	img := image.NewRGBA(b.Rect)
-	d.Render(img, b.Rect, 0)
+	img := image.NewRGBA(n.Board.Rect)
+	shown := *n
+	shown.Visible = true // a hidden board still exports as it looks
+	d.compositeInto(img, &Node{Children: []*Node{&shown}}, img.Rect, 0)
 	return img, nil
 }
 
-// drawBoards fills the boards' backgrounds within r of detail level l, under the layers.
-func (d *Doc) drawBoards(dst *image.RGBA, r image.Rectangle, l int) {
-	for _, b := range d.Boards {
-		if b.Fill.A == 0 {
-			continue
+// drawBoardFill lays a board's background over dst within r of detail level l.
+func drawBoardFill(dst *image.RGBA, b *BoardFrame, r image.Rectangle, l int) {
+	if b.Fill.A == 0 {
+		return
+	}
+	if br := levelDown(b.Rect, l).Intersect(r); !br.Empty() {
+		draw.Draw(dst, br, image.NewUniform(b.Fill), image.Point{}, draw.Over)
+	}
+}
+
+// boardsAtTop reports whether every board is a top-level node, as the operations that move nodes keep them.
+func (d *Doc) boardsAtTop() bool {
+	var deep func(g *Node) bool
+	deep = func(g *Node) bool {
+		for _, c := range g.Children {
+			if c.IsBoard() || deep(c) {
+				return true
+			}
 		}
-		br := image.Rect(b.Rect.Min.X>>l, b.Rect.Min.Y>>l, (b.Rect.Max.X+(1<<l)-1)>>l, (b.Rect.Max.Y+(1<<l)-1)>>l).Intersect(r)
-		if !br.Empty() {
-			draw.Draw(dst, br, image.NewUniform(b.Fill), image.Point{}, draw.Over)
+		return false
+	}
+	for _, c := range d.Root.Children {
+		if deep(c) {
+			return false
 		}
 	}
+	return true
 }

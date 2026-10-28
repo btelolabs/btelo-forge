@@ -181,3 +181,28 @@ func TestPauseHotkeyWhileRecording(t *testing.T) {
 		t.Errorf("opened %s", a.p.Sources[0].Path)
 	}
 }
+
+func TestWindowHotkeyHidesAndBringsBack(t *testing.T) {
+	x := newHarness(t)
+	a, h := x.a, x.h
+	if a.recorder() == nil {
+		t.Skip("hotkeys are not offered here")
+	}
+	if got := h.hotkeys[hotkeyWindow].String(); got != "Ctrl+Shift+F8" {
+		t.Fatalf("registered %q for the window", got)
+	}
+	a.Tick(Input{Hotkeys: []int{hotkeyWindow}})
+	if !h.hidden {
+		t.Fatal("the window in front was not hidden")
+	}
+	a.Tick(Input{Hotkeys: []int{hotkeyWindow}})
+	if h.hidden {
+		t.Fatal("the hidden window did not come back")
+	}
+	// A minimized window comes back rather than being hidden.
+	h.minimized = true
+	a.Tick(Input{Hotkeys: []int{hotkeyWindow}})
+	if h.minimized || h.hidden {
+		t.Errorf("minimized %v, hidden %v", h.minimized, h.hidden)
+	}
+}

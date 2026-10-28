@@ -62,9 +62,20 @@ func (a *App) prepareTools() {
 			}
 			t.ready, t.found, a.encoders = true, found, enc
 			a.checkRecording()
+			if a.settings.Camera.On && a.cam.bubble == nil {
+				a.showCamera(true, func(err error) {
+					if err != nil {
+						a.toast(a.u.tf("The camera could not be shown: %s", a.describe(err)), true)
+					}
+				})
+			}
 			waiting := t.waiting
 			t.waiting = nil
 			for i, path := range waiting {
+				if isEditFile(path) {
+					a.openEditFile(path) // in a tab of its own
+					continue
+				}
 				if i > 0 {
 					a.newTab()
 				}

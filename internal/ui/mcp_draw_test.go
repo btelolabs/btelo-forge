@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"context"
+	"image/color"
 	"image/png"
 	"os"
 	"slices"
@@ -71,14 +72,19 @@ func TestDrawingOverMCP(t *testing.T) {
 		Path   string `json:"path"`
 		Frame  []int  `json:"frame"`
 		Layers []struct {
-			ID   int    `json:"id"`
-			Kind string `json:"kind"`
+			ID       int              `json:"id"`
+			Kind     string           `json:"kind"`
+			Children []map[string]any `json:"children"`
 		} `json:"layers"`
+		BrushPresets []string `json:"brush_presets"`
 	}
 	// An infinite canvas: no frame.
 	s.ok("canvas_new", map[string]any{}, &state)
 	if state.Frame != nil || len(state.Layers) != 1 || !strings.HasSuffix(state.Path, ".btcanvas") {
 		t.Fatalf("new canvas %+v", state)
+	}
+	if !slices.Contains(state.BrushPresets, "ink-brush") {
+		t.Errorf("the brush presets offered: %v", state.BrushPresets)
 	}
 	var shape struct {
 		ID   int    `json:"id"`
@@ -93,27 +99,33 @@ func TestDrawingOverMCP(t *testing.T) {
 	// A brush stroke on a pixel layer above.
 	s.ok("canvas_layer", map[string]any{"action": "add", "name": "Ink"}, nil)
 	s.ok("canvas_paint", map[string]any{"points": [][]float64{{10, 200}, {190, 200}}, "color": "#00aa00", "size": 12, "hardness": 1}, nil)
+	s.ok("canvas_paint", map[string]any{"points": [][]float64{{20, 215}, {180, 215}}, "brush": "charcoal", "size": 10, "color": "#00aa00"}, nil)
+	if res := s.call("canvas_paint", map[string]any{"points": [][]float64{{10, 10}}, "brush": "feather"}); !res.IsError {
+		t.Error("an unknown brush preset was taken")
+	}
 	s.ok("canvas_add_text", map[string]any{"text": "Hi", "x": 20, "y": 20, "size": 40, "color": "#ffffff"}, nil)
-	s.ok("canvas_artboard", map[string]any{"action": "add", "name": "Card", "rect": []int{-10, -10, 260, 240}}, nil)
+	s.ok("canvas_artboard", map[string]any{"action": "add", "name": "Card", "rect": []int{-20, -20, 270, 250}}, nil)
 	s.ok("canvas_state", nil, &state)
-	if len(state.Layers) != 4 || x.a.art.d.Node(shape.ID).Name != "Rectangle 2" {
+	// The artboard took in the boolean's result, the ink and the text, which lie wholly on it.
+	if len(state.Layers) != 2 || state.Layers[0].Kind != "artboard" || len(state.Layers[0].Children) != 3 ||
+		x.a.art.d.Node(shape.ID).Name != "Rectangle 2" {
 		t.Fatalf("layers %+v", state.Layers)
 	}
 	d := x.a.art.d
 	if c := d.Composite(d.Bounds()).RGBAAt(100, 200); c.G < 150 || c.R > 10 {
 		t.Errorf("the stroke is %v", c)
 	}
-	if c := d.Composite(d.Bounds()).RGBAAt(190, 100); c.A != 0 {
-		t.Errorf("the boolean left %v in the bite", c)
+	if c := d.Composite(d.Bounds()).RGBAAt(190, 100); c != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("the boolean left %v in the bite, over the artboard's white", c)
 	}
 	// A picture of the artboard, and its export.
-	res := s.call("canvas_render", map[string]any{"artboard": d.Boards[0].ID})
+	res := s.call("canvas_render", map[string]any{"artboard": d.Boards()[0].ID})
 	img, isImage := res.Content[0].(*mcp.ImageContent)
 	if res.IsError || !isImage {
 		t.Fatalf("render: %+v", res.Content)
 	}
 	pic, err := png.Decode(bytes.NewReader(img.Data))
-	if err != nil || pic.Bounds().Dx() != 260 || pic.Bounds().Dy() != 240 {
+	if err != nil || pic.Bounds().Dx() != 270 || pic.Bounds().Dy() != 250 {
 		t.Fatalf("rendered %v, %v", pic.Bounds(), err)
 	}
 	var out struct {

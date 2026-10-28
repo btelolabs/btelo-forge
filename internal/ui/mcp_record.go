@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"time"
 
@@ -42,6 +43,21 @@ func awaitUI[T any](ctx context.Context, result chan T, timeout time.Duration) (
 	}
 }
 
+// recordRegion checks a region given as [x, y, width, height] against a screen of w×h pixels.
+func recordRegion(r []int, w, h int) (image.Rectangle, error) {
+	if len(r) != 4 {
+		return image.Rectangle{}, errors.New("region is [x, y, width, height]")
+	}
+	if r[2] < 16 || r[3] < 16 {
+		return image.Rectangle{}, errors.New("the region must be at least 16 pixels wide and high")
+	}
+	rect := image.Rect(r[0], r[1], r[0]+r[2], r[1]+r[3])
+	if !rect.In(image.Rect(0, 0, w, h)) {
+		return image.Rectangle{}, fmt.Errorf("the region must lie within the screen, 0,0 to %d×%d", w, h)
+	}
+	return rect, nil
+}
+
 type pathResult struct {
 	path string
 	err  error
@@ -78,8 +94,9 @@ func (a *App) addRecordTools(s *mcp.Server) {
 		SystemAudio  *bool  `json:"system_audio,omitempty" jsonschema:"record the sound the computer plays"`
 		Microphone   *bool  `json:"microphone,omitempty" jsonschema:"record a microphone"`
 		MicrophoneID string `json:"microphone_id,omitempty" jsonschema:"id from recording_status; the system default when left out"`
+		Region       []int  `json:"region,omitempty" jsonschema:"[x, y, width, height] in the screen's pixels to record only that part, such as one window; left out, the whole screen is recorded, or the region the user picks when they chose to"`
 	}
-	mcp.AddTool(s, &mcp.Tool{Name: "start_recording", Description: "Start recording the screen, with sound, into the folder exports go to (the user's videos folder when exports go beside the original). Changed options are remembered as the user's choice. The app window minimizes unless the user turned that off; the user can stop with the recording hotkey (see recording_status). Call stop_recording to finish and open the recording for editing."},
+	mcp.AddTool(s, &mcp.Tool{Name: "start_recording", Description: "Start recording the screen, with sound, into the folder exports go to (the user's videos folder when exports go beside the original). Changed options are remembered as the user's choice. The app window stays as it is unless the user chose to minimize it; the user can stop with the recording hotkey (see recording_status). Call stop_recording to finish and open the recording for editing."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in startIn) (*mcp.CallToolResult, any, error) {
 			done := make(chan pathResult, 1)
 			_, err := call(a, func() (any, error) {
@@ -114,8 +131,24 @@ func (a *App) addRecordTools(s *mcp.Server) {
 				if in.MicrophoneID != "" {
 					s.MicrophoneID = in.MicrophoneID
 				}
+				var region image.Rectangle
+				if in.Region != nil {
+					d, ok := a.chosenDisplay()
+					if !ok {
+						return nil, errors.New("no screen to record was found")
+					}
+					var err error
+					if region, err = recordRegion(in.Region, d.Width, d.Height); err != nil {
+						return nil, err
+					}
+				}
 				a.saveSettings()
-				a.startRecording(func(path string, err error) { done <- pathResult{path, err} })
+				report := func(path string, err error) { done <- pathResult{path, err} }
+				if in.Region != nil {
+					a.startRecordingRegion(region, report)
+				} else {
+					a.startRecording(report)
+				}
 				return nil, nil
 			})
 			if err != nil {

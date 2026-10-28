@@ -15,17 +15,17 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
-// Destination is the file the export writes: "<name>.cut.mp4" in dir (beside the source when dir is empty),
+// Destination is the file the export writes: "<name>.cut<ext>" in dir (beside the source when dir is empty),
 // numbered when it already exists.
-func Destination(source, dir string) string {
+func Destination(source, dir, ext string) string {
 	base := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
 	if dir == "" {
 		dir = filepath.Dir(source)
 	}
 	for n := 1; ; n++ {
-		name := base + ".cut.mp4"
+		name := base + ".cut" + ext
 		if n > 1 {
-			name = fmt.Sprintf("%s.cut-%d.mp4", base, n)
+			name = fmt.Sprintf("%s.cut-%d%s", base, n, ext)
 		}
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
@@ -52,8 +52,12 @@ func Credits(p *project.Project) string {
 // ErrCredits means the video was written but its credits file was not.
 var ErrCredits = errors.New("the video was exported but its credits file could not be written")
 
-// Encode runs an export, reporting progress in [0, 1]; the result appears at output only when it succeeds.
-// creditsHeading is the first line of the credits file written beside it when the music asks for attribution.
+// Analysing is the progress reported while a pass that cannot measure its progress runs.
+const Analysing = -1.0
+
+// Encode runs an export, reporting progress in [0, 1], or Analysing while it cannot tell; the result appears at
+// output only when it succeeds. creditsHeading is the first line of the credits file written beside it when the
+// music asks for attribution.
 func Encode(ctx context.Context, p *project.Project, overlays []Overlay, output, creditsHeading string, progress func(float64)) error {
 	enc, err := media.AvailableEncoders()
 	if err != nil {
@@ -66,10 +70,14 @@ func Encode(ctx context.Context, p *project.Project, overlays []Overlay, output,
 	}
 	defer job.Close()
 	for i, args := range job.Passes {
-		share := 1 / float64(len(job.Passes))
+		k := i - job.Blind
+		share := 1 / float64(len(job.Passes)-job.Blind)
+		if k < 0 && progress != nil {
+			progress(Analysing)
+		}
 		err := runPass(ctx, job, args, func(f float64) {
-			if progress != nil {
-				progress((float64(i) + f) * share)
+			if progress != nil && k >= 0 {
+				progress((float64(k) + f) * share)
 			}
 		})
 		if err != nil {
@@ -81,7 +89,7 @@ func Encode(ctx context.Context, p *project.Project, overlays []Overlay, output,
 		os.Remove(part)
 		return err
 	}
-	if credits := Credits(p); credits != "" {
+	if credits := Credits(p); credits != "" && !p.Export.Codec.Animated() { // an animation has no sound to credit
 		path := strings.TrimSuffix(output, filepath.Ext(output)) + ".credits.txt"
 		if err := os.WriteFile(path, []byte(creditsHeading+"\r\n"+strings.ReplaceAll(credits, "\n", "\r\n")+"\r\n"), 0o644); err != nil {
 			return fmt.Errorf("%w: %w", ErrCredits, err)

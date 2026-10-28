@@ -40,8 +40,10 @@ Free, open source, offline, and driven by AI over MCP.</p>
 <p align="center"><img src="docs/screenshots/en-canvas.jpg" alt="A poster on an artboard: pixel, vector, text and adjustment layers, with the node tool on a curve"></p>
 
 **Pixels, as in Photoshop**
-- Brushes and an eraser with hardness, flow, smoothing and tip shape; the clone stamp; dodge, burn, sponge, blur,
-  sharpen and smudge.
+- Brushes and an eraser with hardness, flow, smoothing, tip shape and shape dynamics (size and angle jitter,
+  scatter, a tip that turns with the stroke); twelve brush presets from pencil, charcoal and ink to bristle brushes,
+  sponge and spatter, and tips made from your own pictures; the clone stamp; dodge, burn, sponge, blur, sharpen and
+  smudge.
 - Marquee, lasso and magic wand selections; paint bucket and gradients.
 - Layers and groups with masks, 26 blend modes and locked transparency; adjustment layers that change what is under
   them without touching its pixels; layer styles — drop and inner shadow, outer and inner glow, stroke, colour
@@ -58,10 +60,28 @@ Free, open source, offline, and driven by AI over MCP.</p>
 
 **The canvas**
 - Infinite: start drawing without choosing a size. Add artboards for fixed-size pictures, each exported on its own.
+- Slices: K marks the chosen layers, groups and artboards, adding .png to their names, and File › Export slices
+  writes each as a PNG beside the canvas file. Names follow the Krita named-assets rules — `assets/fish.png` into a
+  folder, `fish_300x200.png` at a fixed size, a `200x300/assets` group handing its folder and size to what is in it —
+  and the ⓘ by each slice says what it will export and why.
 - Open a screenshot as a canvas, or draw over a video as an overlay that follows every save of its canvas.
 - A canvas file keeps everything — layers, vectors, text, masks, effects, adjustment layers and artboards.
 
 <p align="center"><img src="docs/screenshots/en-style.jpg" alt="The Layer Style dialog"></p>
+
+## Mind maps and flowcharts
+
+- Mind maps and flowcharts on one infinite board, as XMind and Whimsical together: a tree's topic can have connectors,
+  and a flowchart's box can grow a tree. Trees lay out as mind maps, logic charts, org charts or outlines.
+- Everything on the board is a node: topics and flowchart shapes, free text, tables with formulas (=SUM(B2:B9)),
+  pictures and animated GIFs, videos that play where they are, smart objects from your canvases, which follow every
+  change you draw, and other mind maps shown inside — a map that ends up inside itself shows a warning instead.
+- Keys as in XMind: Tab adds a child, Enter a sibling, typing replaces a topic's words, arrows move between topics.
+  Drag a topic onto another to move it there, or out onto the board to free it; drag from the dots at a box's sides
+  to draw a connector, or onto empty board for a new connected box.
+- Built for hundreds of thousands of nodes: the board is drawn from tiles on every core, only what is in view, with
+  an overview of the whole board. Files are small: pictures and videos are referred to, never copied.
+- Mind maps show in the asset manager with a picture of the whole map.
 
 ## Screen recording (Windows)
 
@@ -76,14 +96,27 @@ Free, open source, offline, and driven by AI over MCP.</p>
 
 <p align="center"><img src="docs/screenshots/en-record.jpg" alt="The recording dialog"></p>
 
+## Live streaming (Windows)
+
+- Streams to several platforms at once — YouTube, Twitch, Bilibili, Douyin, Kuaishou, WeChat Channels, Huya, Douyu,
+  or any RTMP, RTMPS or SRT server. The picture is encoded once on the graphics card, so each extra platform costs
+  only upload.
+- Streaming and recording are separate, as in OBS: the stream shows the screen while it is recorded and black between
+  recordings, and stopping a recording, or recording another part of the screen, never interrupts it.
+- Each platform connects, reconnects and falls behind on its own; one that drops never holds up the others, and can
+  be added or taken off while live. Stream keys are kept encrypted for your Windows account.
+- The platforms are a JSON configuration: add one in Settings → Extensions, or let an AI add it.
+- Your camera can sit on the screen in a corner, as a circle or a rounded rectangle with a border, so recordings and
+  streams of the screen have it. Drag it to move it, drag its corner or turn the wheel over it to resize it.
+
 ## AI control over MCP
 
 - A built-in MCP server lets Claude, Codex, Cursor or any MCP client do what you can do with the mouse: edit videos,
-  paint and draw on canvases, record the screen, and look at the result.
-- Each kind of work has its own server — video editing, drawing, recording, or everything — so an AI hears only
+  paint and draw on canvases, build and keep up mind maps, record the screen, and look at the result.
+- Each kind of work has its own server — video editing, drawing, mind maps, recording, or everything — so an AI hears only
   about the tools it needs. Settings copies the setup for it, ready to paste.
-- Music sites, speech models and the ffmpeg download source are plain JSON that an AI (or you, in Settings) can
-  change.
+- Music sites, speech models, streaming platforms and the ffmpeg download source are plain JSON that an AI (or you,
+  in Settings) can change. Stream keys given to an AI are stored encrypted and never shown to it again.
 
 <table>
   <tr>
@@ -108,8 +141,9 @@ Free, open source, offline, and driven by AI over MCP.</p>
 | Windows on ARM | `btelo-forge-windows-arm64.zip` |
 | macOS 11+, Apple silicon and Intel | `btelo-forge-macos.zip` |
 
-There is nothing else to install. If ffmpeg is missing or older than 6.0, a static build is downloaded once into the
-app's own folder. The macOS app is signed and notarised by Apple. On macOS, AI subtitles use `whisper-cli` from
+There is nothing else to install. The app uses its own ffmpeg, so that recording, streaming and exporting work the
+same on every computer: a static build is downloaded once into the app's own folder (Settings → Extensions → ffmpeg
+can allow the one installed on the computer instead). The macOS app is signed and notarised by Apple. On macOS, AI subtitles use `whisper-cli` from
 Homebrew.
 
 Btelo Forge was called Btelo Video Cut; releases up to 0.1.3 carry that name (`btelo-cut-*.zip`). Its settings,

@@ -185,6 +185,10 @@ func (t *TransformSession) SetMesh(m Mesh, name string) (image.Rectangle, error)
 	}
 	t.mesh, t.name = &m, name
 	out := meshClip(m, t.bounds)
+	if t.clip != nil && t.base == nil {
+		clip := meshVector(*t.clip, t.bounds, m) // it bends with the whole layer
+		t.l.Clip = &clip
+	}
 	switch {
 	case t.vector != nil:
 		v := meshVector(*t.vector, t.bounds, m)
@@ -277,7 +281,7 @@ func meshVector(v Vector, src image.Rectangle, m Mesh) Vector {
 	// The curve in canvas space, so the mesh's map applies to it directly.
 	var paths []Subpath
 	for _, s := range c.Path {
-		ns := Subpath{Closed: s.Closed}
+		ns := Subpath{Closed: s.Closed, Op: s.Op}
 		if len(s.Nodes) == 1 {
 			p := c.M.Map(s.Nodes[0].P) // mapped by the mesh below, with the rest
 			ns.Nodes = []PathNode{{P: p, In: p, Out: p}}

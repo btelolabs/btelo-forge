@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/proc"
 )
 
 // Status is how a recording is going.
@@ -57,7 +58,8 @@ type segment struct {
 	conn      net.Conn
 	connMu    sync.Mutex
 	closing   bool
-	listening bool // the sound goes to ffmpeg through a connection
+	listening bool  // the sound goes to ffmpeg through a connection
+	origin    int64 // the counter reading the segment's sound is timed from
 }
 
 // Start begins recording; it returns once ffmpeg and the audio devices are running.
@@ -155,12 +157,46 @@ func (r *Recorder) Stop(ctx context.Context) (string, error) {
 	return r.opts.Path, join(ctx, r.parts, r.opts.Path)
 }
 
-// begin starts a segment: the audio sources, the mixer feeding ffmpeg through a local socket, and ffmpeg.
+// begin starts the next segment of the recording.
 func (r *Recorder) begin() error {
 	o := r.opts
 	part := strings.TrimSuffix(o.Path, filepath.Ext(o.Path)) + fmt.Sprintf(".part%d.mkv", len(r.parts)+1)
+	_, err := startSegment(o, func(t0 int64, audio string) []string { return recordArgs(o, t0, audio, part) }, nil, segmentHooks{
+		started: func(s *segment) {
+			r.mu.Lock()
+			r.parts = append(r.parts, part)
+			r.cur = s
+			r.mu.Unlock()
+		},
+		levels: func(s *segment, levels [2]float32) {
+			r.mu.Lock()
+			if r.cur == s {
+				r.levels = levels
+			}
+			r.mu.Unlock()
+		},
+		failed: r.fail,
+	})
+	if err != nil {
+		os.Remove(part)
+	}
+	return err
+}
+
+// segmentHooks tell the owner of a segment what happens to it: started once ffmpeg and the sound run, levels every
+// 10 ms with the sound's loudness (also before started), and failed, after started, when ffmpeg stopped by itself.
+type segmentHooks struct {
+	started func(s *segment)
+	levels  func(s *segment, levels [2]float32)
+	failed  func(s *segment, err error)
+}
+
+// startSegment starts one ffmpeg run: the audio sources, the mixer feeding ffmpeg through a local socket, and
+// ffmpeg with the arguments args makes for t0 and the sound's address ("" without sound); stdout, when not nil,
+// receives what ffmpeg writes to its standard output.
+func startSegment(o Options, args func(t0 int64, audio string) []string, stdout io.Writer, hooks segmentHooks) (*segment, error) {
 	origin, t0 := counter(), wallMicros()
-	s := &segment{exited: make(chan struct{}), quit: make(chan struct{}), drain: make(chan struct{}), stderr: &tailBuffer{}}
+	s := &segment{origin: origin, exited: make(chan struct{}), quit: make(chan struct{}), drain: make(chan struct{}), stderr: &tailBuffer{}}
 	// ffmpeg grabs no picture until its sound input delivers, so the mixer feeds it from the start, with silence
 	// until the audio devices have opened; they open meanwhile, timed from origin like the picture.
 	var address string
@@ -169,7 +205,7 @@ func (r *Recorder) begin() error {
 	if o.audio() {
 		var err error
 		if listener, err = net.Listen("tcp", "127.0.0.1:0"); err != nil {
-			return err
+			return nil, err
 		}
 		address = "tcp://" + listener.Addr().String()
 		var tracks []*track
@@ -177,12 +213,13 @@ func (r *Recorder) begin() error {
 		s.audio.Add(1)
 		go func() {
 			defer s.audio.Done()
-			r.feed(s, listener, tracks, origin)
+			s.feed(listener, tracks, origin, hooks.levels)
 		}()
 	}
-	cmd, err := media.Command(context.Background(), "ffmpeg", recordArgs(o, t0, address, part)...)
+	cmd, err := media.Command(context.Background(), "ffmpeg", args(t0, address)...)
 	if err == nil {
 		cmd.Stderr = s.stderr
+		cmd.Stdout = stdout
 		s.stdin, err = cmd.StdinPipe()
 	}
 	if err == nil {
@@ -193,23 +230,19 @@ func (r *Recorder) begin() error {
 			listener.Close()
 			s.end()
 		}
-		return err
+		return nil, err
 	}
 	if opened != nil {
 		if err := opened(); err != nil {
 			listener.Close()
 			s.end()
-			cmd.Process.Kill()
+			proc.KillTree(cmd.Process)
 			cmd.Wait()
-			os.Remove(part)
-			return err
+			return nil, err
 		}
 	}
 	s.cmd, s.started, s.listening = cmd, time.Now(), listener != nil
-	r.mu.Lock()
-	r.parts = append(r.parts, part)
-	r.cur = s
-	r.mu.Unlock()
+	hooks.started(s)
 	go func() {
 		s.exitErr = cmd.Wait()
 		s.connMu.Lock()
@@ -223,10 +256,10 @@ func (r *Recorder) begin() error {
 		}
 		close(s.exited)
 		if !closing {
-			r.fail(s, fmt.Errorf("recording stopped: %v: %s", s.exitErr, s.stderr.String()))
+			hooks.failed(s, fmt.Errorf("ffmpeg stopped: %v: %s", s.exitErr, s.stderr.String()))
 		}
 	}()
-	return nil
+	return s, nil
 }
 
 // end stops the segment's audio and waits for it.
@@ -299,8 +332,9 @@ func (s *segment) startAudio(o Options, origin int64) (tracks []*track, opened f
 	}
 }
 
-// feed accepts ffmpeg's connection and writes the mixed sound to it every 10 ms until the segment ends.
-func (r *Recorder) feed(s *segment, l net.Listener, tracks []*track, origin int64) {
+// feed accepts ffmpeg's connection and writes the mixed sound to it every 10 ms until the segment ends, reporting
+// the sound's levels as it goes.
+func (s *segment) feed(l net.Listener, tracks []*track, origin int64, report func(s *segment, levels [2]float32)) {
 	conn, err := l.Accept()
 	l.Close()
 	if err != nil {
@@ -344,11 +378,7 @@ func (r *Recorder) feed(s *segment, l net.Listener, tracks []*track, origin int6
 				levels[i] = max(t.takePeak(), levels[i]*0.85)
 			}
 		}
-		r.mu.Lock()
-		if r.cur == s {
-			r.levels = levels
-		}
-		r.mu.Unlock()
+		report(s, levels)
 	}
 }
 
@@ -368,7 +398,7 @@ func (s *segment) stop() error {
 	select {
 	case <-s.exited:
 	case <-time.After(15 * time.Second):
-		s.cmd.Process.Kill()
+		proc.KillTree(s.cmd.Process)
 		<-s.exited
 	}
 	s.end()
@@ -569,4 +599,11 @@ func (t *tailBuffer) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return lastLine(string(t.buf))
+}
+
+// lines are the whole lines kept, oldest first.
+func (t *tailBuffer) lines() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.Split(strings.TrimSpace(string(t.buf)), "\n")
 }

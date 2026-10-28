@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/btelolabs/btelo-forge/internal/capture"
 	"github.com/btelolabs/btelo-forge/internal/library"
 	"github.com/btelolabs/btelo-forge/internal/media"
 	"github.com/btelolabs/btelo-forge/internal/transcribe"
@@ -23,7 +24,7 @@ type configKind struct {
 }
 
 // configTitles marks the titles of configKinds for translation.
-var configTitles = msgs("Music sources", "Subtitle models", "ffmpeg")
+var configTitles = msgs("Music sources", "Subtitle models", "ffmpeg", "Streaming platforms")
 
 var configKinds = []configKind{
 	{
@@ -64,6 +65,20 @@ var configKinds = []configKind{
 			return nil
 		},
 	},
+	{
+		id: "streaming_platforms", file: "streaming-platforms.json", title: configTitles[3], defaults: capture.DefaultPlatformsJSON, guide: capture.PlatformsGuide,
+		apply: func(a *App, data []byte) error {
+			p, err := capture.ParsePlatforms(data)
+			if err != nil {
+				return err
+			}
+			if len(p.Platforms) == 0 {
+				return errors.New("list at least one platform")
+			}
+			a.onAir.platforms = p
+			return nil
+		},
+	},
 }
 
 func findConfig(id string) (configKind, error) {
@@ -72,7 +87,7 @@ func findConfig(id string) (configKind, error) {
 			return k, nil
 		}
 	}
-	return configKind{}, fmt.Errorf("unknown configuration %q (use music_sources, subtitle_models or ffmpeg)", id)
+	return configKind{}, fmt.Errorf("unknown configuration %q (use music_sources, subtitle_models, ffmpeg or streaming_platforms)", id)
 }
 
 func (a *App) configPath(k configKind) string { return filepath.Join(a.stateDir, k.file) }

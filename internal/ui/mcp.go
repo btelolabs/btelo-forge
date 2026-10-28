@@ -23,32 +23,34 @@ const mcpDomainAll = -1
 // mcpDomains are the domains Settings offers to copy, in order, named by mcpDomainNames; mcpDomainPaths are where
 // each is served, under /mcp.
 var (
-	mcpDomains     = []int{domainVideo, domainDrawing, domainRecording, mcpDomainAll}
-	mcpDomainNames = msgs("Video editing", "Drawing", "Recording", "Everything")
-	mcpDomainPaths = map[int]string{domainVideo: "/video", domainDrawing: "/drawing", domainRecording: "/recording", mcpDomainAll: ""}
+	mcpDomains     = []int{domainVideo, domainDrawing, domainMind, domainRecording, mcpDomainAll}
+	mcpDomainNames = msgs("Video editing", "Drawing", "Mind maps", "Recording", "Everything")
+	mcpDomainPaths = map[int]string{domainVideo: "/video", domainDrawing: "/drawing", domainMind: "/mind", domainRecording: "/recording", mcpDomainAll: ""}
 )
 
 // mcpCommonTools are in every domain's server.
-var mcpCommonTools = []string{"get_state", "new_tab", "switch_tab", "close_tab", "screenshot"}
+var mcpCommonTools = append([]string{"get_state", "new_tab", "switch_tab", "close_tab", "screenshot", "get_config", "set_config", "reset_config"}, mcpAssetTools...)
 
 // mcpDomainTools are each domain's own tools; TestMCPToolsAreAllListed keeps them in step with the server.
 var mcpDomainTools = map[int][]string{
 	domainVideo: {"open_video", "seek", "split", "delete_item", "delete_items", "move_item", "trim_item", "set_clip",
 		"set_items", "set_track", "add_text", "add_image", "update_overlay", "add_music_file", "search_music",
 		"list_music_sources", "add_library_music", "generate_subtitles", "list_subtitle_models", "subtitle_status",
-		"export", "export_status", "export_options", "set_export", "list_exports", "undo", "redo", "frame_at",
-		"get_config", "set_config", "reset_config"},
+		"export", "export_status", "export_options", "set_export", "list_exports", "undo", "redo", "frame_at", "player_mode", "save_edit"},
 	domainDrawing: {"canvas_new", "canvas_open", "canvas_state", "canvas_render", "canvas_save", "canvas_export",
 		"canvas_layer", "canvas_set_layer", "canvas_select", "canvas_paint", "canvas_fill", "canvas_add_shape",
 		"canvas_add_path", "canvas_set_vector", "canvas_boolean", "canvas_add_text", "canvas_filter", "canvas_transform",
 		"canvas_resize", "canvas_artboard", "canvas_history", "canvas_retouch", "canvas_adjustment", "canvas_style"},
-	domainRecording: {"recording_status", "start_recording", "pause_recording", "stop_recording", "take_screenshot"},
+	domainMind: {"mind_new", "mind_open", "mind_state", "mind_add", "mind_update", "mind_set_cells", "mind_delete", "mind_move",
+		"mind_connect", "mind_update_connectors", "mind_find", "mind_outline", "mind_render", "mind_show", "mind_history", "mind_save"},
+	domainRecording: {"recording_status", "start_recording", "pause_recording", "stop_recording", "take_screenshot",
+		"stream_status", "set_stream_destination", "remove_stream_destination", "set_stream_options", "start_stream", "stop_stream", "camera_status", "set_camera"},
 }
 
 // mcpToolsOf are the tools of a domain's server, the common ones first.
 func mcpToolsOf(domain int) []string {
 	out := slices.Clone(mcpCommonTools)
-	for _, d := range []int{domainVideo, domainDrawing, domainRecording} {
+	for _, d := range []int{domainVideo, domainDrawing, domainMind, domainRecording} {
 		if domain == mcpDomainAll || domain == d {
 			out = append(out, mcpDomainTools[d]...)
 		}
@@ -61,9 +63,15 @@ var mcpToolNames = mcpToolsOf(mcpDomainAll)
 
 // The instructions: what the app is and its common tools, then each domain's part.
 const (
-	mcpIntro = ProductName + ` is a desktop app on this computer for editing videos, drawing and recording the screen.
-These tools drive its open window directly. It works in tabs, each a video edit or a drawing canvas: get_state lists
-them, new_tab, switch_tab and close_tab manage them, and screenshot shows the window as it looks.`
+	mcpIntro = ProductName + ` is a desktop app on this computer for editing videos, drawing, mind maps, recording the screen and
+streaming live.
+These tools drive its open window directly. It works in tabs, each a video edit, a drawing canvas or a mind map: get_state lists
+them, new_tab, switch_tab and close_tab manage them, and screenshot shows the window as it looks. The app is
+extended by JSON configurations — music_sources, subtitle_models, ffmpeg and streaming_platforms: get_config reads
+one with a guide to its format, set_config replaces it after checking it, and reset_config goes back to the built-in.
+Files are managed as in Eagle: assets_browse shows a folder in the asset manager tab, assets_list lists a folder's
+files with their tags and categories, assets_tag and assets_categorize organise them, and assets_trash moves files to
+the Recycle Bin.`
 
 	mcpVideoInstructions = `Video editing: call get_state first; ids of clips, overlays and music come from it. Times are seconds on the
 output timeline. Open a video with open_video (placement "new_tab" for a separate edit, "append" to add it to the end
@@ -75,7 +83,8 @@ subtitle engines and models are JSON configurations: read one with get_config (i
 change it with set_config (it is checked before it is used) and undo that with reset_config — for example to add a
 music site, a new model or another ffmpeg download (name ffmpeg). Change several items at once with set_items
 (volume, opacity) and delete_items. Before exporting, export_options lists the presets — from high quality to extreme
-compression, or fit a size in megabytes — and set_export or export applies them. get_state reports whether ffmpeg is
+compression, or fit a size in megabytes, or a silent looping GIF or WebP animation — and set_export or export
+applies them. get_state reports whether ffmpeg is
 ready. Check the result with frame_at (a picture of the output at a time), then export with export and poll
 export_status. Every change can be undone with undo.`
 
@@ -84,7 +93,7 @@ infinite canvas (a frame or artboards give it fixed sizes to export). Make one w
 infinite canvas) or open one with canvas_open, then call canvas_state: it lists the layers with their ids, kinds and
 bounds, the artboards, the selection and the history. Coordinates are canvas pixels; rectangles are
 [x, y, width, height]. Pixel work goes to the chosen pixel layer, within the selection: canvas_select (rect,
-ellipse, polygon, wand…), canvas_paint (brush strokes along points, or erasing), canvas_fill (colour, paint bucket,
+ellipse, polygon, wand…), canvas_paint (brush strokes along points, with the brush or a preset such as pencil or ink-brush, or erasing), canvas_fill (colour, paint bucket,
 gradients), canvas_filter (blur, sharpen, noise, mosaic, levels, hue/saturation, brightness/contrast, posterize,
 threshold, invert, desaturate). Vectors are layers of their own, sharp at any size: canvas_add_shape (rectangle,
 ellipse, polygon, star, line), canvas_add_path (Bézier nodes, or a smooth curve through points), canvas_set_vector
@@ -98,9 +107,37 @@ canvas_artboard manages artboards. Look at the result with canvas_render and exp
 picture, the selection or the artboards); the canvas saves itself, and canvas_save saves at once. canvas_history
 undoes and redoes.`
 
+	mcpMindInstructions = `Mind maps: a mind map (.btmind) is an infinite board where every object is a node — a topic (words in a
+shape), a table with spreadsheet formulas, a picture or animated GIF, a video, a canvas's smart object (by its link
+id: it follows every change made to it on the canvas) or another mind map shown inside (nested maps that hold each
+other are shown as a warning, never followed for ever). Topics grow into trees laid out by their root's layout: map
+(both sides), right or left (logic charts), down or up (org charts) or list (an outline); only free nodes have x and
+y, a tree's nodes are placed by it. Connectors join any two nodes as a flowchart's arrows do, with labels, curve,
+elbow or straight routes, arrowheads and dashes. Make a map with mind_new or open one with mind_open (every tool
+takes path to act on a map file instead of the active tab); call mind_state for its nodes and connectors with ids
+(page a large map with offset and limit, or read it as text with mind_outline). Build in batches: mind_add takes
+whole trees nested by children (keys let later nodes and connectors in the same call refer to new ones) or a
+Markdown outline, and connectors; a flowchart is free topics with shapes (capsule for start and end, rounded for a
+step, diamond for a decision, parallelogram for input or output) joined by mind_connect. mind_update changes nodes,
+mind_set_cells tables' cells, mind_move puts a node under another or frees it, mind_delete removes nodes and
+connectors, mind_find searches, mind_show shows the user nodes in the window, and mind_render returns a PNG to check
+the result. Each call is one step, undone with mind_history; the map saves itself, and mind_save saves at once.`
+
 	mcpRecordingInstructions = `Recording: on Windows the screen can be recorded with sound: recording_status lists the screens and
 microphones, start_recording begins, pause_recording pauses and resumes, and stop_recording saves the MP4 and opens it
-in a tab for editing; take_screenshot saves a PNG of the screen.`
+in a tab for editing; take_screenshot saves a PNG of the screen.
+
+Live streaming goes to several platforms at once, encoded once: stream_status lists the destinations and the
+platforms that can be added; set_stream_destination adds or changes one (platform, server, the stream key the user
+gives you — it is stored encrypted and never shown again — and whether it is streamed to), remove_stream_destination
+forgets one, set_stream_options chooses the canvas (landscape, or upright for phone platforms), frame rate, bit rate
+and sound, and start_stream and stop_stream go live and end it. The stream is separate from recording, as in OBS: it
+shows the screen while a recording runs and black between recordings, without ever interrupting. The platforms are a
+JSON configuration (get_config streaming_platforms): add a service by adding an entry, no code needed.
+
+The camera can be shown on the screen in a window of its own, so that it is in recordings and streams: set_camera
+shows or hides it and sets its shape (a square with 50% corners is a circle), size, border and place;
+camera_status lists the cameras.`
 )
 
 // mcpInstructionsFor are the instructions of a domain's server.
@@ -109,7 +146,7 @@ func mcpInstructionsFor(domain int) string {
 	for _, p := range []struct {
 		domain int
 		text   string
-	}{{domainVideo, mcpVideoInstructions}, {domainDrawing, mcpDrawingInstructions}, {domainRecording, mcpRecordingInstructions}} {
+	}{{domainVideo, mcpVideoInstructions}, {domainDrawing, mcpDrawingInstructions}, {domainMind, mcpMindInstructions}, {domainRecording, mcpRecordingInstructions}} {
 		if domain == mcpDomainAll || domain == p.domain {
 			parts = append(parts, p.text)
 		}
@@ -127,8 +164,12 @@ func (a *App) mcpServer(domain int) *mcp.Server {
 	a.addConfigTools(s)
 	a.addExportTools(s)
 	a.addRecordTools(s)
+	a.addLiveTools(s)
+	a.addCameraTools(s)
 	a.addDrawTools(s)
 	a.addDrawToolsMore(s)
+	a.addMindTools(s)
+	a.addAssetTools(s)
 	if domain != mcpDomainAll {
 		keep := mcpToolsOf(domain)
 		var drop []string
@@ -155,7 +196,7 @@ func mcpServerName(domain int) string {
 
 // mcpTasks say what an AI is asked to do with each domain's server.
 var mcpTasks = map[int]string{domainVideo: "edit videos", domainDrawing: "draw and edit pictures",
-	domainRecording: "record the screen", mcpDomainAll: "edit videos, draw and record the screen"}
+	domainMind: "think in mind maps and flowcharts", domainRecording: "record the screen", mcpDomainAll: "edit videos, draw, think in mind maps and record the screen"}
 
 // mcpConnection is the text Settings copies for a domain: paste it to an AI and it knows how to connect and what it
 // can do there.
@@ -402,5 +443,23 @@ func (a *App) addStateTools(s *mcp.Server) {
 		}
 		a.seek(in.Time)
 		return map[string]float64{"playhead": a.playhead}, nil
+	})
+	tool(s, a, "save_edit", "Save the active edit as a .btcut file (in the default export folder the first time, then to the same file), to open again with open_video.",
+		func(none) (any, error) {
+			path, err := a.saveEditFile()
+			if err != nil {
+				return nil, err
+			}
+			return map[string]string{"path": path}, nil
+		})
+	type watchIn struct {
+		On bool `json:"on" jsonschema:"true hides every tool, leaving the picture and a seek bar; false brings the editor back"`
+	}
+	tool(s, a, "player_mode", "Show the active edit as a video player, or the editor again.", func(in watchIn) (any, error) {
+		if a.p == nil {
+			return nil, errNoProject
+		}
+		a.setWatching(in.On)
+		return map[string]bool{"player_mode": a.watching()}, nil
 	})
 }

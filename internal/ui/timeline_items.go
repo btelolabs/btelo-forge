@@ -58,9 +58,9 @@ func (a *App) outline(r gfx.Rect, selected, hot bool) {
 	u := &a.u
 	switch {
 	case selected:
-		u.c.RoundOutline(r, u.px(6), u.px(2), colWhite)
+		u.c.Outline(r, u.px(2), colWhite)
 	case hot:
-		u.c.RoundOutline(r, u.px(6), u.px(1), gfx.Alpha(colText, 0.5))
+		u.c.Outline(r, u.px(1), gfx.Alpha(colText, 0.5))
 	}
 }
 
@@ -177,7 +177,7 @@ func (a *App) drawClip(t tracks, track int, c project.Clip, r gfx.Rect) {
 	if track > 0 {
 		bg = colVideoUpper
 	}
-	u.c.RoundRect(r, u.px(6), bg)
+	u.c.Fill(r, bg)
 	u.c.Push(r.Inset(u.px(1)))
 	src := a.p.SourceOf(c)
 	sm := a.media.sources[src.Path]
@@ -198,11 +198,11 @@ func (a *App) drawClip(t tracks, track int, c project.Clip, r gfx.Rect) {
 		}
 	}
 	wave := gfx.Rect{X: r.X, Y: r.Bottom() - waveH, W: r.W, H: waveH}
-	u.c.Fill(wave, gfx.Hex(0x18211f))
+	u.c.Fill(wave, gfx.Hex(0x15171b))
 	tr := a.p.Video[track]
 	if sm != nil && len(sm.peaks) > 0 {
 		gain := float32(c.Volume * tr.Volume)
-		col := gfx.Hex(0x6fd3a3)
+		col := gfx.Hex(0x8c96a8)
 		if tr.Muted {
 			col, gain = colFaint, 0.25
 		}
@@ -227,7 +227,7 @@ func (a *App) drawClip(t tracks, track int, c project.Clip, r gfx.Rect) {
 		f := u.bold(10.5)
 		bw := f.Measure(label) + u.px(26)
 		badge := gfx.Rect{X: max(r.X, t.area.X) + u.px(5), Y: r.Y + u.px(4), W: bw, H: u.px(17)}
-		u.c.RoundRect(badge, u.px(8), gfx.Alpha(colBlack, 0.7))
+		u.c.Fill(badge, gfx.Alpha(colBlack, 0.7))
 		u.icon(icSpeed, gfx.Rect{X: badge.X + u.px(4), Y: badge.Y, W: u.px(14), H: badge.H}, 9, colPlayhead)
 		u.label(f, gfx.Rect{X: badge.X + u.px(18), Y: badge.Y, W: bw - u.px(20), H: badge.H}, label, colPlayhead, 0)
 	}
@@ -239,7 +239,7 @@ func (a *App) drawClip(t tracks, track int, c project.Clip, r gfx.Rect) {
 	}
 	left, right := a.edgeRects(r)
 	for _, e := range []gfx.Rect{left, right} {
-		u.c.RoundRect(gfx.Rect{X: e.X + e.W/2 - u.px(1.5), Y: e.Y + e.H/2 - u.px(8), W: u.px(3), H: u.px(16)}, u.px(1.5), handle)
+		u.c.Fill(gfx.Rect{X: e.X + e.W/2 - u.px(1.5), Y: e.Y + e.H/2 - u.px(8), W: u.px(3), H: u.px(16)}, handle)
 	}
 }
 
@@ -284,7 +284,7 @@ func (a *App) drawMusicClips(t tracks) {
 			if hot || selected {
 				bg = colMusicHi
 			}
-			u.c.RoundRect(r, u.px(6), bg)
+			u.c.Fill(r, bg)
 			u.c.Push(r.Inset(u.px(1)))
 			if peaks := a.musicPeaks(m.Path); len(peaks) > 0 {
 				mid, half := r.Y+r.H*0.62, r.H*0.3
@@ -299,7 +299,7 @@ func (a *App) drawMusicClips(t tracks) {
 							peak = max(peak, peaks[i])
 						}
 					}
-					waveColumn(u.c, float32(x), mid, half, min(peak*gain, 1), gfx.Alpha(gfx.Hex(0xbff0da), 0.55))
+					waveColumn(u.c, float32(x), mid, half, min(peak*gain, 1), gfx.Alpha(gfx.Hex(0xc8d0dc), 0.55))
 				}
 			}
 			title := m.Title
@@ -360,7 +360,7 @@ func (a *App) drawOverlayItems(t tracks) {
 			if a.p.Overlays[k].Hidden {
 				bg = gfx.Mix(bg, colPanel, 0.6)
 			}
-			u.c.RoundRect(r, u.px(6), bg)
+			u.c.Fill(r, bg)
 			u.c.Push(r.Inset(u.px(1)))
 			x := max(r.X, t.area.X)
 			u.icon(glyph, gfx.Rect{X: x + u.px(4), Y: r.Y, W: u.px(16), H: r.H}, 10, colText)

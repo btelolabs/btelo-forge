@@ -38,6 +38,8 @@ type Stroke struct {
 	clone      *cloneSource
 	retouch    *Retouch  // a retouching brush's settings, or nil for painting
 	carried    []float32 // the colour smudge carries from dab to dab
+	dir        float64   // the stroke's direction in degrees, which a tip that follows it turns with
+	rnd        uint64    // the shape dynamics' random state
 }
 
 // cloneSource is where the clone stamp paints from, as it was when the stroke began, and how far from the brush it
@@ -116,7 +118,8 @@ func (d *Doc) beginStrokeOf(b Brush, erase bool, clone *cloneSource, rt *Retouch
 	}
 	b = b.normalized()
 	s := &Stroke{doc: d, layer: l, brush: b, erase: erase, clip: clip, x: x, y: y, tx: x, ty: y, mark: d.Mark(),
-		leash: b.Smooth * (b.Size + 40), clone: clone, retouch: rt, cover: map[image.Point][]uint16{}}
+		leash: b.Smooth * (b.Size + 40), clone: clone, retouch: rt, cover: map[image.Point][]uint16{},
+		rnd: math.Float64bits(x)*31 ^ math.Float64bits(y)}
 	if s.toMask = d.EditMask && l.Mask != nil; s.toMask {
 		s.beforeMask = l.Mask.Snapshot()
 	} else {
@@ -124,7 +127,16 @@ func (d *Doc) beginStrokeOf(b Brush, erase bool, clone *cloneSource, rt *Retouch
 		s.beforePix = l.Pixels.Snapshot()
 	}
 	d.stroke = s
-	return s, s.dab(x, y), nil
+	return s, s.laid(s.dab(x, y)), nil
+}
+
+// laid shows the dabs laid within r: the pixels there are worked out once from what they were and the coverage,
+// however many dabs crossed them. It returns r.
+func (s *Stroke) laid(r image.Rectangle) image.Rectangle {
+	if !r.Empty() && !(s.retouch != nil && s.retouch.Kind == RetouchSmudge) {
+		s.compose(r)
+	}
+	return r
 }
 
 // To continues the stroke toward (x, y) and returns the area it changed. With smoothing the brush follows the
@@ -147,6 +159,7 @@ func (s *Stroke) lineTo(x, y float64) image.Rectangle {
 	if dist == 0 {
 		return changed
 	}
+	s.dir = math.Atan2(y-s.y, x-s.x) * 180 / math.Pi
 	t := step - s.carry
 	for ; t <= dist; t += step {
 		f := t / dist
@@ -154,11 +167,16 @@ func (s *Stroke) lineTo(x, y float64) image.Rectangle {
 	}
 	s.carry = dist - (t - step)
 	s.x, s.y = x, y
-	return changed
+	return s.laid(changed)
 }
 
 // coverAt is the coverage cell for canvas pixel (x, y), its tile made when missing.
 func (s *Stroke) coverAt(x, y int) *uint16 {
+	return &s.coverTile(x, y)[(y&tileMask)*TileSize+x&tileMask]
+}
+
+// coverTile is the coverage tile holding canvas pixel (x, y), made when missing.
+func (s *Stroke) coverTile(x, y int) []uint16 {
 	k := image.Pt(x>>tileShift, y>>tileShift)
 	t := s.cover[k]
 	if t == nil {
@@ -166,7 +184,12 @@ func (s *Stroke) coverAt(x, y int) *uint16 {
 		s.cover[k] = t
 		s.lastTile = nil // it may have been looked up as missing
 	}
-	return &t[(y&tileMask)*TileSize+x&tileMask]
+	return t
+}
+
+// coverRow is the coverage cells of row y from canvas pixel x to the end of its tile, the tile made when missing.
+func (s *Stroke) coverRow(x, y int) []uint16 {
+	return s.coverTile(x, y)[(y&tileMask)*TileSize+x&tileMask : (y&tileMask+1)*TileSize]
 }
 
 // coverOf is the coverage of canvas pixel (x, y), 0 to 65535.
@@ -181,7 +204,8 @@ func (s *Stroke) coverOf(x, y int) uint32 {
 	return uint32(s.lastTile[(y&tileMask)*TileSize+x&tileMask])
 }
 
-// dab lays one dab centred at (cx, cy) and recomposes the pixels it touched.
+// dab lays one dab centred at (cx, cy) into the stroke's coverage and returns the pixels it touched, which laid
+// then shows (a smudge's dab shows itself, as it carries colour from one dab to the next).
 func (s *Stroke) dab(cx, cy float64) image.Rectangle {
 	if s.retouch != nil && s.retouch.Kind == RetouchSmudge {
 		box := s.smudgeDab(cx, cy)
@@ -189,26 +213,67 @@ func (s *Stroke) dab(cx, cy float64) image.Rectangle {
 		return box
 	}
 	b := s.brush
-	r := b.Size/2 + 1
+	if b.dynamic() {
+		b, cx, cy = s.vary(b, cx, cy)
+	}
+	r := b.reach()
 	box := image.Rect(int(math.Floor(cx-r)), int(math.Floor(cy-r)), int(math.Ceil(cx+r)), int(math.Ceil(cy+r))).Intersect(s.clip)
 	if box.Empty() {
 		return box
 	}
 	flow := b.Flow
+	shape := b.shape()
 	for y := box.Min.Y; y < box.Max.Y; y++ {
-		for x := box.Min.X; x < box.Max.X; x++ {
-			c := b.coverage(float64(x)+0.5, float64(y)+0.5, cx, cy) * flow
-			if c <= 0 {
-				continue
+		py := float64(y) + 0.5
+		// A row goes tile by tile, each tile's coverage looked up once.
+		for x0 := box.Min.X; x0 < box.Max.X; {
+			x1 := min(box.Max.X, (x0>>tileShift+1)<<tileShift)
+			row := s.coverRow(x0, y)
+			for x := x0; x < x1; x++ {
+				c := shape.at(float64(x)+0.5, py, cx, cy) * flow
+				if c <= 0 {
+					continue
+				}
+				cell := &row[x-x0]
+				m := float64(*cell) / 65535
+				*cell = uint16((m+(1-m)*c)*65535 + 0.5)
 			}
-			cell := s.coverAt(x, y)
-			m := float64(*cell) / 65535
-			*cell = uint16((m+(1-m)*c)*65535 + 0.5)
+			x0 = x1
 		}
 	}
-	s.compose(box)
 	s.dirty = s.dirty.Union(box)
 	return box
+}
+
+// vary is the brush and centre of the next dab with the brush's shape dynamics: turned with the stroke, then
+// thrown aside, turned and made smaller at random.
+func (s *Stroke) vary(b Brush, cx, cy float64) (Brush, float64, float64) {
+	if b.Follow {
+		b.Angle += s.dir
+	}
+	if b.Scatter > 0 {
+		// Anywhere within the scatter's circle, more often near the line.
+		sn, cs := math.Sincos(s.random() * 2 * math.Pi)
+		d := s.random() * b.Scatter * b.Size
+		cx, cy = cx+cs*d, cy+sn*d
+	}
+	if b.AngleJitter > 0 {
+		b.Angle += (s.random()*2 - 1) * 180 * b.AngleJitter
+	}
+	if b.SizeJitter > 0 {
+		b.Size = max(b.Size*(1-b.SizeJitter*s.random()), 1)
+	}
+	return b, cx, cy
+}
+
+// random is the next of the stroke's random numbers, from 0 up to 1 (splitmix64).
+func (s *Stroke) random() float64 {
+	s.rnd += 0x9e3779b97f4a7c15
+	z := s.rnd
+	z = (z ^ z>>30) * 0xbf58476d1ce4e5b9
+	z = (z ^ z>>27) * 0x94d049bb133111eb
+	z ^= z >> 31
+	return float64(z>>11) / (1 << 53)
 }
 
 // compose sets the layer's pixels (or mask) in r from what they were before the stroke and the stroke's coverage,

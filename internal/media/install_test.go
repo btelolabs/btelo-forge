@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -141,5 +142,26 @@ func TestInstallDownloadsUnpacksAndChecksTheVersion(t *testing.T) {
 	bad := config(fmt.Sprintf(`{"name": "bad", %s, "archives": [{"url": "%s/both.zip", "sha256": %q}]}`, here, s.URL, strings.Repeat("0", 64)))
 	if _, err := Install(context.Background(), bad, t.TempDir(), http.DefaultClient, func(float64) {}); err == nil || !strings.Contains(err.Error(), "sha256") {
 		t.Fatalf("a wrong checksum was accepted: %v", err)
+	}
+}
+
+func TestTheAppUsesItsOwnFFmpegUnlessAllowed(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("no ffmpeg on PATH to leave unused")
+	}
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("no ffprobe on PATH to leave unused")
+	}
+	root := t.TempDir()
+	c := DefaultToolsConfig()
+	if c.System {
+		t.Fatal("the built-in configuration uses the system's ffmpeg")
+	}
+	if found, err := Locate(context.Background(), c, root); err == nil {
+		t.Fatalf("found the system's ffmpeg at %s", found.FFmpeg)
+	}
+	c.System = true
+	if found, err := Locate(context.Background(), c, root); err != nil || found.FFmpeg == "" {
+		t.Fatalf("with system allowed: %+v, %v", found, err)
 	}
 }

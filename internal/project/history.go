@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -86,33 +85,24 @@ func Save(path string, p *Project) error {
 // Load reads a remembered edit whose first source is src, and checks it still fits; it returns an error when there is
 // nothing usable.
 func Load(path string, src Source) (*Project, error) {
-	data, err := os.ReadFile(path)
+	p, err := ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var s saved
-	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, err
-	}
-	if s.Version != saveVersion && s.Version != 2 || s.Project == nil {
-		return nil, fmt.Errorf("saved edit version %d is no longer supported", s.Version)
-	}
-	p := s.Project
-	if s.Version == 2 {
-		p.solid()
-	}
-	if len(p.Sources) == 0 {
-		return nil, errors.New("no sources")
-	}
-	first := p.Sources[0]
-	if first.Path != src.Path || math.Abs(first.Duration-src.Duration) > 0.05 || first.Width != src.Width || first.Height != src.Height {
-		return nil, errors.New("the source video has changed")
-	}
-	if err := p.validate(); err != nil {
-		return nil, err
+	if !p.Fits(src) {
+		return nil, ErrSourceChanged
 	}
 	p.Sources[0] = src
 	return p, nil
+}
+
+// ErrSourceChanged means the video an edit starts from is no longer the one it was made from.
+var ErrSourceChanged = errors.New("the source video has changed")
+
+// Fits reports whether src, as probed now, is still the video p's first source was.
+func (p *Project) Fits(src Source) bool {
+	first := p.Sources[0]
+	return first.Path == src.Path && math.Abs(first.Duration-src.Duration) <= 0.05 && first.Width == src.Width && first.Height == src.Height
 }
 
 // solid makes every clip and overlay fully opaque, as edits were before opacity existed.

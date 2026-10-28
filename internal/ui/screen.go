@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 	"time"
 
 	"golang.org/x/image/draw"
@@ -28,6 +29,7 @@ type Overlay interface {
 	Input() Input // what happened since the last call
 	Present(img *image.RGBA, dirty image.Rectangle) error
 	SetClickThrough(on bool)
+	TakeKeyboard(on bool) // in front with the keyboard, or giving it back to the window that had it
 	SetCursor(Cursor)
 	Move(r image.Rectangle)
 	Closed() bool
@@ -234,14 +236,14 @@ func (a *App) pickTick(p *regionPick) {
 			ly = box.Y + u.px(6)
 		}
 		tag := gfx.Rect{X: box.X, Y: ly, W: lw, H: u.px(24)}
-		c.RoundRect(tag, u.px(5), gfx.Alpha(colBlack, 0.8))
+		c.Fill(tag, gfx.Alpha(colBlack, 0.8))
 		u.label(f, tag, label, colWhite, 0.5)
 	} else {
 		hint := u.t("Drag to choose a region · click for the whole screen · Esc cancels")
 		f := u.face(14)
 		w := f.Measure(hint) + u.px(32)
 		pill := gfx.Rect{X: (float32(p.d.Width) - w) / 2, Y: u.px(40), W: w, H: u.px(40)}
-		c.RoundRect(pill, u.px(20), gfx.Alpha(colPanel, 0.92))
+		c.Fill(pill, gfx.Alpha(colPanel, 0.92))
 		u.label(f, pill, hint, colText, 0.5)
 		// A crosshair through the pointer helps lining the corner up.
 		c.Fill(gfx.Rect{X: 0, Y: u.my, W: float32(p.d.Width), H: 1}, gfx.Alpha(colWhite, 0.35))
@@ -288,6 +290,7 @@ func (a *App) toggleScreenDraw() {
 		return
 	}
 	sc.draw = &screenDraw{s: s, d: d, doc: doc, drawing: true}
+	s.o.TakeKeyboard(true)
 	// The toolbar opens again above the new window.
 	if sc.bar != nil {
 		sc.bar.s.close()
@@ -306,6 +309,8 @@ func (a *App) setScreenDrawing(on bool) {
 	}
 	sd.drawing = on
 	sd.s.o.SetClickThrough(!on)
+	// While drawing the window takes the keyboard too, for the brush keys; then it goes back where it was.
+	sd.s.o.TakeKeyboard(on)
 	sd.s.shown = false // shown again: the near-transparent floor that catches the mouse comes or goes
 }
 
@@ -324,13 +329,14 @@ func (a *App) clearScreenDraw() {
 func (a *App) closeScreenDraw() {
 	sc := &a.over
 	if sc.draw != nil {
+		sc.draw.s.o.TakeKeyboard(false)
 		sc.draw.s.close()
 		sc.draw = nil
 	}
 }
 
 func (a *App) drawTick(sd *screenDraw) {
-	_, changed := a.beginSurface(sd.s)
+	in, changed := a.beginSurface(sd.s)
 	u := &sd.s.u
 	if sd.s.o.Closed() {
 		a.closeScreenDraw()
@@ -338,6 +344,11 @@ func (a *App) drawTick(sd *screenDraw) {
 	}
 	area := gfx.Rect{W: float32(sd.d.Width), H: float32(sd.d.Height)}
 	if sd.drawing {
+		for _, k := range in.Keys {
+			if larger, ok := a.brushSizeKey(k); ok {
+				a.stepBrushSize(larger)
+			}
+		}
 		u.cursor = CursorCross
 		if u.rightAt != nil {
 			a.setScreenDrawing(false) // the right button gives the mouse back; the drawing stays
@@ -387,13 +398,34 @@ func (a *App) drawTick(sd *screenDraw) {
 // ---- The floating toolbar
 
 // toolbar sits at the top right of the recorded or drawn-on display, left out of recordings: the recording's
-// time, pause and stop, and the drawing's tools.
+// time, pause and stop, and the drawing's tools — pen and eraser, the brush tip, the colour and the size. The tip
+// and colour buttons open a panel under the bar, which grows to hold it.
 type toolbar struct {
 	s        *surface
 	d        capture.Display
 	dragFrom image.Point // the pointer on the desktop where a drag of the toolbar began
 	barFrom  image.Point
 	drawnAt  time.Time
+	panel    barPanel
+	shows    barLook // what the bar showed of the brush when last drawn
+}
+
+// barPanel is which panel is open under the toolbar.
+type barPanel int
+
+const (
+	barNoPanel barPanel = iota
+	barTips
+	barColors
+)
+
+// barLook is what the toolbar shows of the brush, so it is drawn again when the brush changes from elsewhere: the
+// brush keys over the drawing, the canvas, an MCP tool.
+type barLook struct {
+	size   float64
+	tip    paint.Tip
+	preset string
+	color  color.NRGBA
 }
 
 // toolbarColors are the quick colours on the toolbar.
@@ -401,6 +433,24 @@ var toolbarColors = []color.NRGBA{
 	{R: 0xf0, G: 0x40, B: 0x40, A: 255}, {R: 0xff, G: 0xc8, B: 0x2e, A: 255}, {R: 0x34, G: 0xd6, B: 0x8a, A: 255},
 	{R: 0x3d, G: 0x8b, B: 0xff, A: 255}, {R: 0xff, G: 0xff, B: 0xff, A: 255},
 }
+
+// toolbarPalette are the colours of the toolbar's colour panel.
+var toolbarPalette = []color.NRGBA{
+	{A: 255}, {R: 0x5f, G: 0x63, B: 0x68, A: 255}, {R: 0xb0, G: 0xb4, B: 0xb8, A: 255}, {R: 0xff, G: 0xff, B: 0xff, A: 255},
+	{R: 0x8d, G: 0x5a, B: 0x3b, A: 255}, {R: 0xe5, G: 0x39, B: 0x35, A: 255}, {R: 0xfb, G: 0x8c, B: 0x00, A: 255},
+	{R: 0xfd, G: 0xd8, B: 0x35, A: 255}, {R: 0x7c, G: 0xb3, B: 0x42, A: 255}, {R: 0x2e, G: 0x7d, B: 0x32, A: 255},
+	{R: 0x00, G: 0xac, B: 0xc1, A: 255}, {R: 0x1e, G: 0x88, B: 0xe5, A: 255}, {R: 0x39, G: 0x49, B: 0xab, A: 255},
+	{R: 0x8e, G: 0x24, B: 0xaa, A: 255}, {R: 0xd8, G: 0x1b, B: 0x60, A: 255}, {R: 0xf4, G: 0x8f, B: 0xb1, A: 255},
+}
+
+// The toolbar's measures, in logical pixels.
+const (
+	barHeight     = 52
+	barButton     = 42 // an icon button and the gap after it
+	barSwatch     = 24
+	barSizeSlider = 96
+	barSizeLabel  = 52
+)
 
 func (a *App) openToolbar() {
 	sc := &a.over
@@ -412,7 +462,7 @@ func (a *App) openToolbar() {
 	if host, ok := a.host.(interface{ Scale() float32 }); ok {
 		scale = host.Scale()
 	}
-	w, h := int(a.toolbarWidth()*scale), int(52*scale)
+	w, h := int(a.toolbarWidth()*scale), int(barHeight*scale)
 	pos := image.Pt(d.Width-w-int(24*scale), int(24*scale))
 	if sc.barPos != (image.Point{}) {
 		pos = sc.barPos
@@ -436,43 +486,103 @@ func (a *App) toolbarDisplay() (capture.Display, bool) {
 	return a.chosenDisplay()
 }
 
-// toolbarWidth is how wide the toolbar's contents are, in logical pixels: the recording's part, the drawing tools,
-// and the drawing's commands once there is a drawing.
+// toolbarWidth is how wide the toolbar's bar is, in logical pixels: the grip, the recording's part, pen and eraser,
+// the brush's tip, colours and size while the pen is chosen, and the drawing's commands once there is a drawing.
 func (a *App) toolbarWidth() float32 {
-	w := float32(28 + 2*42 + len(toolbarColors)*24 + 12)
+	w := float32(28 + 2*barButton + 8)
+	if a.penChosen() {
+		w += barButton + 4 + float32(len(toolbarColors)*barSwatch) + 2 + 26 + 10 + barSizeSlider + barSizeLabel
+	}
 	if a.rec.rec != nil {
-		w += 72 + 2*42 + 10
+		w += 72 + 2*barButton + 10
 	}
 	if a.over.draw != nil {
-		w += 3 * 42
+		w += 3 * barButton
 	}
 	return w
+}
+
+// penChosen reports whether the pen draws on the screen now, when the toolbar offers the brush's settings.
+func (a *App) penChosen() bool {
+	sd := a.over.draw
+	return sd != nil && sd.drawing && !sd.eraser
+}
+
+// barLookOf is what the toolbar shows of the brush now.
+func (a *App) barLookOf() barLook {
+	return barLook{size: a.brush.Size, tip: a.brush.Tip, preset: a.brushKey(), color: a.brush.Color}
+}
+
+// toolbarPanel lays out the open panel's cells across the toolbar's width w, under the bar; height is how much
+// taller the panel makes the toolbar. Tips come first, then the brush presets; or the palette's colours.
+func (a *App) toolbarPanel(u *ctx, tb *toolbar, w float32) (cells []gfx.Rect, height float32) {
+	var widths []float32
+	cell := u.px(34)
+	switch tb.panel {
+	case barTips:
+		for range paint.Tips {
+			widths = append(widths, cell)
+		}
+		for range paint.Presets() {
+			widths = append(widths, u.px(76))
+		}
+	case barColors:
+		cell = u.px(barSwatch)
+		for range toolbarPalette {
+			widths = append(widths, cell)
+		}
+	default:
+		return nil, 0
+	}
+	pad, gap := u.px(8), u.px(4)
+	top := u.px(barHeight)
+	x, y := pad, top
+	for _, cw := range widths {
+		if x+cw > w-pad && x > pad {
+			x, y = pad, y+cell+gap
+		}
+		cells = append(cells, gfx.Rect{X: x, Y: y, W: cw, H: cell})
+		x += cw + gap
+	}
+	return cells, y + cell + pad - top
 }
 
 func (a *App) toolbarTick(tb *toolbar) {
 	_, changed := a.beginSurface(tb.s)
 	u := &tb.s.u
-	// The toolbar grows and shrinks with what it holds, keeping its right edge where it is.
-	if b := tb.s.o.Bounds(); int(a.toolbarWidth()*u.s) != b.Dx() && u.s > 0 && u.active == "" {
-		w := int(a.toolbarWidth() * u.s)
-		nb := image.Rect(b.Max.X-w, b.Min.Y, b.Max.X, b.Max.Y)
-		tb.s.o.Move(nb)
-		tb.s.c.Resize(nb.Dx(), nb.Dy())
-		changed = true
+	if !a.penChosen() {
+		tb.panel = barNoPanel // the brush's panels go with its settings
+	}
+	// The toolbar grows and shrinks with what it holds, keeping its top right corner where it is, and moves up when
+	// that would take it past the bottom of its display.
+	if b := tb.s.o.Bounds(); u.s > 0 && u.active == "" {
+		w := float32(int(a.toolbarWidth() * u.s))
+		_, ph := a.toolbarPanel(u, tb, w)
+		size := image.Pt(int(w), int(u.px(barHeight)+ph))
+		if size != b.Size() {
+			nb := image.Rectangle{Min: image.Pt(b.Max.X-size.X, b.Min.Y), Max: image.Pt(b.Max.X, b.Min.Y+size.Y)}
+			if over := nb.Max.Y - (tb.d.Y + tb.d.Height); over > 0 {
+				nb = nb.Sub(image.Pt(0, min(over, nb.Min.Y-tb.d.Y)))
+			}
+			tb.s.o.Move(nb)
+			tb.s.c.Resize(nb.Dx(), nb.Dy())
+			changed = true
+		}
 	}
 	r := &a.rec
 	sd := a.over.draw
+	look := a.barLookOf()
 	// The recording's time changes every second.
-	if !changed && !(r.rec != nil && time.Since(tb.drawnAt) > 500*time.Millisecond) {
+	if !changed && look == tb.shows && !(r.rec != nil && time.Since(tb.drawnAt) > 500*time.Millisecond) {
 		return
 	}
-	tb.drawnAt = time.Now()
+	tb.drawnAt, tb.shows = time.Now(), look
 	c := tb.s.c
 	c.ClearTo(color.RGBA{})
 	full := gfx.Rect{W: float32(c.Img.Rect.Dx()), H: float32(c.Img.Rect.Dy())}
-	c.RoundRect(full, u.px(12), gfx.Alpha(colPanel, 0.96))
-	c.RoundOutline(full, u.px(12), max(1, u.px(1)), colBorder)
-	h := full.H - u.px(12)
+	c.Fill(full, gfx.Alpha(colPanel, 0.96))
+	c.Outline(full, max(1, u.px(1)), colBorder)
+	h := u.px(barHeight - 12)
 	y := u.px(6)
 	x := u.px(8)
 	// The grip drags the toolbar.
@@ -500,7 +610,7 @@ func (a *App) toolbarTick(tb *toolbar) {
 	x = grip.Right() + u.px(6)
 	button := func(id, glyph, hint string, on bool) bool {
 		b := gfx.Rect{X: x, Y: y, W: h, H: h}
-		x += h + u.px(2)
+		x += u.px(barButton)
 		return u.iconButton("bar/"+id, b, glyph, hint, on, true)
 	}
 	if r.rec != nil {
@@ -525,14 +635,19 @@ func (a *App) toolbarTick(tb *toolbar) {
 		c.Fill(gfx.Rect{X: x + u.px(4), Y: y + u.px(8), W: max(1, u.px(1)), H: h - u.px(16)}, colBorder)
 		x += u.px(10)
 	}
-	drawing := sd != nil && sd.drawing
-	if button("pen", icBrush, withKey(u.t("Draw on the screen"), a.hotkeyLabel(hotkeyDraw)), drawing && !sd.eraser) {
+	// pen draws with the brush, starting a drawing when there is none.
+	pen := func() {
 		if sd == nil {
 			a.toggleScreenDraw()
-		} else {
-			sd.eraser = false
-			a.setScreenDrawing(true)
+			sd = a.over.draw
+			return
 		}
+		sd.eraser = false
+		a.setScreenDrawing(true)
+	}
+	drawing := sd != nil && sd.drawing
+	if button("pen", icBrush, withKey(u.t("Draw on the screen"), a.hotkeyLabel(hotkeyDraw)), drawing && !sd.eraser) {
+		pen()
 	}
 	eraserAt := gfx.Rect{X: x, Y: y, W: h, H: h}
 	erasing := drawing && sd.eraser
@@ -548,28 +663,9 @@ func (a *App) toolbarTick(tb *toolbar) {
 			a.setScreenDrawing(true)
 		}
 	}
-	for i, col := range toolbarColors {
-		cell := gfx.Rect{X: x + u.px(3), Y: y + h/2 - u.px(9), W: u.px(18), H: u.px(18)}
-		id := fmt.Sprintf("bar/color/%d", i)
-		c.Circle(cell.X+cell.W/2, cell.Y+cell.H/2, cell.W/2, color.RGBA{col.R, col.G, col.B, 255})
-		if a.brush.Color == col {
-			c.RoundOutline(cell.Inset(-u.px(3)), cell.W/2+u.px(3), u.px(2), colText)
-		}
-		if u.hover(id, cell) {
-			u.cursor = CursorHand
-		}
-		if u.clicked(id, cell.Inset(-u.px(3))) {
-			a.setBrushColor(col)
-			if sd == nil {
-				a.toggleScreenDraw()
-			} else {
-				sd.eraser = false
-				a.setScreenDrawing(true)
-			}
-		}
-		x += u.px(24)
+	if a.penChosen() {
+		x = a.drawBarBrush(u, tb, x, y, h, pen)
 	}
-	x += u.px(4)
 	if sd != nil {
 		if button("undo", icUndo, u.t("Undo"), false) && sd.stroke == nil {
 			sd.doc.Undo()
@@ -582,7 +678,154 @@ func (a *App) toolbarTick(tb *toolbar) {
 			a.closeScreenDraw()
 		}
 	}
+	a.drawToolbarPanel(u, tb, full.W, pen)
 	tb.s.end(image.Rectangle{})
+}
+
+// drawBarBrush draws the brush's settings on the bar from x: the tip, the quick colours, the colour button and the
+// size; it returns where they end.
+func (a *App) drawBarBrush(u *ctx, tb *toolbar, x, y, h float32, pen func()) float32 {
+	c := u.c
+	toggle := func(p barPanel) {
+		if tb.panel == p {
+			tb.panel = barNoPanel
+		} else {
+			tb.panel = p
+		}
+	}
+	// The tip button shows the brush's tip and opens the tips and presets.
+	tipAt := gfx.Rect{X: x, Y: y, W: h, H: h}
+	if u.iconButton("bar/tip", tipAt, "", u.t("Brush tip"), tb.panel == barTips, true) {
+		toggle(barTips)
+	}
+	a.drawBarTip(u, tipAt.Inset(u.px(9)))
+	x += u.px(barButton + 4)
+	for i, col := range toolbarColors {
+		cell := gfx.Rect{X: x + u.px(3), Y: y + h/2 - u.px(9), W: u.px(18), H: u.px(18)}
+		if a.barSwatch(u, fmt.Sprintf("bar/color/%d", i), cell, col) {
+			pen()
+		}
+		x += u.px(barSwatch)
+	}
+	// The colour button shows the brush's colour and opens the palette.
+	more := gfx.Rect{X: x + u.px(2), Y: y + h/2 - u.px(13), W: u.px(26), H: u.px(26)}
+	if tb.panel == barColors {
+		c.RoundRect(more, u.px(5), colSelected)
+	} else if u.hover("bar/colors", more) {
+		c.RoundRect(more, u.px(5), colSurfaceHi)
+	}
+	drawColourSwatch(u, more.Inset(u.px(6)), a.brush.Color)
+	u.hint("bar/colors", u.t("More colours"), more)
+	if u.clicked("bar/colors", more) {
+		toggle(barColors)
+	}
+	x = more.Right() + u.px(10)
+	// The size, on a scale even in the brush keys' steps: small sizes get as much room as large ones.
+	smaller, larger := a.brushSizeKeyLabels()
+	sizeAt := gfx.Rect{X: x, Y: y + h/2 - u.px(12), W: u.px(barSizeSlider), H: u.px(24)}
+	t := math.Log(max(a.brush.Size, 1)) / math.Log(maxBrushSize)
+	moved, done := u.slider("bar/size", sizeAt, &t, 0, 1, true)
+	if moved {
+		a.brush.Size = min(max(math.Round(math.Exp(t*math.Log(maxBrushSize))), 1), maxBrushSize)
+	}
+	if done {
+		a.saveBrush()
+	}
+	u.hint("bar/size", u.tf("Brush size: %s smaller, %s larger", smaller, larger), sizeAt)
+	u.label(u.face(12), gfx.Rect{X: sizeAt.Right() + u.px(4), Y: y, W: u.px(barSizeLabel - 4), H: h}, fmt.Sprintf("%.0f px", a.brush.Size), colText, 0)
+	return sizeAt.Right() + u.px(barSizeLabel)
+}
+
+// drawBarTip draws the brush's tip in r: the preset's stroke, a picture tip's shape, or the plain tip.
+func (a *App) drawBarTip(u *ctx, r gfx.Rect) {
+	switch p, ok := a.chosenPreset(); {
+	case ok:
+		drawTipShape(u, p.Brush.Shape, r)
+	case a.brush.Tip == paint.TipShaped:
+		drawTipShape(u, a.brush.Shape, r)
+	default:
+		drawTip(u, a.brush.Tip, r, colText)
+	}
+}
+
+// barSwatch is a colour to click on the toolbar, outlined when it is the brush's; it reports a click, having made
+// it the brush's colour.
+func (a *App) barSwatch(u *ctx, id string, cell gfx.Rect, col color.NRGBA) bool {
+	u.c.Fill(cell, color.RGBA{col.R, col.G, col.B, 255})
+	if a.brush.Color == col {
+		u.c.Outline(cell.Inset(-u.px(3)), u.px(2), colText)
+	} else {
+		u.c.Outline(cell, max(1, u.px(1)), colBorder)
+	}
+	if u.hover(id, cell) {
+		u.cursor = CursorHand
+	}
+	if !u.clicked(id, cell.Inset(-u.px(3))) {
+		return false
+	}
+	a.setBrushColor(col)
+	return true
+}
+
+// drawToolbarPanel draws the open panel under the bar; choosing a tip, a preset or a colour draws with it.
+func (a *App) drawToolbarPanel(u *ctx, tb *toolbar, w float32, pen func()) {
+	cells, height := a.toolbarPanel(u, tb, w)
+	if height == 0 {
+		return
+	}
+	u.c.Fill(gfx.Rect{X: u.px(8), Y: u.px(barHeight - 1), W: w - u.px(16), H: max(1, u.px(1))}, colBorder)
+	b := &a.brush
+	switch tb.panel {
+	case barTips:
+		presets := paint.Presets()
+		chosen, isPreset := a.chosenPreset()
+		for i, cell := range cells {
+			id := fmt.Sprintf("bar/tip/%d", i)
+			plain := i < len(paint.Tips)
+			var on bool
+			var name string
+			if plain {
+				tip := paint.Tips[i]
+				on, name = b.Tip == tip, u.t(tipNames[tip])
+			} else {
+				p := presets[i-len(paint.Tips)]
+				on, name = isPreset && p.ID == chosen.ID, u.t(p.Name)
+			}
+			bg := colSurface
+			switch {
+			case on:
+				bg = colSelected
+			case u.hover(id, cell):
+				bg = colSurfaceHi
+			}
+			u.c.RoundRect(cell, u.px(5), bg)
+			if plain {
+				drawTip(u, paint.Tips[i], cell, colText)
+			} else {
+				sr := cell.Inset(u.px(3))
+				drawCoverage(u, presetSample(presets[i-len(paint.Tips)], int(sr.W), int(sr.H), u.s), sr)
+			}
+			u.hint(id, name, cell)
+			if !u.clicked(id, cell) {
+				continue
+			}
+			if plain {
+				size := b.Size
+				b.Tip = paint.Tips[i]
+				a.chosenBrush(size)
+				a.saveBrush()
+			} else {
+				a.choosePreset(presets[i-len(paint.Tips)])
+			}
+			pen()
+		}
+	case barColors:
+		for i, cell := range cells {
+			if a.barSwatch(u, fmt.Sprintf("bar/palette/%d", i), cell.Inset(u.px(3)), toolbarPalette[i]) {
+				pen()
+			}
+		}
+	}
 }
 
 // ---- The outline of a recorded region

@@ -28,7 +28,6 @@ const (
 	toolMarquee
 	toolLasso
 	toolWand
-	toolCrop
 	toolPicker
 	toolBrush
 	toolEraser
@@ -49,6 +48,7 @@ const (
 	toolBlur
 	toolSharpen
 	toolSmudge
+	toolMaskGradient
 )
 
 // artDoc is a canvas tab: a layered picture, saved with its layers next to the recordings and exported as PNG.
@@ -70,22 +70,26 @@ type artDoc struct {
 	stroke    *paint.Stroke
 	move      *paint.MoveSession
 	xf        *transformEdit       // Free Transform under way
-	crop      *cropEdit            // the crop tool's box
 	backdrop  *image.RGBA          // the video's picture, behind a drawing on it; never saved or exported
 	noBack    bool                 // the backdrop is turned off in the View menu
 	text      *textEdit            // a text layer being typed
-	pencil    [][2]float64         // the pencil's line so far, in canvas pixels
+	vstroke   *vectorStroke        // the vector brush's stroke under way
 	pen       *penEdit             // a curve being drawn with the pen
 	nodes     *nodeEdit            // the node tool's chosen nodes and drag
 	shape     *paint.VectorSession // the shape being dragged, shown as it will be
 	snapTo    snapTargets          // what the drag under way snaps to, gathered as it began
 	snapMark  *paint.Pt            // where it snapped this frame, for the overlay
 	picked    []int                // layers chosen besides the active one, for booleans
+	layerHeld int                  // one of several chosen layers pressed in the panel: chosen alone if let go without a drag
+	layerDrag *layerDrag           // layers being dragged in the layers panel
 	board     int                  // the artboard the artboard tool has chosen
 	boardDrag *boardEdit           // the artboard being made, moved or resized
 	boardName string               // the chosen board's name as typed
 	boardSize map[string]string    // its width and height as typed
-	props     *paint.VectorSession // a vector property being dragged in the options bar, such as the stroke's width
+	props     *paint.VectorSession // a vector property changed live, such as the stroke's width or a colour being dragged
+	gradStop  int                  // the stop of the chosen vector layer's gradient that the colours edit
+	gradDrag  *gradDrag            // the gradient tool's drag on a vector layer
+	stopsDrag *stopsDrag           // a stop dragged along the options bar's gradient
 	drawing   bool                 // a gradient or shape is being dragged, from drawFrom to drawTo
 	drawFrom  [2]float64
 	drawTo    [2]float64
@@ -95,17 +99,24 @@ type artDoc struct {
 	cloneOffset  image.Point
 	cloneAligned bool
 	moveFrom     [2]float64       // where in the picture the move began
+	descend      int              // the node a click without a drag goes into, by auto-select
+	boardLayer   map[int]int      // the layer last chosen in each artboard, by board
 	mode         paint.SelectMode // how the shape being drawn will combine with the selection
 	selFrom      image.Point
 	selNow       image.Point
 	selDrag      bool
 	lasso        [][2]float64 // the lasso's outline so far, in picture pixels
-	ants         selectionOutline
+	ants         selectionAnts
 	panFrom      [4]float64 // pointer and pan where a hand drag began
+	nav          int        // the navigation drag under way: navPan or navZoom, with Space or the zoom key held
+	navZoom      float64    // the zoom where it began
 	renaming     int
 	rename       string
-	cursor       [2]float64 // the pointer in canvas pixels, for the status line
-	over         bool       // the pointer is over the canvas
+	sliceInfo    int                 // the node whose slice the ⓘ panel explains
+	sliceSizes   sliceSizeCache      // the size of what it shows
+	sliceRows    map[int]paint.Slice // the slices and folder groups, by node, as the layers panel last listed them
+	cursor       [2]float64          // the pointer in canvas pixels, for the status line
+	over         bool                // the pointer is over the canvas
 }
 
 type viewKey struct {
@@ -114,20 +125,25 @@ type viewKey struct {
 }
 
 func (a *App) artTitle(ad *artDoc) string {
+	if ad.d.SmartSource() != "" {
+		return a.smartTitle(ad)
+	}
 	return strings.TrimSuffix(filepath.Base(ad.path), paint.Ext)
 }
 
 // openArt shows a picture in a canvas tab, the current one when it is empty.
 func (a *App) openArt(d *paint.Doc, path string) {
-	if a.p != nil || a.art != nil || a.opening != "" {
+	if a.occupied() {
 		a.newTab()
 	}
 	a.art = &artDoc{d: d, path: path, fit: true, renaming: -1}
 	a.art.refresh()
+	a.linkSmart(a.art)
 }
 
 // newCanvas makes an empty canvas, with no size: it has no edge and grows with what is drawn on it, as Affinity
-// Designer's does. It is saved at once, so it is never only in memory.
+// Designer's does. Its file is named now but written only with the first change, a moment after it as every change
+// is, so a canvas opened and closed again with nothing on it leaves no file behind.
 func (a *App) newCanvas() error {
 	d := paint.New(a.u.tf("Layer %d", 1))
 	path, err := a.capturePath(a.u.t("Canvas %s"), paint.Ext, time.Now())
@@ -135,8 +151,7 @@ func (a *App) newCanvas() error {
 		return err
 	}
 	a.openArt(d, path)
-	a.art.dirty = true
-	return a.saveArt(a.art, true)
+	return nil
 }
 
 // openImageAsArt opens a picture file, such as a screenshot, as a new canvas saved next to it.
@@ -236,6 +251,8 @@ func (a *App) saveArt(ad *artDoc, wait bool) error {
 		ad.saving, ad.saveErr = false, err
 		if err != nil {
 			ad.dirty = true
+		} else {
+			a.mindPictureChanged(ad.path) // the maps showing this canvas show what was saved
 		}
 		a.drawingsChanged(images)
 		return err
@@ -248,14 +265,17 @@ func (a *App) saveArt(ad *artDoc, wait bool) error {
 			if err != nil {
 				ad.dirty, ad.changed = true, time.Now() // try again after the usual delay, not at once
 				a.toast(a.u.tf("The canvas could not be saved: %s", a.describe(err)), true)
+			} else {
+				a.mindPictureChanged(ad.path) // the maps showing this canvas show what was saved
 			}
 		})
 	})
 	return nil
 }
 
-// artSaveDelay is how long after the last change a canvas is saved.
-const artSaveDelay = 2 * time.Second
+// artSaveDelay is how long after the last change a canvas is saved: long enough that the pauses between strokes do
+// not each write the whole canvas. Closing, quitting and a crash save what is left at once.
+const artSaveDelay = 5 * time.Second
 
 // autosaveArt saves canvases a moment after the last change.
 func (a *App) autosaveArt() {
@@ -324,7 +344,7 @@ func (ad *artDoc) fitView() { ad.fit, ad.fitFor = true, gfx.Rect{} }
 // empty canvas without pages is shown at its own size about its origin.
 func (ad *artDoc) fitZoom(vp gfx.Rect) {
 	r := ad.d.Frame
-	for _, b := range ad.d.Boards {
+	for _, b := range ad.d.Boards() {
 		r = r.Union(b.Rect)
 	}
 	if r.Empty() {
@@ -367,10 +387,10 @@ func (ad *artDoc) look(x, y int) color.RGBA {
 }
 
 var (
-	checkLight = color.RGBA{0x3a, 0x3e, 0x42, 0xff}
-	checkDark  = color.RGBA{0x2c, 0x30, 0x33, 0xff}
+	checkLight = color.RGBA{0x2c, 0x2e, 0x34, 0xff}
+	checkDark  = color.RGBA{0x22, 0x24, 0x29, 0xff}
 	// pasteboard darkens the canvas beyond a frame, as Photoshop's and Affinity's do.
-	pasteboard = color.RGBA{0x10, 0x12, 0x14, 0x9c}
+	pasteboard = color.RGBA{0x0c, 0x0d, 0x10, 0x9c}
 )
 
 // drawView brings the viewport's pixels up to date and shows them: all of them when the viewport, zoom or pan
@@ -450,16 +470,22 @@ func (a *App) renderView(ad *artDoc, area image.Rectangle, ox, oy float64) {
 	u := &a.u
 	z := ad.zoom
 	dst := ad.view.SubImage(area).(*image.RGBA)
-	// The checkerboard is fixed to the window, in squares of 8 logical pixels.
+	// The checkerboard is fixed to the window, in squares of 8 logical pixels: two rows of it are made, and each row
+	// of the area is a copy of one of them.
 	cell := max(int(u.px(8)), 4)
-	for y := area.Min.Y; y < area.Max.Y; y++ {
+	var rows [2][]uint8
+	for i := range rows {
+		rows[i] = make([]uint8, area.Dx()*4)
 		for x := area.Min.X; x < area.Max.X; x++ {
 			c := checkLight
-			if (x/cell+y/cell)%2 == 1 {
+			if (x/cell+i)%2 == 1 {
 				c = checkDark
 			}
-			ad.view.SetRGBA(x, y, c)
+			copy(rows[i][(x-area.Min.X)*4:], []uint8{c.R, c.G, c.B, c.A})
 		}
+	}
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		copy(ad.view.Pix[ad.view.PixOffset(area.Min.X, y):][:area.Dx()*4], rows[(y/cell)%2])
 	}
 	var scaler draw.Interpolator = draw.ApproxBiLinear
 	if z >= 1 {
@@ -476,7 +502,7 @@ func (a *App) renderView(ad *artDoc, area image.Rectangle, ox, oy float64) {
 		int(math.Ceil((float64(area.Max.X)-ox)/scale))+1, int(math.Ceil((float64(area.Max.Y)-oy)/scale))+1)
 	img := image.NewRGBA(lr)
 	ad.d.Render(img, lr, l)
-	paint.Resample(scaler, dst, f64.Aff3{scale, 0, ox, 0, scale, oy}, img, lr, draw.Over)
+	scaleOver(ad.view, area, img, scale, ox, oy, z >= 1)
 	// The frame and the artboards are the pages; beyond them is the pasteboard.
 	var pages []image.Rectangle
 	toView := func(f image.Rectangle) image.Rectangle {
@@ -486,7 +512,7 @@ func (a *App) renderView(ad *artDoc, area image.Rectangle, ox, oy float64) {
 	if f := ad.d.Frame; !f.Empty() {
 		pages = append(pages, toView(f))
 	}
-	for _, b := range ad.d.Boards {
+	for _, b := range ad.d.Boards() {
 		pages = append(pages, toView(b.Rect))
 	}
 	if len(pages) > 0 {

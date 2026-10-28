@@ -80,6 +80,8 @@ func (a *App) addDrawing() {
 // canvas.
 func overlayLook(o project.Overlay) (glyph, label string) {
 	switch {
+	case o.Smart != "":
+		return icSmart, "#" + o.Smart
 	case o.Canvas != "":
 		return icBrush, strings.TrimSuffix(baseName(o.Canvas), paint.Ext)
 	case o.Kind == project.ImageOverlay:
@@ -134,11 +136,7 @@ func writePNG(path string, img image.Image) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".saving"
-	if err := os.WriteFile(tmp, buf.Bytes(), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeFileWhole(path, buf.Bytes())
 }
 
 // openCanvasFileWith opens a saved canvas, drawing it over backdrop when there is one; a canvas already open is

@@ -59,9 +59,9 @@ type nodeEdit struct {
 func (a *App) penVector(p paint.Pt) paint.Vector {
 	s := &a.settings.Paint
 	v := paint.Vector{Kind: paint.VectorCurve, M: paint.Identity, Path: []paint.Subpath{{Nodes: []paint.PathNode{sharpNode(p)}}},
-		Stroke: paint.VectorStroke{Paint: solidPaint(a.brush.Color), Width: max(s.ShapeWidth, 1), Join: paint.JoinRound, Cap: paint.CapRound}}
+		Stroke: paint.VectorStroke{Paint: solidPaint(a.shapeColours()[0]), Width: max(s.ShapeWidth, 1), Join: paint.JoinRound, Cap: paint.CapRound}}
 	if s.PenFill {
-		v.Fill = solidPaint(a.backgroundColor())
+		v.Fill = solidPaint(a.shapeColours()[1])
 	}
 	return v
 }
@@ -104,7 +104,7 @@ func (a *App) penPointer(ad *artDoc, vp gfx.Rect) {
 		if ad.pen == nil {
 			s, err := ad.d.BeginVector(0, a.penVector(p), u.tf("Curve %d", len(ad.d.Layers())+1), "Pen")
 			if err != nil {
-				a.toast(a.describe(err), true)
+				a.artFailed(ad, err)
 				u.active = ""
 				return
 			}
@@ -138,67 +138,6 @@ func (a *App) penPointer(ad *artDoc, vp gfx.Rect) {
 	}
 }
 
-// pencilPointer is the pencil, as Affinity Designer's: a freehand line, fitted with a smooth curve when it is let go,
-// and closed when it ends where it began.
-func (a *App) pencilPointer(ad *artDoc, vp gfx.Rect) {
-	u := &a.u
-	const id = "art/view"
-	cx, cy := ad.toCanvas(vp, u.mx, u.my)
-	if u.hover(id, vp) {
-		u.cursor = CursorCross
-	}
-	if u.press(id, vp) {
-		ad.pencil = [][2]float64{{cx, cy}}
-	}
-	if u.dragging(id) && len(ad.pencil) > 0 {
-		last := ad.pencil[len(ad.pencil)-1]
-		if math.Hypot(cx-last[0], cy-last[1])*ad.zoom >= float64(u.px(2)) {
-			ad.pencil = append(ad.pencil, [2]float64{cx, cy})
-		}
-	}
-	if u.letGo(id) && len(ad.pencil) > 0 {
-		line := ad.pencil
-		ad.pencil = nil
-		a.finishPencil(ad, append(line, [2]float64{cx, cy}))
-	}
-}
-
-// finishPencil makes the pencil's line a curve on a layer of its own, as one step.
-func (a *App) finishPencil(ad *artDoc, line [][2]float64) {
-	pts := make([]paint.Pt, len(line))
-	for i, p := range line {
-		pts[i] = paint.Pt{X: p[0], Y: p[1]}
-	}
-	reach := float64(a.u.px(grabReach)) / ad.zoom
-	length := 0.0
-	for i := 1; i < len(pts); i++ {
-		length += pts[i].Dist(pts[i-1])
-	}
-	if length < reach {
-		return // a click, or barely a line, draws nothing
-	}
-	// Ending where it began, after going somewhere, closes it.
-	closed := pts[0].Dist(pts[len(pts)-1]) <= reach && length > 4*reach
-	if closed {
-		pts = pts[:len(pts)-1]
-	}
-	// Fitted to within about a screen pixel and a half, which smooths the hand's tremor away.
-	path := paint.FitPath(pts, closed, float64(a.u.px(1.5))/ad.zoom)
-	v := a.penVector(pts[0])
-	v.Path = []paint.Subpath{path}
-	if !closed {
-		v.Fill = paint.VectorPaint{}
-	}
-	a.artRun(ad, func() error {
-		s, err := ad.d.BeginVector(0, v, a.u.tf("Curve %d", len(ad.d.Layers())+1), "Pencil")
-		if err != nil {
-			return err
-		}
-		s.End()
-		return nil
-	})
-}
-
 // finishPen ends the curve being drawn, keeping it when it has a segment.
 func (a *App) finishPen(ad *artDoc) {
 	pe := ad.pen
@@ -213,10 +152,11 @@ func (a *App) finishPen(ad *artDoc) {
 	ad.changedAll()
 }
 
-// editedVector is the chosen layer's object when it is a vector layer.
+// editedVector is the chosen layer when the node tool has an object of it to edit: a vector layer's object, or else
+// the layer's vector mask.
 func (ad *artDoc) editedVector() (*paint.Node, bool) {
 	n := ad.d.Node(ad.d.Active)
-	return n, n != nil && n.Vector != nil
+	return n, n != nil && n.EditedVector() != nil
 }
 
 // nodeState is the node tool's state for the chosen layer: chosen nodes belong to one layer.
@@ -246,7 +186,7 @@ func (a *App) nodePointer(ad *artDoc, vp gfx.Rect) {
 	var v paint.Vector
 	var inv paint.Affine
 	if ok {
-		v = n.Vector.ToCurve()
+		v = n.EditedVector().ToCurve()
 		if inv, ok = v.M.Inverse(); !ok {
 			n = nil
 		}
@@ -373,7 +313,7 @@ func (a *App) nodePointer(ad *artDoc, vp gfx.Rect) {
 			if ne.s == nil {
 				s, err := ad.d.BeginVector(n.ID, paint.Vector{}, "", ne.name)
 				if err != nil {
-					a.toast(a.describe(err), true)
+					a.artFailed(ad, err)
 					ne.grab = nodeGrabNone
 					break
 				}
@@ -457,7 +397,7 @@ func (a *App) nodeKeys(ad *artDoc, k Key) bool {
 	if !ok || len(ne.sel) == 0 {
 		return false
 	}
-	v := n.Vector.ToCurve()
+	v := n.EditedVector().ToCurve()
 	step := 1.0
 	if k.Shift {
 		step = 10
@@ -520,23 +460,18 @@ func (a *App) drawVectorOverlay(ad *artDoc, vp gfx.Rect) {
 			a.drawOutline(ad, vp, next)
 		}
 		a.drawNodes(ad, vp, v, nil, true)
-	case a.artTool == toolPencil && len(ad.pencil) > 1:
-		w := max(1, u.px(1.5))
-		for i := 1; i < len(ad.pencil); i++ {
-			x0, y0 := ad.toScreen(vp, ad.pencil[i-1])
-			x1, y1 := ad.toScreen(vp, ad.pencil[i])
-			u.c.Line(x0, y0, x1, y1, w, colAccent)
-		}
 	case a.artTool == toolNode:
 		n, ok := ad.editedVector()
 		if !ok {
 			return
 		}
 		ne := ad.nodeState()
-		for _, id := range ad.chosenVectors()[1:] { // the others chosen, outlined without their nodes
-			a.drawOutline(ad, vp, ad.d.Node(id).Vector.ToCurve())
+		for _, id := range ad.chosenVectors() { // the others chosen, outlined without their nodes
+			if id != n.ID {
+				a.drawOutline(ad, vp, ad.d.Node(id).Vector.ToCurve())
+			}
 		}
-		v := n.Vector.ToCurve()
+		v := n.EditedVector().ToCurve()
 		a.drawOutline(ad, vp, v)
 		a.drawNodes(ad, vp, v, ne.sel, false)
 		if ne.grab == nodeGrabBox {
@@ -617,8 +552,8 @@ func (a *App) drawNodes(ad *artDoc, vp gfx.Rect, v paint.Vector, sel []paint.Nod
 	}
 }
 
-// drawPenOptions is the pen's and the pencil's options: the stroke's width and whether it fills, with a hint.
-func (a *App) drawPenOptions(r gfx.Rect, hint string) {
+// drawPenOptions is the pen's options: the stroke's width and whether it fills, with a hint.
+func (a *App) drawPenOptions(ad *artDoc, r gfx.Rect, hint string) {
 	u := &a.u
 	p := &a.settings.Paint
 	x := r.X
@@ -627,6 +562,7 @@ func (a *App) drawPenOptions(r gfx.Rect, hint string) {
 		p.PenFill, done = on, true
 	}
 	x += u.px(78)
+	x = a.drawCombineButtons(ad, x, r)
 	var d bool
 	x, d = a.labelledSlider("art/pen/width", x, r.Y, r.H, u.t("Stroke width"), &p.ShapeWidth, 1, 100, func(v float64) string { return fmt.Sprintf("%.0f px", v) })
 	p.ShapeWidth = math.Round(p.ShapeWidth)
@@ -649,7 +585,7 @@ func (a *App) drawNodeOptions(ad *artDoc, r gfx.Rect) {
 		return
 	}
 	ne := ad.nodeState()
-	v := n.Vector.ToCurve()
+	v := n.EditedVector().ToCurve()
 	x := r.X
 	for _, b := range []struct {
 		id, hint string
@@ -678,8 +614,63 @@ func (a *App) drawNodeOptions(ad *artDoc, r gfx.Rect) {
 		a.nodeKeys(ad, Key{Code: keyDelete})
 	}
 	x += u.px(40)
-	x = a.drawBoolButtons(ad, x, r)
+	if len(ad.chosenVectors()) >= 2 {
+		x = a.drawBoolButtons(ad, x, r)
+	} else {
+		x = a.drawShapeOps(ad, n, x, r)
+	}
+	if n.Vector == nil {
+		u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H}, u.t("Editing the vector mask: the layer shows inside its outline"), colDim, 0)
+		return
+	}
 	a.drawVectorProperties(ad, n, gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H})
+}
+
+// chosenShape is the shape of the edited object that the node tool's chosen nodes are in, or -1 when they are in
+// none or in more than one.
+func (ad *artDoc) chosenShape(v *paint.Vector) int {
+	shape := -1
+	for _, r := range ad.nodeState().sel {
+		i := v.ShapeOf(r.Sub)
+		if shape >= 0 && i != shape {
+			return -1
+		}
+		shape = i
+	}
+	return shape
+}
+
+// shapeOpBools are the boolean each shape operation is drawn as, by paint.ShapeOp from OpAdd.
+var shapeOpBools = []paint.BoolOp{paint.BoolAdd, paint.BoolSubtract, paint.BoolIntersect, paint.BoolExclude}
+
+// drawShapeOps are the buttons that choose how the shape of the chosen nodes combines with the shapes before it,
+// and the one that expands the shapes into one outline; it returns where the next control goes.
+func (a *App) drawShapeOps(ad *artDoc, n *paint.Node, x float32, r gfx.Rect) float32 {
+	u := &a.u
+	v := n.EditedVector()
+	if !v.Compound() {
+		return x
+	}
+	shape := ad.chosenShape(v)
+	on := shape > 0 // the first shape combines with nothing
+	for i, b := range shapeOpBools {
+		op := paint.ShapeOp(i + 1)
+		br := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
+		hint := u.tf("%s: how the chosen nodes' shape combines with the shapes under it", u.tc("boolean", boolNames[b]))
+		pressed := u.iconButton(fmt.Sprintf("art/shapeop/%d", i), br, "", hint, on && v.ShapeOpOf(shape) == op, on)
+		drawBoolGlyph(u, br, b, on)
+		if pressed {
+			a.artRun(ad, func() error { return ad.d.SetShapeOp(n.ID, shape, op) })
+		}
+		x += u.px(32)
+	}
+	label := u.t("Merge shape components")
+	w := u.buttonWidth("", label)
+	if x+w < r.Right() && u.button("art/shape/expand", gfx.Rect{X: x, Y: r.Y, W: w, H: r.H}, "", label, ghost, true) {
+		ad.nodeState().sel = nil
+		a.artRun(ad, func() error { return ad.d.ExpandShapes(n.ID) })
+	}
+	return x + w + u.px(10)
 }
 
 // drawNodeGlyph draws the icon of a sharp node, two straight segments meeting at a square, or of a smooth one, an
@@ -788,7 +779,7 @@ func (a *App) drawVectorProperties(ad *artDoc, n *paint.Node, r gfx.Rect) {
 			u.c.Fill(sw.Inset(-max(1, u.px(1))), colBorder)
 			u.c.Fill(sw, color.RGBA{col.R, col.G, col.B, 255})
 		} else {
-			u.c.RoundOutline(sw, u.px(2), max(1, u.px(1)), colBorder)
+			u.c.Outline(sw, max(1, u.px(1)), colBorder)
 			u.c.Line(sw.X, sw.Bottom(), sw.Right(), sw.Y, max(1, u.px(1)), colDanger)
 		}
 		u.hint(swid, u.tf("%s: click to use the foreground colour", part.label), sw)
@@ -819,7 +810,7 @@ func (a *App) drawVectorProperties(ad *artDoc, n *paint.Node, r gfx.Rect) {
 		if ad.props == nil {
 			s, err := ad.d.BeginVector(n.ID, paint.Vector{}, "", "Stroke")
 			if err != nil {
-				a.toast(a.describe(err), true)
+				a.artFailed(ad, err)
 				return
 			}
 			ad.props = s
@@ -869,10 +860,9 @@ func (a *App) convertToCurves(ad *artDoc) {
 		a.toast(a.describe(paint.ErrNotVector), true)
 		return
 	}
-	if n.Vector.Kind == paint.VectorCurve {
-		return
+	if v := n.EditedVector(); v.Kind != paint.VectorCurve {
+		a.artRun(ad, func() error { ad.d.SetVector(n.ID, v.ToCurve(), "Convert to curves"); return nil })
 	}
-	a.artRun(ad, func() error { ad.d.SetVector(n.ID, n.Vector.ToCurve(), "Convert to curves"); return nil })
 }
 
 // togglePicked chooses layer id besides the active one, or lets it go; the active layer stays chosen.
@@ -885,6 +875,15 @@ func (ad *artDoc) togglePicked(id int) {
 		return
 	}
 	ad.picked = append(ad.picked, id)
+}
+
+// groupChosen puts the chosen layers, the active one and those picked besides it, into a new group.
+func (a *App) groupChosen(ad *artDoc, name string) error {
+	_, err := ad.d.Group(name, append([]int{ad.d.Active}, ad.picked...))
+	if err == nil {
+		ad.picked = nil
+	}
+	return err
 }
 
 // chosenVectors are the chosen vector layers: the active one and those picked besides it that are still there.
@@ -901,11 +900,16 @@ func (ad *artDoc) chosenVectors() []int {
 // boolNames name the booleans, by paint.BoolOp.
 var boolNames = msgsIn("boolean", "Add", "Subtract", "Intersect", "Exclude")
 
-// runBoolean combines the chosen vector layers.
+// combineNames name the ways of combining the chosen vector layers into one, by paint.BoolOp, as Photoshop's path
+// operations are named.
+var combineNames = msgs("Unite shapes", "Subtract front shape", "Intersect shape areas", "Exclude overlapping shapes")
+
+// runBoolean combines the chosen vector layers into one, each a shape of it that combines by op with those under
+// it, as Photoshop's Combine Shapes does; Merge shape components bakes them into one outline.
 func (a *App) runBoolean(ad *artDoc, op paint.BoolOp) {
 	ids := ad.chosenVectors()
 	a.artRun(ad, func() error {
-		_, err := ad.d.Boolean(op, ids)
+		_, err := ad.d.CombineShapes(paint.ShapeOp(op)+paint.OpAdd, ids)
 		return err
 	})
 	ad.picked = nil
@@ -937,18 +941,27 @@ func drawBoolGlyph(u *ctx, r gfx.Rect, op paint.BoolOp, enabled bool) {
 		u.c.Fill(both, colPanel)
 	}
 	w := max(1, u.px(1))
-	u.c.RoundOutline(back, 0, w, col)
-	u.c.RoundOutline(front, 0, w, col)
+	u.c.Outline(back, w, col)
+	u.c.Outline(front, w, col)
 }
 
-// drawBoolButtons are the booleans' buttons, enabled when two or more vector layers are chosen; it returns where
-// the next control goes.
+// drawCombineButtons are the buttons combining the chosen vector layers, in the options of the tools that work on
+// vectors, while two or more are chosen; it returns where the next control goes.
+func (a *App) drawCombineButtons(ad *artDoc, x float32, r gfx.Rect) float32 {
+	if len(ad.chosenVectors()) < 2 {
+		return x
+	}
+	return a.drawBoolButtons(ad, x, r) + a.u.px(4)
+}
+
+// drawBoolButtons are the buttons combining the chosen vector layers into one, enabled when two or more are
+// chosen; it returns where the next control goes.
 func (a *App) drawBoolButtons(ad *artDoc, x float32, r gfx.Rect) float32 {
 	u := &a.u
 	on := len(ad.chosenVectors()) >= 2
-	for i, name := range boolNames {
+	for i, name := range combineNames {
 		br := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
-		hint := u.tf("%s: combine the chosen vector layers (Ctrl+click layers to choose more)", u.tc("boolean", name))
+		hint := u.tf("%s: combine the chosen vector layers into one, each staying a shape you can edit (Shift+click layers to choose more)", u.t(name))
 		pressed := u.iconButton(fmt.Sprintf("art/bool/%d", i), br, "", hint, false, on)
 		drawBoolGlyph(u, br, paint.BoolOp(i), on)
 		if pressed {

@@ -56,19 +56,21 @@ func (a *App) drawExportPanel(r gfx.Rect) float32 {
 		id := "export/preset/" + p.id
 		selected := i == matched
 		bg := colSurface
+		edge := colBorder
 		if selected {
-			bg = gfx.Mix(colSurface, colAccent, 0.18)
+			bg, edge = colSelected, colBorderHi
 		} else if u.hover(id, row) {
 			bg = colSurfaceHi
 			u.cursor = CursorHand
 		}
-		u.c.RoundRect(row, u.px(7), bg)
+		u.c.Fill(row, bg)
+		u.c.Outline(row, max(1, u.px(1)), edge)
 		dot := gfx.Rect{X: row.X + u.px(10), Y: row.Y + u.px(9), W: u.px(14), H: u.px(14)}
 		if selected {
-			u.c.Circle(dot.X+dot.W/2, dot.Y+dot.H/2, u.px(7), colAccent)
-			u.c.Circle(dot.X+dot.W/2, dot.Y+dot.H/2, u.px(3), colOnAccent)
+			u.c.Fill(dot, colPrimary)
+			u.c.Fill(dot.Inset(u.px(4)), colOnPrimary)
 		} else {
-			u.c.RoundOutline(dot, u.px(7), u.px(1.5), colFaint)
+			u.c.Outline(dot, u.px(1.5), colFaint)
 		}
 		u.label(u.bold(12.5), gfx.Rect{X: row.X + u.px(32), Y: row.Y + u.px(5), W: row.W - u.px(40), H: u.px(22)}, u.t(p.name), colText, 0)
 		for k, l := range note {
@@ -85,12 +87,12 @@ func (a *App) drawExportPanel(r gfx.Rect) float32 {
 		y = row.Bottom() + u.px(4)
 	}
 	if matched < 0 {
-		u.label(u.face(11.5), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(20)}, u.t("Custom settings (below)"), colAccentHi, 0)
+		u.label(u.face(11.5), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(20)}, u.t("Custom settings (below)"), colText, 0)
 		y += u.px(22)
 	}
 	y += u.px(10)
 
-	if e.TargetMB > 0 {
+	if e.Effective().TargetMB > 0 {
 		y = a.drawTargetSize(r, y, e, set)
 	}
 	y = a.drawExportDetails(r, y, e, set)
@@ -113,7 +115,11 @@ func (a *App) drawExportTab(r gfx.Rect) {
 		u.label(u.face(12), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(20)}, l, colDim, 0)
 		y += u.px(20)
 	}
-	if u.button("export/go", gfx.Rect{X: r.X, Y: footer.Bottom() - u.px(42), W: r.W, H: u.px(42)}, icExport, u.t("Export video (Ctrl+E)"), primary, a.export == nil) {
+	label := u.t("Export video (Ctrl+E)")
+	if a.p.Export.Codec.Animated() {
+		label = u.t("Export animation (Ctrl+E)")
+	}
+	if u.button("export/go", gfx.Rect{X: r.X, Y: footer.Bottom() - u.px(42), W: r.W, H: u.px(42)}, icExport, label, primary, a.export == nil) {
 		a.startExport()
 	}
 }
@@ -132,7 +138,7 @@ func (a *App) exportSummary(width float32) []string {
 	info := []string{u.tf("Output %d×%d · %s fps · %s · length %s", w, h, rate(render.OutputRate(a.p.Canvas, e)), encoder, clock(a.p.Duration()))}
 	if st, err := os.Stat(a.p.Sources[0].Path); err == nil {
 		line := u.tf("Original file %s", size(st.Size()))
-		if e.TargetMB > 0 {
+		if e.Effective().TargetMB > 0 {
 			line += " · " + u.tf("aiming for at most %s MB", trimNumber(e.TargetMB))
 		}
 		info = append(info, line)
@@ -234,21 +240,33 @@ func (a *App) drawExportDetails(r gfx.Rect, y float32, e project.Export, set fun
 	if !available[project.AV1] && a.encoders != nil {
 		y = a.paragraph(r.X, y-u.px(6), r.W, u.t("AV1 needs an ffmpeg built with libsvtav1 or libaom (the full builds have them)."), 11, colFaint) + u.px(8)
 	}
+	animated := e.Codec.Animated()
+	switch e.Codec {
+	case project.GIF:
+		y = a.paragraph(r.X, y-u.px(6), r.W, u.t("A silent loop in 256 colours chosen for this clip, at most 50 fps. Keep it short and small: GIFs grow fast."), 11, colFaint) + u.px(8)
+	case project.WebP:
+		y = a.paragraph(r.X, y-u.px(6), r.W, u.t("A silent loop in full colour; only what changes between frames is stored."), 11, colFaint) + u.px(8)
+	}
 	row(u.t("Picture quality"))
-	if e.TargetMB > 0 {
+	if e.Effective().TargetMB > 0 {
 		y = a.paragraph(r.X, y, r.W, u.t("Set by the target size"), 11.5, colFaint) + u.px(10)
 	} else if pick := chips("export/quality", qualityNames, int(e.Quality), nil); pick != int(e.Quality) {
 		n := e
 		n.Quality = project.Quality(pick)
 		set(n)
 	}
-	row(u.t("Encoding speed (slower makes smaller files)"))
-	if k := indexOf(speedOrder, e.Speed); true {
-		if pick := chips("export/speed", speedNames, k, nil); pick != k {
-			n := e
-			n.Speed = speedOrder[pick]
-			set(n)
+	if e.Codec != project.GIF { // a GIF takes as long whatever the setting
+		row(u.t("Encoding speed (slower makes smaller files)"))
+		if k := indexOf(speedOrder, e.Speed); true {
+			if pick := chips("export/speed", speedNames, k, nil); pick != k {
+				n := e
+				n.Speed = speedOrder[pick]
+				set(n)
+			}
 		}
+	}
+	if animated {
+		return y + u.px(4)
 	}
 	row(u.t("Sound"))
 	if pick := chips("export/audio", audioNames, int(e.Audio), nil); pick != int(e.Audio) {

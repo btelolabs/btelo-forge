@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"math"
 	"slices"
 	"strings"
@@ -18,19 +19,25 @@ const (
 	domainGeneral = iota
 	domainVideo
 	domainDrawing
+	domainFiles
+	domainMind
 	domainRecording
 )
 
-var domainNames = msgs("General", "Video editing", "Drawing", "Recording")
+var domainNames = msgs("General", "Video editing", "Drawing", "Resource manager", "Mind maps", "System-wide")
 
 // shortcut is a command keys can run: its id, domain, name (translated) and default keys. A tool's key picks the
-// tool; tools may share one, as Photoshop's do, and Shift with it goes to the next.
+// tool; tools may share one, as Photoshop's do, and Shift with it goes to the next. A brush command acts only while
+// a painting tool is chosen, so it may share a key with a command that acts otherwise, and comes first. A reserved
+// command's keys act in every tab before any other's, so no command of any domain may have them.
 type shortcut struct {
 	id       string
 	domain   int
 	label    string
 	defaults []Key
 	tool     bool
+	brush    bool
+	reserved bool
 }
 
 // hotkeyOf and keyOf convert between a key press and a stored combination.
@@ -80,6 +87,8 @@ type appCommand struct {
 	run func()
 	// video says it needs a project open.
 	video bool
+	// anywhere says it acts also while a dialog, a menu or Settings is open.
+	anywhere bool
 }
 
 // appCommands are the general and the video editing commands keys can run.
@@ -90,6 +99,24 @@ func (a *App) appCommands() []appCommand {
 	}
 	v := func(id, label string, run func(), ks ...*Key) appCommand {
 		return appCommand{shortcut: shortcut{id: "video." + id, domain: domainVideo, label: label, defaults: keys(ks...)}, run: run, video: true}
+	}
+	// The reserved commands, a browser's: Ctrl (Command) and a digit from 1 to 9 bring that tab forward, and Ctrl
+	// with =, - or 0 zooms the whole window, on the main keys or the number pad.
+	reserved := func(c appCommand) appCommand {
+		c.reserved = true
+		return c
+	}
+	goTab := func(n int) appCommand {
+		return reserved(g(fmt.Sprintf("tab.%d", n), u.tf("Go to tab %d", n), func() {
+			if n <= len(a.docs) {
+				a.switchTab(n - 1)
+			}
+		}, key('0'+uint16(n), "c"), key(keyNum0+uint16(n), "c")))
+	}
+	zoom := func(id, label string, run func(), ks ...*Key) appCommand {
+		c := reserved(g(id, label, run, ks...))
+		c.anywhere = true
+		return c
 	}
 	step := func(frames bool, back bool) func() {
 		return func() {
@@ -104,10 +131,14 @@ func (a *App) appCommands() []appCommand {
 		}
 	}
 	return []appCommand{
-		g("tab.new", u.t("New tab"), a.newTab, key('T', "c")),
+		g("tab.new", u.t("New tab"), a.newTab, key('T', "cs")),
 		g("tab.close", u.t("Close the tab"), func() { a.closeTab(a.current()) }, key('W', "c")),
 		g("tab.next", u.t("Next tab"), func() { a.switchTab((a.current() + 1) % len(a.docs)) }, key(keyTab, "c")),
 		g("tab.previous", u.t("Previous tab"), func() { a.switchTab((a.current() + len(a.docs) - 1) % len(a.docs)) }, key(keyTab, "cs")),
+		goTab(1), goTab(2), goTab(3), goTab(4), goTab(5), goTab(6), goTab(7), goTab(8), goTab(9),
+		zoom("zoom.in", u.t("Zoom the window in"), func() { a.stepWindowZoom(1) }, key(keyEquals, "c"), key(keyEquals, "cs"), key(keyNumPlus, "c")),
+		zoom("zoom.out", u.t("Zoom the window out"), func() { a.stepWindowZoom(-1) }, key(keyMinus, "c"), key(keyNumMinus, "c")),
+		zoom("zoom.reset", u.t("Reset the window's zoom"), func() { a.setWindowZoom(1) }, key('0', "c"), key(keyNum0, "c")),
 		g("open", u.t("Open a video"), a.chooseVideo, key('O', "c")),
 		g("paste", u.t("Paste"), a.paste, key('V', "c")),
 
@@ -118,6 +149,7 @@ func (a *App) appCommands() []appCommand {
 		v("redo", u.t("Redo"), a.redo, key('Y', "c"), key('Z', "cs")),
 		v("text", u.t("Add text"), a.addText, key('T', "")),
 		v("export", u.t("Export"), func() { a.startExport() }, key('E', "c")),
+		v("save", u.t("Save the edit as a file"), a.saveEditCommand, key('S', "c")),
 		v("frame.back", u.t("Back a frame"), step(true, true), key(keyLeft, "")),
 		v("frame.forward", u.t("Forward a frame"), step(true, false), key(keyRight, "")),
 		v("second.back", u.t("Back a second"), step(false, true), key(keyLeft, "s")),
@@ -126,16 +158,48 @@ func (a *App) appCommands() []appCommand {
 		v("end", u.t("Go to the end"), func() { a.seek(a.p.Duration()) }, key(keyEnd, "")),
 		v("deselect", u.t("Deselect"), func() { a.selectOnly(selection{}) }, key(keyEscape, "")),
 		v("select-all", u.t("Select all"), a.selectAll, key('A', "c")),
+		v("watch", u.t("Player mode: hide every tool, leaving the picture and the seek bar"), func() { a.setWatching(!a.watch.on) }, key(keyTab, "")),
 	}
+}
+
+// reservedKeys runs the reserved commands (going to a tab, zooming the window) the keys pressed this frame are
+// bound to, before any tab, tool, field or dialog sees the keys, and takes those keys away. Only choosing a key in
+// Settings, which must see every press, keeps them; and a dialog or menu, which belongs to its tab, keeps the tab.
+func (a *App) reservedKeys() {
+	u := &a.u
+	if a.hotkeys.capturing >= 0 || a.keyCapture != nil {
+		return
+	}
+	var reserved []appCommand
+	for _, c := range a.appCommands() {
+		if c.reserved && (c.anywhere || !u.blocked) {
+			reserved = append(reserved, c)
+		}
+	}
+	var rest []Key
+	for _, k := range u.keys {
+		i := slices.IndexFunc(reserved, func(c appCommand) bool { return a.bound(c.id, c.defaults, k) })
+		if i < 0 {
+			rest = append(rest, k)
+			continue
+		}
+		reserved[i].run()
+	}
+	u.keys = rest
 }
 
 // shortcuts runs the general and video editing commands the keys pressed this frame are bound to.
 func (a *App) shortcuts() {
 	u := &a.u
 	cmds := a.appCommands()
+	watching := a.watching()
 	for _, k := range u.keys {
+		if watching && k == (Key{Code: keyEscape}) {
+			a.setWatching(false)
+			continue
+		}
 		for _, c := range cmds {
-			if (!c.video || a.p != nil) && a.bound(c.id, c.defaults, k) {
+			if (!c.video || a.p != nil) && (!watching || watchCommands[c.id]) && a.bound(c.id, c.defaults, k) {
 				c.run()
 				break
 			}
@@ -149,37 +213,107 @@ var (
 	drawingKeys = []struct {
 		id       string
 		defaults []Key
+		brush    bool
 	}{
-		{"draw.swap-colours", keys(key('X', ""))},
-		{"draw.default-colours", keys(key('D', ""))},
-		{"draw.brush-smaller", keys(key(0xdb, ""))},
-		{"draw.brush-larger", keys(key(0xdd, ""))},
+		{"draw.brush-smaller", keys(key(0xdb, ""), key('D', "")), true},
+		{"draw.brush-larger", keys(key(0xdd, ""), key('F', "")), true},
+		{"draw.swap-colours", keys(key('X', "")), false},
+		{"draw.swap-fill-stroke", keys(key('X', "s")), false},
+		{"draw.default-colours", keys(key('D', "")), false},
 	}
-	drawingKeyNames = msgs("Swap the colours", "Default colours", "Smaller brush", "Larger brush")
+	drawingKeyNames = msgs("Smaller brush", "Larger brush", "Swap the colours", "Swap the fill and the stroke", "Default colours")
 )
+
+// painting reports whether the chosen tool paints with the brush, so the brush commands act.
+func (a *App) painting() bool {
+	switch a.artTool {
+	case toolBrush, toolEraser, toolClone, toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge:
+		return true
+	}
+	return false
+}
 
 // drawingKey runs the drawing command bound to k that is not in the menus; it reports whether there was one.
 func (a *App) drawingKey(k Key) bool {
 	for _, dk := range drawingKeys {
-		if !a.bound(dk.id, dk.defaults, k) {
+		if !a.bound(dk.id, dk.defaults, k) || dk.brush && !a.painting() && a.artTool != toolPencil {
 			continue
+		}
+		if a.artTool == toolPencil && (dk.id == "draw.brush-smaller" || dk.id == "draw.brush-larger") {
+			// The vector brush's size, its own.
+			size := a.vectorBrush().Size
+			if dk.id == "draw.brush-smaller" {
+				a.setVectorBrushSize(size / 1.15)
+			} else {
+				a.setVectorBrushSize(size*1.15 + 0.5)
+			}
+			return true
 		}
 		switch dk.id {
 		case "draw.swap-colours":
+			if _, n := a.paintedVector(); n != nil {
+				a.pickBackground = !a.pickBackground // the colours edit the stroke, or the fill again
+				a.picker.hex = ""
+				break
+			}
 			a.swapColors()
+		case "draw.swap-fill-stroke":
+			if ad, n := a.paintedVector(); n != nil {
+				a.swapFillAndStroke(ad, n)
+			}
 		case "draw.default-colours":
 			a.resetColors()
 		case "draw.brush-smaller":
-			a.brush.Size = max(1, math.Round(a.brush.Size/1.15))
-			a.saveBrush()
+			a.stepBrushSize(false)
 		case "draw.brush-larger":
-			a.brush.Size = min(500, math.Round(a.brush.Size*1.15+0.5))
-			a.saveBrush()
+			a.stepBrushSize(true)
 		}
 		return true
 	}
 	return false
 }
+
+// brushSizeKey reports whether k is bound to making the brush smaller or larger, and which; drawing on the screen
+// takes the same keys as the canvas.
+func (a *App) brushSizeKey(k Key) (larger, ok bool) {
+	for _, dk := range drawingKeys {
+		if (dk.id == "draw.brush-smaller" || dk.id == "draw.brush-larger") && a.bound(dk.id, dk.defaults, k) {
+			return dk.id == "draw.brush-larger", true
+		}
+	}
+	return false, false
+}
+
+// brushSizeKeyLabels name every key making the brush smaller, and larger, as hints show them.
+func (a *App) brushSizeKeyLabels() (smaller, larger string) {
+	names := func(id string) string {
+		for _, dk := range drawingKeys {
+			if dk.id != id {
+				continue
+			}
+			var out []string
+			for _, k := range a.keysFor(id, dk.defaults) {
+				out = append(out, hotkeyOf(k).String())
+			}
+			return strings.Join(out, " / ")
+		}
+		return ""
+	}
+	return names("draw.brush-smaller"), names("draw.brush-larger")
+}
+
+// stepBrushSize makes the brush a step smaller or larger, and keeps it.
+func (a *App) stepBrushSize(larger bool) {
+	if larger {
+		a.brush.Size = min(maxBrushSize, math.Round(a.brush.Size*1.15+0.5))
+	} else {
+		a.brush.Size = max(1, math.Round(a.brush.Size/1.15))
+	}
+	a.saveBrush()
+}
+
+// maxBrushSize is the largest brush the options bar, the keys and the screen toolbar give.
+const maxBrushSize = 500
 
 // toolFor is the tool a press of k picks, and whether it picks one: of the tools with that key, the chosen one
 // (or with Shift the next of them), else the one last used in its place.
@@ -223,7 +357,7 @@ func toolID(t artTool) string {
 
 // toolKeys are the keys that pick tool t.
 func (a *App) toolKeys(t artTool) []Key {
-	return a.keysFor(toolID(t), keys(key(toolPlace(t), "")))
+	return a.keysFor(toolID(t), toolDefaultKeys(t))
 }
 
 // drawingShortcuts lists the drawing commands for Settings: the tools, the menus' commands and the others.
@@ -232,7 +366,7 @@ func (a *App) drawingShortcuts() []shortcut {
 	var out []shortcut
 	for _, e := range artTools {
 		out = append(out, shortcut{id: toolID(e.tool), domain: domainDrawing, label: u.tf("%s tool", u.t(artToolNames[e.tool])),
-			defaults: keys(key(e.key, "")), tool: true})
+			defaults: toolDefaultKeys(e.tool), tool: true})
 	}
 	// The menus' commands, read from a stand-in picture: their ids, names and keys do not depend on the picture.
 	stand := &artDoc{d: paint.New(""), zoom: 1}
@@ -241,10 +375,10 @@ func (a *App) drawingShortcuts() []shortcut {
 		if c.sub != "" {
 			label = c.sub + " › " + label
 		}
-		out = append(out, shortcut{id: c.id, domain: domainDrawing, label: label, defaults: keys(c.key, c.also)})
+		out = append(out, shortcut{id: c.id, domain: domainDrawing, label: label, defaults: c.defaults()})
 	}
 	for i, k := range drawingKeys {
-		out = append(out, shortcut{id: k.id, domain: domainDrawing, label: u.t(drawingKeyNames[i]), defaults: k.defaults})
+		out = append(out, shortcut{id: k.id, domain: domainDrawing, label: u.t(drawingKeyNames[i]), defaults: k.defaults, brush: k.brush})
 	}
 	return out
 }
@@ -253,6 +387,12 @@ func (a *App) drawingShortcuts() []shortcut {
 func (a *App) shortcutsOf(domain int) []shortcut {
 	if domain == domainDrawing {
 		return a.drawingShortcuts()
+	}
+	if domain == domainFiles {
+		return a.fileShortcuts()
+	}
+	if domain == domainMind {
+		return a.mindShortcuts()
 	}
 	var out []shortcut
 	for _, c := range a.appCommands() {
@@ -263,13 +403,31 @@ func (a *App) shortcutsOf(domain int) []shortcut {
 	return out
 }
 
-// conflict is the command of the domain, other than id, whose keys include k, or "" when none; tools may share
-// keys with tools. A domain's keys come before the general ones in its tabs, as a canvas's Ctrl+T is Free
-// Transform rather than a new tab, so only commands of the same domain clash.
+// conflict is the command, other than id, whose keys include k, or "" when none; tools may share keys with tools,
+// and brush commands with the others. A domain's keys come before the general ones in its tabs, as a canvas's
+// Ctrl+T is Free Transform rather than a new tab, so only commands of the same domain clash; but the reserved
+// commands' keys come before every domain's, so they clash with the commands of all.
 func (a *App) conflict(domain int, id string, tool bool, k Key) string {
+	brush, reserved := false, false
 	for _, s := range a.shortcutsOf(domain) {
-		if s.id != id && !(tool && s.tool) && slices.Contains(a.keysFor(s.id, s.defaults), k) {
+		if s.id == id {
+			brush, reserved = s.brush, s.reserved
+		}
+	}
+	has := func(s shortcut) bool { return s.id != id && slices.Contains(a.keysFor(s.id, s.defaults), k) }
+	for _, s := range a.shortcutsOf(domain) {
+		if !(tool && s.tool) && s.brush == brush && has(s) {
 			return s.label
+		}
+	}
+	for d := domainGeneral; d < domainRecording; d++ {
+		if d == domain {
+			continue
+		}
+		for _, s := range a.shortcutsOf(d) {
+			if (reserved || s.reserved) && has(s) {
+				return s.label
+			}
 		}
 	}
 	return ""
@@ -324,9 +482,9 @@ func (a *App) settingsKeys(domain int, r gfx.Rect) {
 				bg = colSurfaceHi
 			}
 		}
-		u.c.RoundRect(box, u.px(7), bg)
+		u.c.Fill(box, bg)
 		if capturing {
-			u.c.RoundOutline(box, u.px(7), u.px(1.5), colAccent)
+			u.c.Outline(box, u.px(1.5), colAccent)
 		}
 		u.label(u.bold(12), box.Inset(u.px(10)), text, fg, 0.5)
 		if u.clicked(id, box) && !capturing {

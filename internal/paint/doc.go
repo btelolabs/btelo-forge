@@ -6,6 +6,8 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"runtime"
+	"sync"
 )
 
 // Node is a layer, which has pixels, or a group, which has children; the first child is the top one.
@@ -26,11 +28,19 @@ type Node struct {
 	Style *LayerStyle
 	// The layer mask: white shows the layer, black hides it; beyond what was painted on it, it is its fill. Off
 	// turns it off without removing it.
-	Mask     *Mask
-	MaskOff  bool
+	Mask    *Mask
+	MaskOff bool
+	// A vector mask: an object whose outline shows the layer or group, inside it, and hides it beyond; nil for none.
+	// Never changed in place.
+	Clip     *Vector
 	Text     *Text   // a text layer's words, which its pixels are drawn from; nil for other layers. Never changed in place.
 	Children []*Node // a group's layers and groups, top first
-	Open     bool    // a group shows its children in the layers panel
+	// An artboard's frame, which makes the group an artboard; nil for any other node. Never changed in place.
+	Board *BoardFrame
+	// A smart object's link, which makes the group one whose layers its copies share; nil for any other node. Never
+	// changed in place.
+	Smart *SmartLink
+	Open  bool // a group shows its children in the layers panel
 }
 
 // IsGroup reports whether n is a group.
@@ -42,10 +52,8 @@ type Doc struct {
 	// exports what is on it.
 	Frame image.Rectangle
 	// Paper is white under the layers, as a new canvas has; without it the picture is transparent where nothing is.
-	Paper bool
-	// Boards are the artboards, fixed-size areas of the canvas each exported as a picture of its own, bottom first.
-	Boards    []Board
-	Root      *Node // the top-level group; it is not shown as a layer
+	Paper     bool
+	Root      *Node // the top-level group, whose children are the top-level layers, groups and artboards
 	Active    int   // the node being painted on or changed
 	Selection *Mask // 255 where selected; nil when nothing is
 	EditMask  bool  // painting and filling go to the chosen layer's mask instead of its pixels
@@ -55,6 +63,8 @@ type Doc struct {
 
 	nextID        int
 	history       history
+	smart         map[string]*smartShared // what each smart object link shares, as its copies here show it
+	smartOut      []SmartContent          // shared layers changed here, not yet asked for
 	stroke        *Stroke
 	lastSelection *Mask // for Reselect
 }
@@ -163,6 +173,18 @@ func (d *Doc) Layers() []*Node {
 	return out
 }
 
+// someNode is a node to choose when the chosen one went: the first layer, or else the first node at the top level
+// (a picture whose smart objects took their layers away may have no layer), or 0 for an empty picture.
+func (d *Doc) someNode() int {
+	if layers := d.Layers(); len(layers) > 0 {
+		return layers[0].ID
+	}
+	if len(d.Root.Children) > 0 {
+		return d.Root.Children[0].ID
+	}
+	return 0
+}
+
 // ActiveLayer is the chosen node when it is a layer.
 func (d *Doc) ActiveLayer() (*Node, error) {
 	n := d.Node(d.Active)
@@ -178,7 +200,7 @@ func (d *Doc) ActiveLayer() (*Node, error) {
 // Composite is the visible picture within r, over transparency.
 func (d *Doc) Composite(r image.Rectangle) *image.RGBA {
 	out := image.NewRGBA(r)
-	d.compositeInto(out, d.Root, r, 0)
+	d.compositeBands(out, d.Root, r, 0)
 	return out
 }
 
@@ -210,50 +232,57 @@ func (d *Doc) Extent() image.Rectangle {
 
 // compositeInto draws group g's visible children, bottom first, onto dst within r, reading the layers at detail
 // level l (r is then in that level's pixels). A pass-through group at full opacity lets its layers blend with what
-// is under it directly; any other group is composed on its own first and then blended as one.
+// is under it directly; any other group is composed on its own first and then blended as one. Each layer and group
+// is worked only over where it shows anything, however large r is.
 func (d *Doc) compositeInto(dst *image.RGBA, g *Node, r image.Rectangle, l int) {
 	for i := len(g.Children) - 1; i >= 0; i-- {
 		c := g.Children[i]
 		if !c.Visible || c.Opacity <= 0 {
 			continue
 		}
-		mask := c.activeMask()
-		var maskPix *image.Alpha
-		var maskFill uint8 = 255
-		if mask != nil {
-			maskFill = mask.Fill()
-			if maskFill == 0 && mask.TileBounds().Intersect(levelUp(r, l)).Empty() {
-				continue // hidden here
+		at := r // where c can show anything, in level pixels
+		if reach, bounded := contentReach(c); bounded {
+			if at = r.Intersect(levelDown(reach, l)); at.Empty() {
+				continue // nothing here
 			}
-			maskPix = mask.ReadLevel(l, r)
+		}
+		reachAt := at // where it shows anything, effects and all, before its masks narrow it
+		at, maskPix, maskFill, hidden := shapeAt(c, at, l)
+		if hidden && c.Style.empty() {
+			continue
 		}
 		if c.Adjust != nil {
 			// What is under it so far, adjusted, laid over it through the layer's opacity, blend mode and mask.
-			blendPixels(dst, c.Adjust.Filter().apply(dst, r), r, c.Opacity, c.Blend, maskPix, maskFill)
+			blendPixels(dst, c.Adjust.Filter().apply(dst, at), at, c.Opacity, c.Blend, maskPix, maskFill)
 			continue
 		}
 		if !c.IsGroup() {
-			if reachOfNode(c).Intersect(levelUp(r, l)).Empty() {
-				continue // nothing here
-			}
 			if !c.Style.empty() {
-				d.drawStyled(dst, c, r, l)
+				// Its effects are worked out only where it shows anything, effects and all: around it, not over
+				// all of r.
+				d.drawStyled(dst, c, reachAt, l)
 				continue
 			}
-			blendPixels(dst, readLayer(c, r, l), r, c.Opacity, c.Blend, maskPix, maskFill)
+			blendPixels(dst, readLayer(c, at, l), at, c.Opacity, c.Blend, maskPix, maskFill)
 			continue
 		}
-		if c.Blend == BlendPassThrough && c.Opacity >= 1 && mask == nil {
-			d.compositeInto(dst, c, r, l)
+		if c.Blend == BlendPassThrough && c.Opacity >= 1 && maskPix == nil {
+			if c.Board != nil {
+				drawBoardFill(dst, c.Board, at, l)
+			}
+			d.compositeInto(dst, c, at, l)
 			continue
 		}
-		tmp := image.NewRGBA(r)
-		d.compositeInto(tmp, c, r, l)
+		tmp := image.NewRGBA(at)
+		if c.Board != nil {
+			drawBoardFill(tmp, c.Board, at, l)
+		}
+		d.compositeInto(tmp, c, at, l)
 		mode := c.Blend
 		if mode == BlendPassThrough {
 			mode = BlendNormal
 		}
-		blendPixels(dst, tmp, r, c.Opacity, mode, maskPix, maskFill)
+		blendPixels(dst, tmp, at, c.Opacity, mode, maskPix, maskFill)
 	}
 }
 
@@ -262,14 +291,56 @@ func levelUp(r image.Rectangle, l int) image.Rectangle {
 	return image.Rect(r.Min.X<<l, r.Min.Y<<l, r.Max.X<<l, r.Max.Y<<l)
 }
 
+// levelDown is the area of detail level l that covers the canvas area r.
+func levelDown(r image.Rectangle, l int) image.Rectangle {
+	if r.Empty() {
+		return image.Rectangle{}
+	}
+	return image.Rect(r.Min.X>>l, r.Min.Y>>l, (r.Max.X+(1<<l)-1)>>l, (r.Max.Y+(1<<l)-1)>>l)
+}
+
 // Render composites the area r of detail level l (the canvas halved l times) into dst, on white when the canvas
 // has paper: what the editor shows, and only what it shows.
 func (d *Doc) Render(dst *image.RGBA, r image.Rectangle, l int) {
 	if d.Paper {
 		draw.Draw(dst, r, image.White, image.Point{}, draw.Src)
 	}
-	d.drawBoards(dst, r, l)
-	d.compositeInto(dst, d.Root, r, l)
+	d.compositeBands(dst, d.Root, r, l)
+}
+
+// minBand is the fewest rows a band of a composite drawn on several cores has.
+const minBand = 32
+
+// compositeBands is compositeInto spread over the processor's cores, a band of rows on each: every band reads the
+// layers and writes only its own rows. The halved levels the bands read are made first, so the bands only read.
+func (d *Doc) compositeBands(dst *image.RGBA, g *Node, r image.Rectangle, l int) {
+	n := min(runtime.GOMAXPROCS(0), r.Dy()/minBand)
+	if n <= 1 {
+		d.compositeInto(dst, g, r, l)
+		return
+	}
+	if l > 0 {
+		makeLevels(g, l)
+	}
+	var wg sync.WaitGroup
+	for i := range n {
+		band := image.Rect(r.Min.X, r.Min.Y+r.Dy()*i/n, r.Max.X, r.Min.Y+r.Dy()*(i+1)/n)
+		wg.Go(func() { d.compositeInto(dst, g, band, l) })
+	}
+	wg.Wait()
+}
+
+// makeLevels makes the halved level l of every raster and mask under g, which reading it otherwise makes on demand.
+func makeLevels(g *Node, l int) {
+	for _, c := range g.Children {
+		if c.Pixels != nil {
+			c.Pixels.p.level(l)
+		}
+		if c.Mask != nil {
+			c.Mask.p.level(l)
+		}
+		makeLevels(c, l)
+	}
 }
 
 // activeMask is the mask that applies, nil when there is none or it is turned off.

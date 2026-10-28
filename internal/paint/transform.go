@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"image/draw"
 	"math"
-	"slices"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/math/f64"
@@ -71,6 +70,7 @@ type TransformSession struct {
 	vector *Vector     // or a vector layer's object, as it was
 	base   *Raster     // the layer without the selected pixels, when they were lifted out
 	mask   *Mask       // the layer's mask, transformed with a whole layer
+	clip   *Vector     // the layer's vector mask, transformed with a whole layer
 	sel    *Mask       // the selection being transformed, or nil
 	bounds image.Rectangle
 	m      Affine
@@ -88,7 +88,7 @@ func (d *Doc) BeginTransform() (*TransformSession, error) {
 	if l.Adjust != nil {
 		return nil, ErrAdjustmentLayer
 	}
-	t := &TransformSession{d: d, l: l, mark: d.Mark(), m: Identity}
+	t := &TransformSession{d: d, l: l, mark: d.Mark(), m: Identity, clip: l.Clip}
 	if l.Vector != nil {
 		t.vector, t.mask = l.Vector, l.Mask
 		t.bounds = l.Vector.PixelBounds()
@@ -145,6 +145,9 @@ func (t *TransformSession) Set(m Affine, fast bool) image.Rectangle {
 func (t *TransformSession) set(m Affine, k xdraw.Interpolator) image.Rectangle {
 	t.m = m
 	out := m.bounds(t.bounds)
+	if t.clip != nil && t.base == nil {
+		t.l.Clip = t.clip.Transformed(m) // exactly, as the object is
+	}
 	if t.vector != nil {
 		t.l.Vector = t.vector
 		transformVector(t.l, m)
@@ -262,6 +265,12 @@ func (d *Doc) remapCanvas(name string, m Affine, exact bool, frame image.Rectang
 			if c.Mask != nil {
 				c.Mask = resampleMask(c.Mask, m, k)
 			}
+			if c.Clip != nil {
+				c.Clip = c.Clip.Transformed(m)
+			}
+			if c.Board != nil {
+				c.Board = &BoardFrame{Rect: m.bounds(c.Board.Rect), Fill: c.Board.Fill}
+			}
 			switch {
 			case c.IsGroup():
 				walk(c)
@@ -293,13 +302,6 @@ func (d *Doc) remapCanvas(name string, m Affine, exact bool, frame image.Rectang
 		d.Frame = frame
 	case !d.Frame.Empty():
 		d.Frame = m.bounds(d.Frame)
-	}
-	if len(d.Boards) > 0 {
-		boards := slices.Clone(d.Boards)
-		for i := range boards {
-			boards[i].Rect = m.bounds(boards[i].Rect)
-		}
-		d.Boards = boards
 	}
 	d.lastSelection = nil // it would no longer fit
 	d.Commit(name, mark)

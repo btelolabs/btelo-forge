@@ -103,18 +103,17 @@ func (a *App) beginText(ad *artDoc, cx, cy float64) {
 	}
 	s, err := ad.d.BeginText(id)
 	if err != nil {
-		a.toast(a.describe(err), true)
+		a.artFailed(ad, err)
 		return
 	}
 	ad.text = &textEdit{s: s}
 	t := a.textSettings(words, x, y)
 	ad.touched(s.Set(t, a.renderText(t)))
-	u.focus, u.focusDrawn = textFocus, true
 	caret := len([]rune(words))
 	if id != 0 {
 		caret = a.textCaretAt(t, cx, cy) // a click on a text puts the caret where it was clicked
 	}
-	u.edit = editor{text: []rune(words), multiline: true, caret: caret, anchor: caret}
+	u.beginEdit(textFocus, words, true, caret, caret)
 }
 
 // commitText records what was typed; cancelText drops it.
@@ -155,6 +154,11 @@ func (a *App) textTick(ad *artDoc) {
 		return
 	}
 	u.focusDrawn = true
+	if !u.editing(textFocus) {
+		// The editor went to another box and the keyboard came back: it starts again from the words typed so far.
+		words := te.s.Layer().Text.Text
+		u.beginEdit(textFocus, words, true, len([]rune(words)), len([]rune(words)))
+	}
 	keys := u.keys
 	u.keys = nil
 	for _, k := range keys {
@@ -166,11 +170,11 @@ func (a *App) textTick(ad *artDoc) {
 			a.commitText(ad)
 			return
 		default:
-			u.edit.key(k, u.paste)
+			u.edit.key(k, u)
 		}
 	}
 	if len(u.typed) > 0 {
-		u.edit.insert(string(u.typed))
+		u.edit.typeText(string(u.typed))
 		u.typed = nil
 	}
 	cur := te.s.Layer().Text
@@ -234,10 +238,16 @@ func (a *App) textPointer(ad *artDoc, vp gfx.Rect) {
 	if u.press(id, vp) {
 		switch {
 		case inside():
-			u.edit.caret = a.textCaretAt(*ad.text.s.Layer().Text, cx, cy)
-			if !u.shift {
-				u.edit.anchor = u.edit.caret
+			at := a.textCaretAt(*ad.text.s.Layer().Text, cx, cy)
+			switch {
+			case u.double:
+				u.edit.anchor, u.edit.caret = wordAround(u.edit.text, at)
+			case u.shift:
+				u.edit.caret = at
+			default:
+				u.edit.caret, u.edit.anchor = at, at
 			}
+			u.editDrag = !u.double
 			u.focus, u.focusDrawn = textFocus, true
 		case ad.text != nil:
 			a.commitText(ad)
@@ -247,7 +257,7 @@ func (a *App) textPointer(ad *artDoc, vp gfx.Rect) {
 			u.active = ""
 		}
 	}
-	if u.dragging(id) && ad.text != nil {
+	if u.dragging(id) && ad.text != nil && u.editDrag {
 		u.edit.caret = a.textCaretAt(*ad.text.s.Layer().Text, cx, cy)
 	}
 	u.letGo(id)
@@ -280,10 +290,7 @@ func (a *App) drawTextOverlay(ad *artDoc, vp gfx.Rect) {
 		}
 		if c := u.edit.caret - start; c >= 0 && c <= len(rs) {
 			cx, cy := ad.toScreen(vp, [2]float64{lx + float64(f.Measure(string(rs[:c]))), ly})
-			h := float32(float64(f.Height()) * ad.zoom)
-			u.c.Fill(gfx.Rect{X: cx - 1, Y: cy, W: max(1, u.px(1.5)) + 1, H: h}, gfx.Alpha(colBlack, 0.5))
-			u.c.Fill(gfx.Rect{X: cx, Y: cy, W: max(1, u.px(1.5)), H: h}, colWhite)
-			u.imeAt = [3]float32{cx, cy, h}
+			u.drawCaret(cx, cy, float32(float64(f.Height())*ad.zoom), true)
 		}
 		start += len(rs) + 1
 	}

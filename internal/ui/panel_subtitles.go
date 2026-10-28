@@ -77,8 +77,8 @@ func (a *App) drawSubtitlePanel(r gfx.Rect) float32 {
 		u.label(u.face(12.5), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(20)}, fmt.Sprintf("%s · %d%%", stage, int(job.fraction*100)), colText, 0)
 		y += u.px(26)
 		bar := gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(8)}
-		u.c.RoundRect(bar, u.px(4), colSurface)
-		u.c.RoundRect(gfx.Rect{X: bar.X, Y: bar.Y, W: max(bar.W*float32(job.fraction), bar.H), H: bar.H}, u.px(4), colAccent)
+		u.c.Fill(bar, colSurface)
+		u.c.Fill(gfx.Rect{X: bar.X, Y: bar.Y, W: max(bar.W*float32(job.fraction), bar.H), H: bar.H}, colAccent)
 		y += u.px(18)
 		if u.button("sub/cancel", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(36)}, "", u.t("Cancel"), plain, true) {
 			s.cancel()
@@ -94,7 +94,7 @@ func (a *App) drawSubtitlePanel(r gfx.Rect) float32 {
 	}
 	if s.lastErr != "" {
 		for _, l := range f.Wrap(s.lastErr, r.W) {
-			u.c.Text(f, r.X, y, l, gfx.Hex(0xffb4b2))
+			u.c.Text(f, r.X, y, l, colDangerText)
 			y += f.Height() * 1.3
 		}
 	}
@@ -107,19 +107,21 @@ func (a *App) drawSubtitlePanel(r gfx.Rect) float32 {
 		id := "sub/model/" + m.ID
 		selected := m.ID == chosen.ID
 		bg := colSurface
+		edge := colBorder
 		if selected {
-			bg = gfx.Mix(colSurface, colAccent, 0.18)
+			bg, edge = colSelected, colBorderHi
 		} else if u.hover(id, row) {
 			bg = colSurfaceHi
 			u.cursor = CursorHand
 		}
-		u.c.RoundRect(row, u.px(7), bg)
+		u.c.Fill(row, bg)
+		u.c.Outline(row, max(1, u.px(1)), edge)
 		dot := gfx.Rect{X: row.X + u.px(10), Y: row.Y + u.px(10), W: u.px(14), H: u.px(14)}
 		if selected {
-			u.c.Circle(dot.X+dot.W/2, dot.Y+dot.H/2, u.px(7), colAccent)
-			u.c.Circle(dot.X+dot.W/2, dot.Y+dot.H/2, u.px(3), colOnAccent)
+			u.c.Fill(dot, colPrimary)
+			u.c.Fill(dot.Inset(u.px(4)), colOnPrimary)
 		} else {
-			u.c.RoundOutline(dot, u.px(7), u.px(1.5), colFaint)
+			u.c.Outline(dot, u.px(1.5), colFaint)
 		}
 		u.label(u.bold(12.5), gfx.Rect{X: row.X + u.px(32), Y: row.Y, W: u.px(120), H: row.H}, m.Name.In(lang), colText, 0)
 		info := m.Note.In(lang)

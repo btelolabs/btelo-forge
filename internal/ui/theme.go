@@ -2,30 +2,39 @@ package ui
 
 import "github.com/btelolabs/btelo-forge/internal/gfx"
 
+// The palette is a ladder of cool, near-black greys — chrome, panels, controls, hover, selection — with hairline
+// borders between them. Colour is kept for what needs to stand out: the light primary action, the blue of focus,
+// progress and on-canvas handles, and the hues that tell timeline items apart.
 var (
-	colBackground = gfx.Hex(0x0f1112)
-	colPanel      = gfx.Hex(0x171a1c)
-	colSurface    = gfx.Hex(0x202427)
-	colSurfaceHi  = gfx.Hex(0x2a2f33)
-	colBorder     = gfx.Hex(0x2b3034)
-	colText       = gfx.Hex(0xeceff0)
-	colDim        = gfx.Hex(0x9ba3a8)
-	colFaint      = gfx.Hex(0x666e74)
-	colAccent     = gfx.Hex(0x1fbf75)
-	colAccentHi   = gfx.Hex(0x34d68a)
-	colOnAccent   = gfx.Hex(0xffffff) // text and icons on green
+	colBackground = gfx.Hex(0x0c0d10) // the window chrome: tab strip, menu bar, status bar
+	colPanel      = gfx.Hex(0x131418) // panels and the work area
+	colSurface    = gfx.Hex(0x1b1c21) // controls and cards
+	colSurfaceHi  = gfx.Hex(0x24262c) // a control under the mouse
+	colSelected   = gfx.Hex(0x2b2d35) // the chosen row, chip, tool or menu item
+	colBorder     = gfx.Hex(0x25272d) // hairlines
+	colBorderHi   = gfx.Hex(0x383a42) // hairlines of a control under the mouse, or chosen
+	colText       = gfx.Hex(0xe6e7ea)
+	colDim        = gfx.Hex(0x9a9ca5)
+	colFaint      = gfx.Hex(0x5c5f68)
+	colPrimary    = gfx.Hex(0xe6e7ea) // the one main action of a place
+	colPrimaryHi  = gfx.Hex(0xffffff)
+	colOnPrimary  = gfx.Hex(0x0c0d10)
+	colAccent     = gfx.Hex(0x4c8dff) // focus, progress, live state, handles on the canvas
+	colAccentHi   = gfx.Hex(0x74a6ff)
+	colOnAccent   = gfx.Hex(0xffffff) // text and icons on blue
 	colDanger     = gfx.Hex(0xf0605d)
-	colSuccess    = gfx.Hex(0x34d68a)
+	colDangerText = gfx.Hex(0xffb4b2) // error messages, readable on the dark greys
+	colSuccess    = gfx.Hex(0x3ecf8e)
 	colWarning    = gfx.Hex(0xf2c879)
-	colVideo      = gfx.Hex(0x2b3a43)
-	colVideoUpper = gfx.Hex(0x30414f)
-	colMusic      = gfx.Hex(0x17614a)
-	colMusicHi    = gfx.Hex(0x1f7a5d)
-	colCaption    = gfx.Hex(0x6b4fc4)
-	colCaptionHi  = gfx.Hex(0x8065d8)
-	colImage      = gfx.Hex(0xa0612a)
-	colImageHi    = gfx.Hex(0xbb7535)
-	colPlayhead   = gfx.Hex(0xffd84d)
+	colVideo      = gfx.Hex(0x262b33)
+	colVideoUpper = gfx.Hex(0x2c3340)
+	colMusic      = gfx.Hex(0x1d4a3d)
+	colMusicHi    = gfx.Hex(0x26604f)
+	colCaption    = gfx.Hex(0x5a46a8)
+	colCaptionHi  = gfx.Hex(0x6c57c0)
+	colImage      = gfx.Hex(0x8a5526)
+	colImageHi    = gfx.Hex(0xa1652e)
+	colPlayhead   = gfx.Hex(0xf5f6f8)
 	colBlack      = gfx.Hex(0x000000)
 	colWhite      = gfx.Hex(0xffffff)
 )
@@ -68,6 +77,24 @@ const (
 	icPanelIn  = "\ueac3"
 	icRecord   = "\ue061"
 	icCamera   = "\ue412"
+	// icFullscreen and icFullscreenExit enter and leave player mode.
+	icFullscreen     = "\ue5d0"
+	icFullscreenExit = "\ue5d1"
+	// The asset manager's symbols.
+	icDescription = "\ue873"
+	icCode        = "\ue86f"
+	icFile        = "\ue24d"
+	icLabel       = "\ue892"
+	icLabelOff    = "\ue9b6"
+	icInbox       = "\ue156"
+	icMouse       = "\ue323"
+	icCategory    = "\ue574"
+	icBack        = "\ue5c4"
+	icForward     = "\ue5c8"
+	icUpward      = "\ue5d8"
+	icFolderOpen  = "\ue2c7"
+	icSort        = "\ue164"
+	icLink        = "\ue157"
 )
 
 // textColors are the caption colour swatches.

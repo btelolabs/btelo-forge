@@ -57,9 +57,19 @@ func blendPixels(dst, src *image.RGBA, r image.Rectangle, opacity float64, mode 
 		return
 	}
 	op := uint32(min(opacity, 1)*255 + 0.5)
+	normal := mode == BlendNormal || mode == BlendPassThrough
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		si := src.PixOffset(r.Min.X, y)
 		di := dst.PixOffset(r.Min.X, y)
+		// The mask's row where it covers this one, from mx0 to mx1; its fill beyond.
+		var mrow []uint8
+		mx0, mx1 := 0, 0
+		if mask != nil && y >= mask.Rect.Min.Y && y < mask.Rect.Max.Y {
+			mx0, mx1 = max(r.Min.X, mask.Rect.Min.X), min(r.Max.X, mask.Rect.Max.X)
+			if mx0 < mx1 {
+				mrow = mask.Pix[mask.PixOffset(mx0, y):][:mx1-mx0]
+			}
+		}
 		for x := r.Min.X; x < r.Max.X; x, si, di = x+1, si+4, di+4 {
 			sa := uint32(src.Pix[si+3])
 			if sa == 0 {
@@ -68,19 +78,23 @@ func blendPixels(dst, src *image.RGBA, r image.Rectangle, opacity float64, mode 
 			k := op
 			if mask != nil {
 				m := uint32(maskFill)
-				if (image.Point{x, y}).In(mask.Rect) {
-					m = uint32(mask.Pix[mask.PixOffset(x, y)])
+				if x >= mx0 && x < mx1 {
+					m = uint32(mrow[x-mx0])
 				}
 				k = mul8(k, m)
 				if k == 0 {
 					continue
 				}
 			}
+			if k == 255 && sa == 255 && normal {
+				copy(dst.Pix[di:di+4], src.Pix[si:si+4]) // opaque over anything is itself
+				continue
+			}
 			s0, s1, s2 := uint32(src.Pix[si]), uint32(src.Pix[si+1]), uint32(src.Pix[si+2])
 			if k < 255 {
 				s0, s1, s2, sa = mul8(s0, k), mul8(s1, k), mul8(s2, k), mul8(sa, k)
 			}
-			if mode == BlendNormal || mode == BlendPassThrough || dst.Pix[di+3] == 0 {
+			if normal || dst.Pix[di+3] == 0 {
 				inv := 255 - sa
 				dst.Pix[di] = uint8(s0 + mul8(uint32(dst.Pix[di]), inv))
 				dst.Pix[di+1] = uint8(s1 + mul8(uint32(dst.Pix[di+1]), inv))

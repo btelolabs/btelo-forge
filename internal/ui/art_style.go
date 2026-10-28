@@ -82,7 +82,7 @@ func (a *App) openStyle(ad *artDoc) {
 	a.finishPen(ad)
 	s, err := ad.d.BeginStyle(ad.d.Active)
 	if err != nil {
-		a.toast(a.describe(err), true)
+		a.artFailed(ad, err)
 		return
 	}
 	f := &styleDialog{ad: ad, s: s, st: cloneStyle(s.Style()),
@@ -191,11 +191,11 @@ func (a *App) drawStyleDialog() {
 	in := box.Inset(u.px(22))
 	u.label(u.bold(16), gfx.Rect{X: in.X, Y: in.Y, W: in.W, H: u.px(24)}, u.t("Layer style"), colText, 0)
 	list := gfx.Rect{X: in.X, Y: in.Y + u.px(40), W: u.px(180), H: in.H - u.px(90)}
-	u.c.RoundRect(list, u.px(8), colBackground)
+	u.c.Fill(list, colBackground)
 	for i, name := range effectNames {
 		row := gfx.Rect{X: list.X + u.px(4), Y: list.Y + u.px(4) + float32(i)*u.px(36), W: list.W - u.px(8), H: u.px(32)}
 		if i == f.page {
-			u.c.RoundRect(row, u.px(6), gfx.Mix(colSurface, colAccent, 0.35))
+			u.c.Fill(row, colSelected)
 		}
 		box := gfx.Rect{X: row.X + u.px(6), Y: row.Y, W: u.px(26), H: row.H}
 		if on := u.checkbox(fmt.Sprintf("style/on/%d", i), box, "", f.on(i)); on != f.on(i) {

@@ -99,6 +99,9 @@ static int modifierBits(NSEventModifierFlags f) {
 	}
 	goKey(e.keyCode, (char *)e.charactersIgnoringModifiers.UTF8String, modifierBits(e.modifierFlags));
 }
+- (void)keyUp:(NSEvent *)e {
+	goKeyUp(e.keyCode, (char *)e.charactersIgnoringModifiers.UTF8String);
+}
 - (void)cursorUpdate:(NSEvent *)e {
 	[(currentCursor ? currentCursor : NSCursor.arrowCursor) set];
 }

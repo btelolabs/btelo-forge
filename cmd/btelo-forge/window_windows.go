@@ -46,7 +46,7 @@ func (h winWindow) Input() ui.Input { return uiInput(h.w.Input()) }
 
 // uiInput converts a window's input for the editor.
 func uiInput(raw *win.Input) ui.Input {
-	in := ui.Input{X: raw.X, Y: raw.Y, Down: raw.Down[win.Left], Wheel: raw.Wheel, Ctrl: raw.Ctrl, Shift: raw.Shift, Alt: raw.Alt, Typed: raw.Typed, Dropped: raw.Dropped, Hotkeys: raw.Hotkeys,
+	in := ui.Input{X: raw.X, Y: raw.Y, Down: raw.Down[win.Left], Wheel: raw.Wheel, Ctrl: raw.Ctrl, Shift: raw.Shift, Alt: raw.Alt, Up: raw.Up, Typed: raw.Typed, Dropped: raw.Dropped, Opened: raw.Opened, Hotkeys: raw.Hotkeys,
 		Inactive: raw.Inactive}
 	for _, p := range raw.Pointer {
 		if p.Button == win.Middle {
@@ -60,7 +60,7 @@ func uiInput(raw *win.Input) ui.Input {
 	return in
 }
 
-var cursors = map[ui.Cursor]win.Cursor{ui.CursorArrow: win.Arrow, ui.CursorHand: win.Hand, ui.CursorText: win.IBeam, ui.CursorResize: win.SizeWE, ui.CursorMove: win.SizeAll, ui.CursorCross: win.Cross}
+var cursors = map[ui.Cursor]win.Cursor{ui.CursorArrow: win.Arrow, ui.CursorHand: win.Hand, ui.CursorText: win.IBeam, ui.CursorResize: win.SizeWE, ui.CursorMove: win.SizeAll, ui.CursorCross: win.Cross, ui.CursorResizeCorner: win.SizeNWSE}
 
 func (h winWindow) Wake()                                   { h.w.Wake() }
 func (h winWindow) SetTitle(title string)                   { h.w.SetTitle(title) }
@@ -85,6 +85,8 @@ func (h winWindow) SetClipboardImage(img image.Image) error { return h.w.SetClip
 // editor offers screen recording.
 func (h winWindow) Minimize()                        { h.w.Minimize() }
 func (h winWindow) Restore()                         { h.w.Restore() }
+func (h winWindow) Hide()                            { h.w.Hide() }
+func (h winWindow) Shown() bool                      { return h.w.Shown() }
 func (h winWindow) ExcludeFromCapture(on bool) error { return h.w.ExcludeFromCapture(on) }
 func (h winWindow) SetHotkeys(keys []ui.Hotkey) []error {
 	list := make([]win.Hotkey, len(keys))
@@ -116,6 +118,7 @@ type winOverlay struct{ w *win.Window }
 func (o winOverlay) Bounds() image.Rectangle { return o.w.Bounds() }
 func (o winOverlay) Scale() float32          { return o.w.Scale() }
 func (o winOverlay) SetClickThrough(on bool) { o.w.SetClickThrough(on) }
+func (o winOverlay) TakeKeyboard(on bool)    { o.w.TakeKeyboard(on) }
 func (o winOverlay) Move(r image.Rectangle)  { o.w.MoveOverlay(r) }
 func (o winOverlay) SetCursor(c ui.Cursor)   { o.w.SetCursor(cursors[c]) }
 func (o winOverlay) Closed() bool            { return o.w.Closed() }

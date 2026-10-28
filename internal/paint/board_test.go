@@ -11,6 +11,10 @@ import (
 func TestArtboards(t *testing.T) {
 	d := New("Layer 1")
 	d.Paper = false
+	d.Select(image.Rect(150, 120, 170, 140))
+	d.Fill(color.NRGBA{R: 255, A: 255})
+	d.Deselect()
+	outside := d.AddVector(Vector{Kind: VectorRect, Size: Pt{20, 20}, M: Translate(0, 0), Fill: solidBlue}, "Outside")
 	b, err := d.AddBoard(image.Rect(100, 100, 300, 200), "Banner")
 	if err != nil {
 		t.Fatal(err)
@@ -18,49 +22,78 @@ func TestArtboards(t *testing.T) {
 	if _, err := d.AddBoard(image.Rect(0, 0, 0, 10), "Flat"); err != ErrEmpty {
 		t.Errorf("a board with no width: %v", err)
 	}
-	// Its background is drawn under the layers, only on it.
-	d.Select(image.Rect(150, 120, 170, 140))
-	d.Fill(color.NRGBA{R: 255, A: 255})
-	d.Deselect()
+	// It takes in what lies wholly on it, and nothing else; it is chosen, so new layers go into it.
+	board := d.Node(b.ID)
+	if len(board.Children) != 1 || board.Children[0].Name != "Layer 1" || d.BoardOf(outside.ID) != 0 || d.Active != b.ID {
+		t.Fatalf("the new board holds %d, active %d", len(board.Children), d.Active)
+	}
+	across := d.AddVector(Vector{Kind: VectorRect, Size: Pt{200, 20}, M: Translate(250, 150), Fill: solidRed}, "Across")
+	if d.BoardOf(across.ID) != b.ID {
+		t.Fatal("a layer added in a board goes into it")
+	}
+	at := func(x, y int) color.RGBA { return d.Composite(image.Rect(x, y, x+1, y+1)).RGBAAt(x, y) }
+	// Its background is under what is in it, and what is in it is cut to it.
+	if c := at(101, 101); c != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("the background %v", c)
+	}
+	if c := at(290, 155); c != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("the shape in the board %v", c)
+	}
+	if c := at(310, 155); c.A != 0 {
+		t.Errorf("the shape past the board's edge shows %v", c)
+	}
+	if c := at(5, 5); c != (color.RGBA{0, 0, 255, 255}) {
+		t.Errorf("a layer outside every board %v", c)
+	}
+	// It exports with its background and only what is in it.
 	img, err := d.BoardPicture(b.ID)
 	if err != nil || img.Rect != b.Rect {
 		t.Fatalf("picture %v, %v", img.Rect, err)
 	}
-	if c := img.RGBAAt(101, 101); c != (color.RGBA{255, 255, 255, 255}) {
-		t.Errorf("the background %v", c)
-	}
 	if c := img.RGBAAt(160, 130); c != (color.RGBA{255, 0, 0, 255}) {
 		t.Errorf("what is on the board %v", c)
 	}
-	if c := d.Composite(image.Rect(50, 50, 51, 51)).RGBAAt(50, 50); c.A != 0 {
-		t.Errorf("off the board %v", c)
-	}
-	// A shape that lies on the board moves with it; one that reaches past it stays.
-	on := d.AddVector(Vector{Kind: VectorRect, Size: Pt{20, 20}, M: Translate(200, 150), Fill: solidRed}, "On")
-	off := d.AddVector(Vector{Kind: VectorRect, Size: Pt{300, 20}, M: Translate(50, 150), Fill: solidRed}, "Across")
+	// Moving it carries what is in it, and only that.
 	if err := d.MoveBoard(b.ID, 1000, 10); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := d.Board(b.ID); got.Rect != image.Rect(1100, 110, 1300, 210) {
 		t.Errorf("moved board %v", got.Rect)
 	}
-	if m := d.Node(on.ID).Vector.M; m.C != 1200 || m.F != 160 {
-		t.Errorf("the shape on it is at %v, %v", m.C, m.F)
+	if m := d.Node(across.ID).Vector.M; m.C != 1250 || m.F != 160 {
+		t.Errorf("the shape in it is at %v, %v", m.C, m.F)
 	}
-	if m := d.Node(off.ID).Vector.M; m.C != 50 {
-		t.Errorf("the shape across it moved to %v", m.C)
+	if m := d.Node(outside.ID).Vector.M; m.C != 0 {
+		t.Errorf("the shape outside moved to %v", m.C)
 	}
-	if c := d.Composite(image.Rect(1160, 140, 1161, 141)).RGBAAt(1160, 140); c != (color.RGBA{255, 0, 0, 255}) {
-		t.Errorf("the pixels on it did not move with it: %v", c)
+	if c := at(1160, 140); c != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("the pixels in it did not move with it: %v", c)
 	}
 	if steps, _ := d.History(); steps[len(steps)-1] != "Move artboard" {
 		t.Errorf("steps %v", steps)
 	}
 	d.Undo()
-	if got, _ := d.Board(b.ID); got.Rect != b.Rect || d.Node(on.ID).Vector.M.C != 200 {
+	if got, _ := d.Board(b.ID); got.Rect != b.Rect || d.Node(across.ID).Vector.M.C != 250 {
 		t.Errorf("undo left the board at %v", got.Rect)
 	}
-	// Renaming, a transparent background, then deleting.
+	// It stays at the top level: it is neither grouped nor merged, and steps past an open group.
+	d.Choose(b.ID)
+	if _, err := d.GroupChosen("G"); err != ErrBoardInside {
+		t.Errorf("grouping a board: %v", err)
+	}
+	if err := d.MergeGroup(); err != ErrMergeBoard {
+		t.Errorf("merging a board: %v", err)
+	}
+	d.Choose(outside.ID)
+	g, _ := d.GroupChosen("Open group")
+	d.Choose(b.ID)
+	for range 3 {
+		d.Move(false)
+	}
+	if !d.boardsAtTop() || d.Node(g.ID).Children[0].ID != outside.ID {
+		t.Error("moving a board took it into a group")
+	}
+	// Renaming, a transparent background, then deleting, which leaves what was in it.
 	b.Name, b.Fill = "Hero", color.NRGBA{}
 	if err := d.SetBoard(b, "Artboard"); err != nil {
 		t.Fatal(err)
@@ -68,12 +101,21 @@ func TestArtboards(t *testing.T) {
 	if got, _ := d.Board(b.ID); got.Name != "Hero" || d.BoardAt(image.Pt(110, 110)) != b.ID || d.BoardAt(image.Pt(10, 10)) != 0 {
 		t.Errorf("board %+v", got)
 	}
-	if err := d.DeleteBoard(b.ID); err != nil || len(d.Boards) != 0 {
-		t.Fatalf("delete: %v, %d left", err, len(d.Boards))
+	if c := at(101, 101); c.A != 0 {
+		t.Errorf("a clear board's background %v", c)
+	}
+	if err := d.DeleteBoard(b.ID); err != nil || len(d.Boards()) != 0 {
+		t.Fatalf("delete: %v, %d left", err, len(d.Boards()))
+	}
+	if n := d.Node(across.ID); n == nil || d.BoardOf(across.ID) != 0 {
+		t.Error("deleting a board should keep what was in it")
+	}
+	if c := at(310, 155); c != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("out of the board the shape shows whole: %v", c)
 	}
 	d.Undo()
-	if len(d.Boards) != 1 || d.Boards[0].Name != "Hero" {
-		t.Errorf("undo of the delete: %+v", d.Boards)
+	if bs := d.Boards(); len(bs) != 1 || bs[0].Name != "Hero" {
+		t.Errorf("undo of the delete: %+v", bs)
 	}
 	// Resizing the image scales the boards with it.
 	d.Frame = image.Rect(0, 0, 400, 300)
@@ -82,6 +124,46 @@ func TestArtboards(t *testing.T) {
 	}
 	if got, _ := d.Board(b.ID); got.Rect != image.Rect(200, 200, 600, 400) {
 		t.Errorf("the board after doubling %v", got.Rect)
+	}
+}
+
+// Artboards saved by versions 4 and 5, apart from the layers, become groups of the top-level layers lying on them,
+// under everything else.
+func TestOldArtboardsBecomeGroups(t *testing.T) {
+	d := New("Background")
+	d.Select(image.Rect(10, 10, 20, 20))
+	d.Fill(color.NRGBA{R: 255, A: 255})
+	d.Deselect()
+	d.AddVector(Vector{Kind: VectorRect, Size: Pt{500, 20}, M: Translate(0, 50), Fill: solidBlue}, "Wide")
+	s := d.Snapshot()
+	s.doc.Version = 5
+	s.doc.NextID = 100
+	s.doc.Boards = []fileBoard{{ID: 50, Name: "Lower", Rect: [4]int{0, 0, 100, 100}, Fill: [4]uint8{255, 255, 255, 255}},
+		{ID: 51, Name: "Upper", Rect: [4]int{200, 0, 300, 100}}}
+	var buf bytes.Buffer
+	if err := s.Save(&buf); err != nil {
+		t.Fatal(err)
+	}
+	e, err := Load(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := e.Boards()
+	if len(bs) != 2 || bs[0].ID != 50 || bs[1].ID != 51 || bs[0].Rect != image.Rect(0, 0, 100, 100) {
+		t.Fatalf("boards %+v", bs)
+	}
+	top := e.Root.Children
+	if !top[len(top)-1].IsBoard() || top[len(top)-1].ID != 50 || !top[len(top)-2].IsBoard() {
+		t.Error("the boards should be at the bottom, the lowest last")
+	}
+	if lower := e.Node(50); len(lower.Children) != 1 || lower.Children[0].Name != "Background" {
+		t.Errorf("the lower board holds %+v", lower.Children)
+	}
+	if e.BoardOf(e.Layers()[0].ID) != 0 {
+		t.Error("the wide shape reaches past the boards and stays out of them")
+	}
+	if n := e.AddLayer("New"); n.ID <= 100 {
+		t.Errorf("a new layer took id %d", n.ID)
 	}
 }
 
@@ -123,8 +205,8 @@ func TestTheFileKeepsEveryDrawing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(e.Boards, d.Boards) || e.Frame != d.Frame || e.Paper != d.Paper || e.Active != d.Active {
-		t.Errorf("boards %+v, frame %v, paper %v, active %d", e.Boards, e.Frame, e.Paper, e.Active)
+	if !reflect.DeepEqual(e.Boards(), d.Boards()) || e.Frame != d.Frame || e.Paper != d.Paper || e.Active != d.Active {
+		t.Errorf("boards %+v, frame %v, paper %v, active %d", e.Boards(), e.Frame, e.Paper, e.Active)
 	}
 	if len(e.Layers()) != len(d.Layers()) {
 		t.Fatalf("%d layers, want %d", len(e.Layers()), len(d.Layers()))

@@ -50,6 +50,7 @@ func (v *codeView) step(e *editor, from, to *[]codeSnap) bool {
 	*from = (*from)[:len(*from)-1]
 	*to = append(*to, codeSnap{append([]rune(nil), e.text...), e.caret, e.anchor})
 	e.text, e.caret, e.anchor = s.text, s.caret, s.anchor
+	e.rev++
 	v.lastTyped = time.Time{}
 	return true
 }
@@ -63,7 +64,10 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 	f := u.mono(12.5)
 	lineH := float32(int(f.Height()*1.3 + 0.5))
 	pad := u.px(8)
-	focused := u.focus == id
+	if u.focus == id && !u.editing(id) {
+		u.beginEdit(id, *value, true, 0, 0) // given the keyboard from outside: it starts from its own text
+	}
+	focused := u.editing(id)
 	u.focusDrawn = u.focusDrawn || focused
 	text := *value
 	if focused {
@@ -94,25 +98,8 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 		}
 		return index + col
 	}
-	if u.press(id, r) {
-		if !focused {
-			u.focus, u.focusDrawn, focused = id, true, true
-			u.edit = editor{text: []rune(*value), multiline: true}
-		}
-		u.edit.caret = pos(u.pressX, u.pressY)
-		if !u.shift {
-			u.edit.anchor = u.edit.caret
-		}
-		if u.double {
-			u.edit.anchor, u.edit.caret = wordAround(u.edit.text, u.edit.caret)
-		}
-		u.caretBlink = time.Now()
-	}
-	if u.dragging(id) && u.drag.moved && focused {
-		u.edit.caret = pos(u.mx, u.my)
-		u.caretBlink = time.Now()
-	}
-	u.letGo(id)
+	focused = u.editPointer(id, r, *value, true, pos)
+	u.focusDrawn = u.focusDrawn || focused
 	if focused && u.pressed && !r.Contains(u.pressX, u.pressY) {
 		u.focus, focused = "", false
 	}
@@ -166,21 +153,19 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 				}
 			case k.Code == keyBack || k.Code == keyDelete || (k.Ctrl && k.Code == 'V'):
 				v.remember(e, false)
-				e.key(k, u.paste)
+				e.key(k, u)
 			default:
-				e.key(k, u.paste)
+				e.key(k, u)
 			}
 			if string(e.text) != before {
 				changed = true
 			}
-			u.caretBlink = time.Now()
 		}
 		if focused && len(u.typed) > 0 {
 			v.remember(e, true)
-			e.insert(string(u.typed))
+			e.typeText(string(u.typed))
 			u.typed = nil
 			changed = true
-			u.caretBlink = time.Now()
 		}
 		if changed {
 			*value = string(e.text)
@@ -211,14 +196,17 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 	v.scrollY = min(max(v.scrollY, 0), max(content-area.H, 0))
 	v.scrollX = max(v.scrollX, 0)
 
-	u.c.RoundRect(r, u.px(6), gfx.Mix(colSurface, colBlack, 0.3))
+	u.c.Fill(r, gfx.Mix(colSurface, colBlack, 0.3))
 	border := colBorder
 	if focused {
 		border = colAccent
 	} else if hot {
-		border = colFaint
+		border = colBorderHi
 	}
-	u.c.RoundOutline(r, u.px(6), u.px(1.2), border)
+	if focused {
+		u.c.Outline(r.Inset(-u.px(2)), u.px(2), gfx.Alpha(colAccent, 0.25))
+	}
+	u.c.Outline(r, max(1, u.px(1)), border)
 	u.c.Push(r.Inset(u.px(1)))
 	defer u.c.Pop()
 	u.c.Fill(gfx.Rect{X: r.X + gutter - u.px(1), Y: r.Y, W: max(1, u.px(1)), H: r.H}, colBorder)
@@ -241,7 +229,7 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 		numCol := colFaint
 		if i+1 == errLine {
 			u.c.Fill(gfx.Rect{X: r.X, Y: y, W: r.W, H: lineH}, gfx.Alpha(gfx.Hex(0xff6b68), 0.16))
-			numCol = gfx.Hex(0xffb4b2)
+			numCol = colDangerText
 		} else if focused && i == caretLine {
 			u.c.Fill(gfx.Rect{X: area.X, Y: y, W: area.W + u.px(10), H: lineH}, gfx.Alpha(colSurfaceHi, 0.45))
 		}
@@ -261,13 +249,8 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 			}
 		}
 		u.drawCode(f, x, ty, rs)
-		if focused && i == caretLine && time.Since(u.caretBlink)%(1060*time.Millisecond) < 530*time.Millisecond {
-			cx := x + f.Measure(string(rs[:caretCol]))
-			u.c.Fill(gfx.Rect{X: cx, Y: y + u.px(2), W: max(1, u.px(1.5)), H: lineH - u.px(4)}, colText)
-		}
 		if focused && i == caretLine {
-			u.imeAt = [3]float32{x + f.Measure(string(rs[:caretCol])), y, lineH}
-			u.blinking = true
+			u.drawCaret(x+f.Measure(string(rs[:caretCol])), y+u.px(2), lineH-u.px(4), false)
 		}
 		u.c.Pop()
 		offset += len(rs) + 1
@@ -275,7 +258,7 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 	if content > area.H {
 		h := max(area.H*area.H/content, u.px(24))
 		y := area.Y + (area.H-h)*v.scrollY/(content-area.H)
-		u.c.RoundRect(gfx.Rect{X: r.Right() - u.px(6), Y: y, W: u.px(3), H: h}, u.px(1.5), colSurfaceHi)
+		u.c.Fill(gfx.Rect{X: r.Right() - u.px(6), Y: y, W: u.px(3), H: h}, colSurfaceHi)
 	}
 	return changed
 }
@@ -349,15 +332,3 @@ func (e *editor) moveLines(caret, n int, f *gfx.Face) int {
 	return end
 }
 
-// wordAround returns the bounds of the word at i.
-func wordAround(text []rune, i int) (int, int) {
-	isWord := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' }
-	a, b := i, i
-	for a > 0 && isWord(text[a-1]) {
-		a--
-	}
-	for b < len(text) && isWord(text[b]) {
-		b++
-	}
-	return a, b
-}

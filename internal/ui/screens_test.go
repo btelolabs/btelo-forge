@@ -41,9 +41,10 @@ func TestScreens(t *testing.T) {
 		x.a.undo()
 		x.a.selectOnly(selection{})
 		x.a.settingsOpen = true
-		for page, name := range []string{"general", "mcp", "phone", "extensions", "about"} {
+		x.a.keysDomain = domainRecording
+		for page, name := range []string{"general", "mcp", "phone", "hotkeys", "file-types", "extensions", "about"} {
 			x.a.settingsPage = page
-			if page == 2 {
+			if page == settingsPhonePage {
 				x.a.settings.Phone = true
 				x.a.applyServices()
 			}

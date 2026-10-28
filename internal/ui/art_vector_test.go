@@ -27,9 +27,9 @@ func TestCanvasPenAndNodeTool(t *testing.T) {
 	a.settings.Paint.ShapeWidth, a.settings.Paint.PenFill = 6, false
 
 	// P picks the pen: two clicks and a drag, then a click on the first node closes the curve.
-	x.key('P', false)
+	x.key('C', false)
 	if a.artTool != toolPen {
-		t.Fatalf("P chose tool %d", a.artTool)
+		t.Fatalf("C chose tool %d", a.artTool)
 	}
 	before := len(d.Layers())
 	x.clickCanvas(ad, 60, 60, false)
@@ -223,17 +223,72 @@ func TestCanvasBooleans(t *testing.T) {
 	u := &a.u
 	sub := gfx.Rect{X: bar.X + u.px(32*2+40) + u.px(32)*float32(paint.BoolSubtract), Y: bar.Y, W: u.px(30), H: bar.H}
 	x.click(sub)
-	if len(d.Layers()) != before-1 || d.UndoName() != "Boolean" || d.Node(circle) != nil {
+	if len(d.Layers()) != before-1 || d.UndoName() != "Combine shapes" || d.Node(circle) != nil {
 		t.Fatalf("after subtracting: %d layers, %q", len(d.Layers()), d.UndoName())
 	}
-	if c := ad.look(100, 100); c.R < 250 {
-		t.Errorf("the square's corner is gone: %v", c)
+	check := func(when string) {
+		t.Helper()
+		if c := ad.look(100, 100); c.R < 250 {
+			t.Errorf("%s: the square's corner is gone: %v", when, c)
+		}
+		if c := ad.look(190, 190); c != (color.RGBA{255, 255, 255, 255}) {
+			t.Errorf("%s: the bite is still filled: %v", when, c)
+		}
 	}
-	if c := ad.look(190, 190); c != (color.RGBA{255, 255, 255, 255}) {
-		t.Errorf("the bite is still filled: %v", c)
+	check("combined")
+	// Both stay shapes of the one layer, the circle taking itself away, until they are merged into one outline.
+	v := d.Node(square).Vector
+	if len(v.Shapes()) != 2 || v.ShapeOpOf(1) != paint.OpSubtract {
+		t.Fatalf("the combined layer has %d shapes, the second combining by %d", len(v.Shapes()), v.ShapeOpOf(1))
 	}
 	x.frame(Input{})
 	x.shot("canvas-boolean-subtracted")
+	a.artRun(ad, func() error { return d.ExpandShapes(square) })
+	if v := d.Node(square).Vector; v.Compound() {
+		t.Error("Merge shape components left the shapes apart")
+	}
+	check("merged")
+}
+
+// With the move tool, Shift+click on the canvas chooses more layers, as in Photoshop, and the combine buttons
+// appear in its options while two or more vector layers are chosen.
+func TestMoveToolChoosesLayersToCombine(t *testing.T) {
+	x, ad := canvasHarness(t)
+	a, d := x.a, ad.d
+	red := paint.VectorPaint{Kind: paint.PaintSolid, Color: color.NRGBA{R: 255, A: 255}}
+	bottom := d.AddVector(paint.Vector{Kind: paint.VectorRect, Size: paint.Pt{X: 100, Y: 100}, M: paint.Translate(40, 40), Fill: red}, "Bottom")
+	top := d.AddVector(paint.Vector{Kind: paint.VectorEllipse, Size: paint.Pt{X: 100, Y: 100}, M: paint.Translate(90, 90), Fill: red}, "Top")
+	x.key('V', false)
+	x.clickCanvas(ad, 50, 50, false)
+	if d.Active != bottom.ID {
+		t.Fatalf("the click chose %d", d.Active)
+	}
+	px, py := x.viewPoint(ad, 160, 160)
+	x.clickWith(gfx.Rect{X: px - 1, Y: py - 1, W: 2, H: 2}, false, true)
+	if len(ad.chosenVectors()) != 2 || d.Node(top.ID).Vector.M != paint.Translate(90, 90) {
+		t.Fatalf("Shift+click chose %v and moved the top to %v", ad.chosenVectors(), d.Node(top.ID).Vector.M)
+	}
+	// Shift+click on a chosen layer lets it go; again, chooses it.
+	x.clickWith(gfx.Rect{X: px - 1, Y: py - 1, W: 2, H: 2}, false, true)
+	if len(ad.picked) != 0 {
+		t.Fatalf("Shift+click on the chosen top left %v picked", ad.picked)
+	}
+	x.clickWith(gfx.Rect{X: px - 1, Y: py - 1, W: 2, H: 2}, false, true)
+	x.frame(Input{})
+	x.shot("canvas-move-combine")
+	bar := x.barArea()
+	u := &a.u
+	intersect := gfx.Rect{X: bar.X + checkboxWidth(u, u.t("Auto-select")) + u.px(16) + u.px(32)*float32(paint.BoolIntersect), Y: bar.Y, W: u.px(30), H: bar.H}
+	x.click(intersect)
+	if len(d.Layers()) != 2 || d.Node(top.ID) != nil || d.Node(bottom.ID).Vector.ShapeOpOf(1) != paint.OpIntersect {
+		t.Fatalf("after intersecting: %d layers, step %q", len(d.Layers()), d.UndoName())
+	}
+	if c := ad.look(60, 60); c != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("outside where they meet: %v", c)
+	}
+	if c := ad.look(120, 120); c.R < 250 || c.G > 5 {
+		t.Errorf("where they meet: %v", c)
+	}
 }
 
 func TestCanvasSnapping(t *testing.T) {
@@ -258,7 +313,7 @@ func TestCanvasSnapping(t *testing.T) {
 		t.Errorf("the corner snapped to %v, want x 300 and y 30", p)
 	}
 	// The pen's node lands on the target's centre.
-	x.key('P', false)
+	x.key('C', false)
 	x.clickCanvas(ad, 251.5, 141, false)
 	x.clickCanvas(ad, 380, 20, false)
 	x.key(keyEscape, false)
@@ -281,17 +336,14 @@ func TestCanvasSnapping(t *testing.T) {
 	}
 }
 
-func TestCanvasPencil(t *testing.T) {
+// The vector brush follows the hand's line: every point drawn is under its stroke.
+func TestCanvasVectorBrushFollowsTheLine(t *testing.T) {
 	x, ad := canvasHarness(t)
 	a := x.a
 	d := ad.d
 	a.brush.Color = color.NRGBA{B: 255, A: 255}
-	a.settings.Paint.ShapeWidth = 4
-	x.key('N', false)
-	if a.artTool != toolPencil {
-		t.Fatalf("N chose tool %d", a.artTool)
-	}
-	before := len(d.Layers())
+	x.key('P', false)
+	a.setVectorBrushSize(6)
 	// A wavy line, drawn point by point with a slight tremor.
 	var pts [][2]float64
 	for i := 0; i <= 60; i++ {
@@ -307,21 +359,16 @@ func TestCanvasPencil(t *testing.T) {
 		x.frame(Input{Down: true})
 	}
 	x.frame(Input{Down: true})
-	x.shot("canvas-pencil-drawing")
+	x.shot("canvas-vector-brush-drawing")
 	x.frame(Input{Pointer: []Pointer{{X: x.mx, Y: x.my}}})
-	if len(d.Layers()) != before+1 || d.UndoName() != "Pencil" {
-		t.Fatalf("after the pencil: %d layers, %q", len(d.Layers()), d.UndoName())
-	}
 	v := d.Node(d.Active).Vector
-	if v == nil || v.Path[0].Closed || len(v.Path[0].Nodes) > 12 || v.Fill.Kind != paint.PaintNone {
-		t.Fatalf("the pencil's curve %+v", v)
+	if v == nil || d.UndoName() != "Vector brush" || v.Fill.Kind != paint.PaintSolid {
+		t.Fatalf("the stroke %+v, %q", v, d.UndoName())
 	}
-	// The curve follows the line within the tremor and the fit.
+	ad.changedAll()
 	for _, p := range pts {
-		if _, _, dist := v.NearestOnSegment(paint.Pt{X: p[0], Y: p[1]}); dist > 2 {
-			t.Errorf("the curve is %.2f from %v", dist, p)
+		if c := ad.look(int(p[0]), int(p[1])); c.B < 200 || c.R > 60 {
+			t.Errorf("the line's point %v is not under the stroke: %v", p, c)
 		}
 	}
-	x.frame(Input{})
-	x.shot("canvas-pencil")
 }

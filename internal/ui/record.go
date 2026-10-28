@@ -20,7 +20,9 @@ import (
 // capture package cannot record, shows no recording controls.
 type recorderHost interface {
 	Minimize()
-	Restore()
+	Restore() // also brings back a hidden window
+	Hide()
+	Shown() bool // on the screen and in front, not minimized, hidden or behind another program
 	ExcludeFromCapture(on bool) error
 	SetHotkeys(keys []Hotkey) []error
 }
@@ -34,14 +36,17 @@ type recordSettings struct {
 	Microphone   bool   `json:"microphone"`
 	MicrophoneID string `json:"microphoneId"` // "" follows the system's default microphone
 	Region       bool   `json:"region"`       // pick a region of the screen when recording starts
-	Minimize     bool   `json:"minimize"`
+	// Minimize sends this window to the taskbar when a recording starts. It is off by default — the floating toolbar
+	// controls the recording, and the app is often what is recorded — and named anew so that the old default, on, is
+	// not carried over.
+	Minimize bool `json:"minimizeOnStart"`
 	// HideWindow leaves this window out of recordings and screenshots. It is off by default — recording how the app
 	// is used is a common reason to record — and named anew so that the old default, on, is not carried over.
 	HideWindow bool `json:"leaveWindowOut"`
 }
 
 func defaultRecordSettings() recordSettings {
-	return recordSettings{FPS: 30, Cursor: true, SystemAudio: true, Minimize: true}
+	return recordSettings{FPS: 30, Cursor: true, SystemAudio: true}
 }
 
 var recordRates = []int{30, 60}
@@ -310,6 +315,7 @@ func (a *App) startRecordingIn(region image.Rectangle, pickedRegion bool, done f
 				return
 			}
 			r.rec = rec
+			a.liveFollow()
 			a.showRegionFrame(d, rec.Options().Region)
 			if s.HideWindow {
 				if err := host.ExcludeFromCapture(true); err != nil {
@@ -366,6 +372,7 @@ func (a *App) stopRecording(done func(path string, err error)) {
 		return
 	}
 	r.stopping = true
+	a.liveFollow() // the stream goes black, and on
 	failure := rec.Err()
 	// The joining goes on while the app closes, so it does not use the app's lifetime.
 	a.background(func(context.Context) {
@@ -428,6 +435,8 @@ func (a *App) releaseRecordingWindow() {
 func (a *App) recordTick(in Input) {
 	r := &a.rec
 	a.handleHotkeys(in.Hotkeys)
+	a.liveTick()
+	a.cameraTick()
 	if r.rec == nil {
 		return
 	}
@@ -459,7 +468,7 @@ func (a *App) Tick(in Input) time.Duration {
 	a.drainJobs()
 	a.recordTick(in)
 	a.screenTick()
-	if a.recording() || a.over.bar != nil || a.over.pick != nil {
+	if a.recording() || a.streaming() || a.cameraSettling() || a.over.bar != nil || a.over.pick != nil {
 		return 250 * time.Millisecond
 	}
 	return 0
@@ -506,43 +515,18 @@ func (a *App) displayLabel(d capture.Display, i int) string {
 	return strings.Join(parts, " · ")
 }
 
-// drawRecordControl is the recording button at the end of the tab strip, or the running recording's time, sound
-// levels and buttons; it returns where it begins.
+// drawRecordControl is, while recording, the recording's time, sound levels and buttons at the end of the tab strip;
+// it returns where it begins. Recording and screenshots start from the new tab's card or their hotkeys.
 func (a *App) drawRecordControl(end, y, h float32) float32 {
 	u := &a.u
 	r := &a.rec
-	if a.recorder() == nil {
+	if r.rec == nil {
 		return end
 	}
-	reason, checking := a.recordBlocker()
-	b, shot := a.recordButtons(end, y, h)
-	if r.rec == nil {
-		label := u.t("Record")
-		hint := withKey(u.t("Record the screen"), a.hotkeyLabel(hotkeyRecord))
-		switch {
-		case reason != "":
-			hint = u.tf("Screen recording is not available: %s", reason)
-		case checking:
-			hint = u.t("Checking how this computer can record…")
-		}
-		if u.button("tabs/record", b, icRecord, label, plain, !r.starting && a.export == nil) {
-			a.openRecorder()
-		}
-		u.hint("tabs/record", hint, b)
-		if reason != "" {
-			// A small warning mark: the button still opens the dialog that explains.
-			u.c.Circle(b.Right()-u.px(7), b.Y+u.px(7), u.px(3), colWarning)
-		} else if r.starting {
-			u.c.Circle(b.Right()-u.px(7), b.Y+u.px(7), u.px(3), colDanger)
-		}
-		a.drawScreenshotButton(shot)
-		return b.X
-	}
-	a.drawScreenshotButton(shot)
-	end = shot.X - u.px(4)
+	end -= u.px(4)
 	st := r.rec.Status()
 	pill := gfx.Rect{X: end - u.px(236), Y: y, W: u.px(232), H: h}
-	u.c.RoundRect(pill, h/2, gfx.Mix(colSurface, colDanger, 0.18))
+	u.c.Fill(pill, gfx.Mix(colSurface, colDanger, 0.18))
 	dot := colDanger
 	if st.Paused {
 		dot = colDim
@@ -573,8 +557,8 @@ func (a *App) drawRecordControl(end, y, h float32) float32 {
 	meters := rectAt(pill.X+u.px(136), pill.Y+h/2-u.px(3)*float32(len(levels)), u.px(24), u.px(6)*float32(len(levels)))
 	for i, level := range levels {
 		bar := rectAt(meters.X, meters.Y+float32(i)*u.px(6), meters.W, u.px(4))
-		u.c.RoundRect(bar, u.px(2), colSurfaceHi)
-		u.c.RoundRect(rectAt(bar.X, bar.Y, max(bar.W*level, 0), bar.H), u.px(2), colAccent)
+		u.c.Fill(bar, colSurfaceHi)
+		u.c.Fill(rectAt(bar.X, bar.Y, max(bar.W*level, 0), bar.H), colAccent)
 	}
 	if len(names) > 0 {
 		u.hint("tabs/rec/meters", u.tf("Sound level of %s", strings.Join(names, u.t(" and "))), meters)
@@ -593,24 +577,6 @@ func (a *App) drawRecordControl(end, y, h float32) float32 {
 		a.stopRecording(nil)
 	}
 	return pill.X
-}
-
-// recordButtons are where the tab strip puts the labelled recording button and, right of it, the screenshot button,
-// ending at end.
-func (a *App) recordButtons(end, y, h float32) (record, shot gfx.Rect) {
-	u := &a.u
-	shot = gfx.Rect{X: end - u.px(36), Y: y, W: u.px(32), H: h}
-	w := u.buttonWidth(icRecord, u.t("Record"))
-	return gfx.Rect{X: shot.X - u.px(4) - w, Y: y, W: w, H: h}, shot
-}
-
-// drawScreenshotButton takes a screenshot of the chosen screen.
-func (a *App) drawScreenshotButton(b gfx.Rect) {
-	u := &a.u
-	hint := withKey(u.t("Take a screenshot of the screen chosen for recording"), a.hotkeyLabel(hotkeyScreenshot))
-	if u.iconButton("tabs/screenshot", b, icCamera, hint, a.rec.shooting, !a.rec.shooting && a.over.pick == nil) {
-		a.screenshotRegion()
-	}
 }
 
 // screenshotRegion lets the user pick a region of the chosen screen, or click for all of it, and saves it.
@@ -905,7 +871,7 @@ func (a *App) recorderBody(in gfx.Rect) float32 {
 	}
 	y += u.px(10)
 	line := rectAt(in.X, y, in.W-u.px(158), u.px(32))
-	u.c.RoundRect(line, u.px(7), colSurface)
+	u.c.Fill(line, colSurface)
 	u.label(u.face(12), line.Inset(u.px(10)), u.tf("Saved in %s", dir), colText, 0)
 	u.hint("record/dir/path", u.t("Recordings open here for editing as soon as they stop"), line)
 	if u.button("record/dir", rectAt(in.Right()-u.px(150), y+u.px(1), u.px(150), u.px(30)), icFolder, u.t("Choose folder…"), plain, true) {

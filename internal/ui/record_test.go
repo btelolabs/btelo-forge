@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,11 +69,22 @@ func TestRecordingExplainsWhyItCannot(t *testing.T) {
 	}
 }
 
-// recordButton is where the tab strip draws the recording button, left of the settings gear.
-func (x *harness) recordButton() gfx.Rect {
-	gear := float32(x.c.Img.Rect.Dx()) - 40
-	record, _ := x.a.recordButtons(gear, 5, 30)
-	return record
+// recordCard is the new tab's recording card.
+func (x *harness) recordCard() gfx.Rect {
+	return x.startCard("empty/record")
+}
+
+// startCard is where the new tab's card with id is.
+func (x *harness) startCard(id string) gfx.Rect {
+	x.t.Helper()
+	cards := x.a.startCards()
+	for i, c := range cards {
+		if c.id == id {
+			return x.a.startLayout(x.a.layout().body, cards).cards[i]
+		}
+	}
+	x.t.Fatalf("no start card %s", id)
+	return gfx.Rect{}
 }
 
 // startButton is the dialog's start button, laid out as drawRecorder does at scale 1.
@@ -86,10 +98,9 @@ func (x *harness) startButton() gfx.Rect {
 func TestRecordFromTheWindowAndEditIt(t *testing.T) {
 	x := recordingHarness(t)
 	a, h := x.a, x.h
-	a.settings.Record.Minimize = true
-	x.click(x.recordButton())
+	x.click(x.recordCard())
 	if !a.rec.open {
-		t.Fatal("the recording button did not open the dialog")
+		t.Fatal("the recording card did not open the dialog")
 	}
 	d, _ := a.chosenDisplay()
 	x.pump(time.Minute, func() bool {
@@ -113,8 +124,8 @@ func TestRecordFromTheWindowAndEditIt(t *testing.T) {
 	if a.rec.rec == nil {
 		t.Fatalf("the recording did not start; toasts %+v", a.toasts)
 	}
-	// By default the window is recorded too: how the app is used is often what is being recorded.
-	if !h.minimized || h.excluded {
+	// By default the window stays as it was and is recorded too: how the app is used is often what is being recorded.
+	if h.minimized || h.excluded {
 		t.Errorf("window while recording: minimized %v, left out %v", h.minimized, h.excluded)
 	}
 	path := a.rec.rec.Path()
@@ -122,6 +133,7 @@ func TestRecordFromTheWindowAndEditIt(t *testing.T) {
 		t.Errorf("recording into %s, want a new MP4 in %s", path, a.settings.ExportDir)
 	}
 	// Minimized, the window draws nothing and the main loop calls Tick instead.
+	h.minimized = true
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		a.Tick(Input{})
@@ -243,13 +255,25 @@ func TestRecordSettingsDefaultForOldSettingsFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	x.a.loadSettings()
-	if r := x.a.settings.Record; r.HideWindow || r.FPS != 60 {
-		t.Errorf("settings with the old default %+v: the window is still left out, or the rest was lost", r)
+	if r := x.a.settings.Record; r.HideWindow || r.Minimize || r.FPS != 60 {
+		t.Errorf("settings with the old defaults %+v: the window is still left out or minimized, or the rest was lost", r)
 	}
-	x.a.settings.Record.HideWindow = true
+	x.a.settings.Record.HideWindow, x.a.settings.Record.Minimize = true, true
 	x.a.saveSettings()
 	x.a.loadSettings()
-	if !x.a.settings.Record.HideWindow {
-		t.Error("choosing to leave the window out is not kept")
+	if r := x.a.settings.Record; !r.HideWindow || !r.Minimize {
+		t.Errorf("choosing to leave the window out or minimize it is not kept: %+v", r)
+	}
+}
+
+func TestRecordRegionIsChecked(t *testing.T) {
+	r, err := recordRegion([]int{10, 20, 300, 200}, 1920, 1080)
+	if err != nil || r != image.Rect(10, 20, 310, 220) {
+		t.Fatalf("region = %v, %v", r, err)
+	}
+	for _, bad := range [][]int{{1, 2, 3}, {0, 0, 8, 100}, {-1, 0, 100, 100}, {1900, 0, 100, 100}} {
+		if _, err := recordRegion(bad, 1920, 1080); err == nil {
+			t.Errorf("%v was accepted", bad)
+		}
 	}
 }

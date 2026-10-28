@@ -165,10 +165,10 @@ func TestCanvasHistoryPanelAndAdjustments(t *testing.T) {
 // sideTab is where drawSideTabs puts a page's title.
 func (x *harness) sideTab(l artLayout, page int) gfx.Rect {
 	u := &x.a.u
-	in := l.side.Inset(u.px(14))
-	top := in.Y + u.px(250) + u.px(14)
+	_, layers := x.a.sideLayout(l.side)
+	top := layers.Y
 	f := u.bold(12.5)
-	px := in.X
+	px := layers.X
 	for i, name := range []string{u.t("Layers"), u.t("History")} {
 		w := f.Measure(name) + u.px(16)
 		if i == page {
@@ -182,7 +182,7 @@ func (x *harness) sideTab(l artLayout, page int) gfx.Rect {
 // historyRow is where drawHistory puts row i, while the list starts at the top.
 func (x *harness) historyRow(l artLayout, i int) gfx.Rect {
 	u := &x.a.u
-	in := l.side.Inset(u.px(14))
-	top := in.Y + u.px(250) + u.px(14) + u.px(26)
-	return gfx.Rect{X: in.X + u.px(4), Y: top + u.px(4) + float32(i)*u.px(28), W: in.W - u.px(8), H: u.px(26)}
+	_, layers := x.a.sideLayout(l.side)
+	top := layers.Y + u.px(26)
+	return gfx.Rect{X: layers.X + u.px(4), Y: top + u.px(4) + float32(i)*u.px(28), W: layers.W - u.px(8), H: u.px(26)}
 }

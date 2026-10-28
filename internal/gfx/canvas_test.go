@@ -113,3 +113,23 @@ func TestClearToKeepsTransparency(t *testing.T) {
 		t.Errorf("Clear gives %v, want opaque", got)
 	}
 }
+
+// TestRoundRectClippedOnTheLeft: a rounded rectangle whose straight middle lies wholly left of the clip draws only
+// its part inside the clip, never on the row before.
+func TestRoundRectClippedOnTheLeft(t *testing.T) {
+	c := NewCanvas(64, 64)
+	c.Clear(color.RGBA{0, 0, 0, 255})
+	c.Push(Rect{X: 0, Y: 0, W: 64, H: 64})
+	c.RoundRect(Rect{X: -60, Y: 10, W: 66, H: 40}, 8, color.RGBA{255, 0, 0, 255})
+	c.Pop()
+	for y := range 64 {
+		for x := 8; x < 64; x++ {
+			if p := c.Img.RGBAAt(x, y); p.R != 0 {
+				t.Fatalf("drawn at %d,%d, outside the rectangle", x, y)
+			}
+		}
+	}
+	if c.Img.RGBAAt(2, 30).R == 0 {
+		t.Fatal("the part inside the clip was not drawn")
+	}
+}

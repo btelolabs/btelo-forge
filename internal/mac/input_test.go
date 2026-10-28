@@ -10,13 +10,14 @@ func TestEventsBetweenPollsReachTheNextFrame(t *testing.T) {
 	q.next.X, q.next.Down = 10, true
 	q.next.Dropped = append(q.next.Dropped, "/tmp/a.mp4")
 	q.next.Keys = append(q.next.Keys, KeyEvent{VK: 0x41})
+	q.next.Up = append(q.next.Up, 0x41)
 	q.next.Wheel = 2
 	q.flip()
 
-	if !slices.Equal(q.last.Dropped, []string{"/tmp/a.mp4"}) || len(q.last.Keys) != 1 || q.last.Wheel != 2 {
+	if !slices.Equal(q.last.Dropped, []string{"/tmp/a.mp4"}) || len(q.last.Keys) != 1 || len(q.last.Up) != 1 || q.last.Wheel != 2 {
 		t.Fatalf("the frame lost the collected events: %+v", q.last)
 	}
-	if len(q.next.Dropped) != 0 || len(q.next.Keys) != 0 || q.next.Wheel != 0 {
+	if len(q.next.Dropped) != 0 || len(q.next.Keys) != 0 || len(q.next.Up) != 0 || q.next.Wheel != 0 {
 		t.Fatalf("the events were handed over twice: %+v", q.next)
 	}
 	if q.next.X != 10 || !q.next.Down {

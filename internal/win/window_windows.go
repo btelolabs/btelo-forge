@@ -19,6 +19,7 @@ var (
 	destroyWindow    = user32.NewProc("DestroyWindow")
 	defWindowProc    = user32.NewProc("DefWindowProcW")
 	peekMessage      = user32.NewProc("PeekMessageW")
+	getFocus         = user32.NewProc("GetFocus")
 	postMessage      = user32.NewProc("PostMessageW")
 	translateMessage = user32.NewProc("TranslateMessage")
 	dispatchMessage  = user32.NewProc("DispatchMessageW")
@@ -210,6 +211,10 @@ func windowProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		case wmApp:
 			w.input.Woken = true
 			return 0
+		case wmCopyData:
+			if w.takeForwarded(lp) {
+				return 1
+			}
 		}
 		if w.mouse(msg, wp, lp) || w.key(msg, wp) || w.char(msg, wp) || w.drop(msg, wp) || w.hotkey(msg, wp) {
 			return 0
@@ -226,8 +231,10 @@ func windowProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 func (w *Window) Poll() bool {
 	w.input.Pointer = w.input.Pointer[:0]
 	w.input.Keys = w.input.Keys[:0]
+	w.input.Up = w.input.Up[:0]
 	w.input.Typed = w.input.Typed[:0]
 	w.input.Dropped = w.input.Dropped[:0]
+	w.input.Opened = w.input.Opened[:0]
 	w.input.Wheel = 0
 	w.input.Hotkeys = w.input.Hotkeys[:0]
 	w.input.Woken = false
@@ -243,6 +250,11 @@ func (w *Window) Poll() bool {
 		syscall.SyscallN(dispatchMessage.Addr(), uintptr(unsafe.Pointer(&w.msg)))
 	}
 	w.input.Ctrl, w.input.Shift, w.input.Alt = held(0x11), held(0x10), held(0x12)
+	// Whether the window has the keyboard focus, asked of Windows rather than kept from WM_SETFOCUS and
+	// WM_KILLFOCUS: a window made foreground from outside, as -background leaves it to be, can have the focus
+	// without being told, and a caret would then never blink.
+	focus, _, _ := getFocus.Call()
+	w.input.Inactive = focus != w.Handle
 	return !w.closed
 }
 
@@ -270,8 +282,11 @@ func (w *Window) Scale() float32 {
 	return float32(dpi) / 96
 }
 
-// Size is the client area in physical pixels; it is 0×0 while minimized.
+// Size is the client area in physical pixels; it is 0×0 while minimized or hidden, when there is nothing to draw.
 func (w *Window) Size() (int, int) {
+	if r, _, _ := isWindowVisible.Call(w.Handle); r == 0 {
+		return 0, 0
+	}
 	if r, _, _ := getClientRect.Call(w.Handle, uintptr(unsafe.Pointer(&w.bounds))); r == 0 {
 		return 0, 0
 	}

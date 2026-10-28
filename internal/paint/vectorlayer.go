@@ -10,19 +10,23 @@ import (
 // rasterized, as Photoshop asks of a shape layer.
 var ErrVectorLayer = errors.New("the chosen layer is a vector layer; rasterize it to paint on it")
 
-// pixelLayer is the chosen layer when it has pixels.
+// pixelLayer is the chosen node when it has pixels to paint: a pixel layer's own, or the mask being edited of any
+// layer or group, which a mask hides alike.
 func (d *Doc) pixelLayer() (*Node, error) {
-	l, err := d.ActiveLayer()
-	if err != nil {
-		return nil, err
-	}
+	n := d.Node(d.Active)
 	switch {
-	case l.Vector != nil:
+	case n == nil:
+		return nil, ErrNoLayer
+	case d.EditMask && n.Mask != nil:
+		return n, nil
+	case n.IsGroup():
+		return nil, ErrGroup
+	case n.Vector != nil:
 		return nil, ErrVectorLayer
-	case l.Adjust != nil && !(d.EditMask && l.Mask != nil):
+	case n.Adjust != nil:
 		return nil, ErrAdjustmentLayer
 	}
-	return l, nil
+	return n, nil
 }
 
 // reachOfNode is a quick bound of where a layer shows anything: its tiles, or its object, and its effects.
@@ -100,15 +104,26 @@ func (d *Doc) AddVector(v Vector, name string) *Node {
 	return n
 }
 
-// SetVector replaces a vector layer's object as one step called name, as editing it with the node tool or its
-// properties does.
+// AddVectorLayer adds an empty vector layer above the chosen node and chooses it, for the vector brush, the pen and
+// the shapes to draw on; what is drawn on it is filled with fill.
+func (d *Doc) AddVectorLayer(name string, fill VectorPaint) *Node {
+	m := d.Mark()
+	n := &Node{ID: d.newID(), Name: name, Visible: true, Opacity: 1, Vector: &Vector{Kind: VectorCurve, M: Identity, Fill: fill}}
+	d.insertAbove(n)
+	d.EditMask = false
+	d.Commit("New vector layer", m)
+	return n
+}
+
+// SetVector replaces a vector layer's object, or else the node's vector mask, as one step called name, as editing
+// it with the node tool or its properties does.
 func (d *Doc) SetVector(id int, v Vector, name string) {
 	n := d.Node(id)
-	if n == nil || n.Vector == nil {
+	if n == nil || n.vectorOf() == nil {
 		return
 	}
 	m := d.Mark()
-	n.Vector = &v
+	n.setVectorOf(&v)
 	d.Commit(name, m)
 }
 
@@ -131,12 +146,15 @@ func (d *Doc) Rasterize() error {
 	return nil
 }
 
-// transformVector maps a vector layer's object through m: exactly, as it is drawn anew at any scale.
-func transformVector(n *Node, m Affine) {
-	v := *n.Vector
-	v.M = v.M.Then(m)
-	n.Vector = &v
+// Transformed is the object mapped through m: exactly, as it is drawn anew at any scale.
+func (v *Vector) Transformed(m Affine) *Vector {
+	w := *v
+	w.M = w.M.Then(m)
+	return &w
 }
+
+// transformVector maps a vector layer's object through m: exactly, as it is drawn anew at any scale.
+func transformVector(n *Node, m Affine) { n.Vector = n.Vector.Transformed(m) }
 
 // TransformVector maps the chosen vector layer's object through m as one step called name, as Free Transform and
 // the move tool do for an object.
@@ -170,11 +188,15 @@ func (v *Vector) valid() bool {
 	if v.Kind < VectorCurve || v.Kind > VectorStar || v.Rule < NonZero || v.Rule > EvenOdd ||
 		!finite(v.Size.X, v.Size.Y, v.Radius, v.Inner, v.M.A, v.M.B, v.M.C, v.M.D, v.M.E, v.M.F, v.Stroke.Width, v.Stroke.Miter) ||
 		v.Sides < 0 || v.Sides > 1000 || v.Stroke.Width < 0 || len(v.Stroke.Dash) > 64 ||
-		v.Fill.Kind < PaintNone || v.Fill.Kind > PaintRadial || v.Stroke.Paint.Kind < PaintNone || v.Stroke.Paint.Kind > PaintRadial {
+		v.Fill.Kind < PaintNone || v.Fill.Kind > PaintConical || v.Stroke.Paint.Kind < PaintNone || v.Stroke.Paint.Kind > PaintConical ||
+		!finite(v.Fill.Aspect, v.Stroke.Paint.Aspect) || v.Fill.Aspect < 0 || v.Stroke.Paint.Aspect < 0 {
 		return false
 	}
 	nodes := 0
 	for _, s := range v.Path {
+		if s.Op < OpJoin || s.Op > OpExclude {
+			return false
+		}
 		for _, n := range s.Nodes {
 			if !finite(n.P.X, n.P.Y, n.In.X, n.In.Y, n.Out.X, n.Out.Y) {
 				return false

@@ -23,6 +23,7 @@ type Input struct {
 	Ctrl    bool
 	Shift   bool
 	Keys    []KeyEvent
+	Up      []uint16 // the keys let go, as Windows virtual-key codes
 	Typed   []rune
 	Dropped []string
 }
@@ -39,6 +40,6 @@ func (q *inputQueue) flip() {
 	q.last, q.next = q.next, q.last
 	n := &q.next
 	n.X, n.Y, n.Down, n.Ctrl, n.Shift = q.last.X, q.last.Y, q.last.Down, q.last.Ctrl, q.last.Shift
-	n.Pointer, n.Keys, n.Typed, n.Dropped = n.Pointer[:0], n.Keys[:0], n.Typed[:0], n.Dropped[:0]
+	n.Pointer, n.Keys, n.Up, n.Typed, n.Dropped = n.Pointer[:0], n.Keys[:0], n.Up[:0], n.Typed[:0], n.Dropped[:0]
 	n.Wheel = 0
 }

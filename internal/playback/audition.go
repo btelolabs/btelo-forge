@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,7 +31,10 @@ func NewAudition(wake func()) *Audition { return &Audition{wake: wake} }
 
 // Play starts source (a path or an http URL, fetched naming referer when it is set) under key, replacing whatever
 // was playing.
-func (a *Audition) Play(key, source, referer string) {
+func (a *Audition) Play(key, source, referer string) { a.PlayFrom(key, source, referer, 0) }
+
+// PlayFrom is Play starting from seconds into the sound; Playing then counts the seconds heard from there.
+func (a *Audition) PlayFrom(key, source, referer string, from float64) {
 	a.Stop()
 	ctx, cancel := context.WithCancel(context.Background())
 	a.mu.Lock()
@@ -39,7 +43,7 @@ func (a *Audition) Play(key, source, referer string) {
 	a.running.Add(1)
 	go func() {
 		defer a.running.Done()
-		err := a.play(ctx, key, source, referer)
+		err := a.play(ctx, key, source, referer, from)
 		a.mu.Lock()
 		if a.key == key && a.cancel != nil && ctx.Err() == nil {
 			a.key, a.cancel, a.out = "", nil, nil
@@ -53,7 +57,7 @@ func (a *Audition) Play(key, source, referer string) {
 	}()
 }
 
-func (a *Audition) play(ctx context.Context, key, source, referer string) error {
+func (a *Audition) play(ctx context.Context, key, source, referer string, from float64) error {
 	out, err := wave.Open()
 	if err != nil {
 		return err
@@ -77,6 +81,9 @@ func (a *Audition) play(ctx context.Context, key, source, referer string) error 
 		if referer != "" {
 			args = append(args, "-referer", referer)
 		}
+	}
+	if from > 0 {
+		args = append(args, "-ss", strconv.FormatFloat(from, 'f', 3, 64))
 	}
 	args = append(args, "-i", source, "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
 	cmd, err := media.Command(ctx, "ffmpeg", args...)

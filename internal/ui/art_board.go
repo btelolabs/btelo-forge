@@ -14,9 +14,11 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
-// The artboard tool, as Affinity Designer's: a drag on the canvas makes an artboard, a fixed-size area exported as
-// a picture of its own; a press on one chooses it, a drag moves it with what is drawn wholly on it, its handles
-// resize it. The options bar names it, sizes it from presets or typed numbers and sets its background.
+// The artboard tool, as Affinity Designer's: a drag on the canvas makes an artboard, a group with a fixed-size area
+// that cuts what is in it to it and exports as a picture of its own; a press on one chooses it, a drag moves it with
+// what is in it, its handles resize it. A board being made or resized takes the width and height of the other
+// boards when it comes near them, so boards side by side come out the same. The options bar names it, sizes it from
+// presets or typed numbers and sets its background.
 
 const icBoard = "\ue069"
 
@@ -26,6 +28,7 @@ type boardEdit struct {
 	start xbox
 	box   xbox // the board as dragged
 	from  [2]float64
+	match [2]int // the boards whose width and height it took, or 0
 }
 
 // boardPresets are the sizes the artboard tool offers, common for pictures, posts, videos and print, named by
@@ -55,9 +58,10 @@ func (a *App) boardLabel(ad *artDoc, vp gfx.Rect, b paint.Board) gfx.Rect {
 // boardUnder is the board whose label or area is under the pointer, labels first, or 0.
 func (a *App) boardUnder(ad *artDoc, vp gfx.Rect) int {
 	u := &a.u
-	for i := len(ad.d.Boards) - 1; i >= 0; i-- {
-		if a.boardLabel(ad, vp, ad.d.Boards[i]).Contains(u.mx, u.my) {
-			return ad.d.Boards[i].ID
+	boards := ad.d.Boards()
+	for i := len(boards) - 1; i >= 0; i-- {
+		if a.boardLabel(ad, vp, boards[i]).Contains(u.mx, u.my) {
+			return boards[i].ID
 		}
 	}
 	return ad.d.BoardAt(image.Pt(int(math.Floor(ad.cursor[0])), int(math.Floor(ad.cursor[1]))))
@@ -88,6 +92,9 @@ func (a *App) boardPointer(ad *artDoc, vp gfx.Rect) {
 			if under := a.boardUnder(ad, vp); under != 0 && under != ad.board {
 				ad.board = under
 				chosen, has = ad.chosenBoard()
+			}
+			if ad.d.BoardOf(ad.d.Active) != ad.board {
+				ad.d.Choose(ad.board) // new layers go into it
 			}
 		}
 		if g == grabNone {
@@ -132,13 +139,25 @@ func (a *App) boardPointer(ad *artDoc, vp gfx.Rect) {
 				h = math.Copysign(math.Abs(w), h)
 			}
 			e.box = xbox{cx: e.from[0] + w/2, cy: e.from[1] + h/2, w: atLeast(math.Abs(w), 1), h: atLeast(math.Abs(h), 1)}
+			sx, sy := math.Copysign(1, w), math.Copysign(1, h)
+			if u.shift {
+				sy = 0 // kept square
+			}
+			e.box, e.match = a.snapBoardSize(ad, e.box, sx, sy, false, 0)
+			if u.shift {
+				e.box.h, e.box.cy = e.box.w, e.from[1]+math.Copysign(e.box.w/2, h)
+			}
 		default:
 			corner := boxHandles[g][0] != 0 && boxHandles[g][1] != 0
 			at, _ := a.snapped(ad, paint.Pt{X: p[0], Y: p[1]}, ad.snapTo)
 			b := e.start.resize(g, pt2(at), u.alt, corner && u.shift)
 			b.w, b.h = math.Abs(b.w), math.Abs(b.h)
-			e.box = b
+			e.box, e.match = b, [2]int{}
+			if !(corner && u.shift) {
+				e.box, e.match = a.snapBoardSize(ad, b, boxHandles[g][0], boxHandles[g][1], u.alt, ad.board)
+			}
 		}
+		e.box = boxOf(e.box.rect()) // a board lies on whole pixels, its corner and its size, as it is dragged too
 	}
 	if u.letGo(id) && e != nil {
 		ad.boardDrag = nil
@@ -149,7 +168,7 @@ func (a *App) boardPointer(ad *artDoc, vp gfx.Rect) {
 			}
 		case e.grab == grabNew:
 			a.artRun(ad, func() error {
-				b, err := ad.d.AddBoard(e.box.rect(), u.tf("Artboard %d", len(ad.d.Boards)+1))
+				b, err := ad.d.AddBoard(e.box.rect(), u.tf("Artboard %d", len(ad.d.Boards())+1))
 				ad.board = b.ID
 				return err
 			})
@@ -162,6 +181,46 @@ func (a *App) boardPointer(ad *artDoc, vp gfx.Rect) {
 			a.artRun(ad, func() error { return ad.d.SetBoard(b, "Artboard") })
 		}
 	}
+}
+
+// snapBoardSize draws the size of a board being dragged to the width and the height of the other boards (but
+// skip) when it is within snapReach screen pixels of them. sx and sy say which side moves each way: -1 the left or
+// top, 1 the right or bottom, 0 neither; the other stays, or with fromCentre the middle. It returns the box and the
+// boards whose width and height it took, or 0.
+func (a *App) snapBoardSize(ad *artDoc, b xbox, sx, sy float64, fromCentre bool, skip int) (xbox, [2]int) {
+	var match [2]int
+	if a.settings.Paint.NoSnap {
+		return b, match
+	}
+	reach := float64(a.u.px(snapReach)) / ad.zoom
+	fit := func(size float64, side func(paint.Board) int) (float64, int) {
+		best, bestD, id := size, reach, 0
+		for _, o := range ad.d.Boards() {
+			if o.ID == skip {
+				continue
+			}
+			if d := math.Abs(float64(side(o)) - size); d <= bestD {
+				best, bestD, id = float64(side(o)), d, o.ID
+			}
+		}
+		return best, id
+	}
+	// The side that stays, where it is, or the middle.
+	place := func(c, size, next, s float64) float64 {
+		if fromCentre {
+			return c
+		}
+		return c - s*size/2 + s*next/2
+	}
+	if sx != 0 {
+		w, id := fit(b.w, func(o paint.Board) int { return o.Rect.Dx() })
+		b.cx, b.w, match[0] = place(b.cx, b.w, w, sx), w, id
+	}
+	if sy != 0 {
+		h, id := fit(b.h, func(o paint.Board) int { return o.Rect.Dy() })
+		b.cy, b.h, match[1] = place(b.cy, b.h, h, sy), h, id
+	}
+	return b, match
 }
 
 // boardKeys are the artboard tool's keys: Delete removes the chosen board, leaving what is drawn on it; Escape lets
@@ -206,24 +265,43 @@ func (a *App) boardKeys(ad *artDoc, k Key) bool {
 // handles, or the board being dragged.
 func (a *App) drawBoardOverlay(ad *artDoc, vp gfx.Rect) {
 	u := &a.u
-	for _, b := range ad.d.Boards {
+	for _, b := range ad.d.Boards() {
 		r := a.boardLabel(ad, vp, b)
 		col := colDim
-		if a.artTool == toolBoard && b.ID == ad.board {
+		if a.artTool == toolBoard && b.ID == ad.board || ad.d.Active == b.ID {
 			col = colAccent
 		}
 		u.label(u.face(11.5), r, b.Name, col, 0)
+		// Its size, above its top right corner, while there is room beside the name.
+		size := fmt.Sprintf("%d × %d", b.Rect.Dx(), b.Rect.Dy())
+		f := u.face(11)
+		rx, _ := ad.toScreen(vp, [2]float64{float64(b.Rect.Max.X), float64(b.Rect.Min.Y)})
+		if sw := f.Measure(size); rx-sw > r.X+f.Measure(b.Name)+u.px(10) {
+			u.label(f, gfx.Rect{X: rx - sw, Y: r.Y, W: sw, H: r.H}, size, colDim, 1)
+		}
 	}
 	if a.artTool != toolBoard {
 		return
 	}
 	switch e := ad.boardDrag; {
 	case e != nil && (e.grab != grabNew || u.drag.moved):
+		// The boards whose width or height it took, outlined.
+		for _, id := range e.match {
+			if b, ok := ad.d.Board(id); ok && id != 0 {
+				x0, y0 := ad.toScreen(vp, [2]float64{float64(b.Rect.Min.X), float64(b.Rect.Min.Y)})
+				x1, y1 := ad.toScreen(vp, [2]float64{float64(b.Rect.Max.X), float64(b.Rect.Max.Y)})
+				u.c.Outline(gfx.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}, max(1, u.px(1.5)), colWarning)
+			}
+		}
 		a.drawBox(ad, vp, e.box, false)
 		if e.grab == grabNew || e.grab >= 0 && e.grab < len(boxHandles) {
 			r := e.box.rect()
 			x, y := ad.toScreen(vp, [2]float64{float64(r.Max.X), float64(r.Max.Y)})
-			u.label(u.face(11.5), gfx.Rect{X: x + u.px(8), Y: y + u.px(4), W: u.px(120), H: u.px(16)}, fmt.Sprintf("%d × %d", r.Dx(), r.Dy()), colWhite, 0)
+			col := colWhite
+			if e.match != [2]int{} {
+				col = colWarning // the same size as a board beside it
+			}
+			u.label(u.face(11.5), gfx.Rect{X: x + u.px(8), Y: y + u.px(4), W: u.px(120), H: u.px(16)}, fmt.Sprintf("%d × %d", r.Dx(), r.Dy()), col, 0)
 		}
 	default:
 		if b, ok := ad.chosenBoard(); ok {
@@ -258,7 +336,7 @@ func (a *App) drawBoardOptions(ad *artDoc, vp, r gfx.Rect) {
 	}
 	x += pw + u.px(10)
 	if !has {
-		if len(ad.d.Boards) > 0 && x+u.px(170) < r.Right() {
+		if len(ad.d.Boards()) > 0 && x+u.px(170) < r.Right() {
 			bw := u.buttonWidth(icDownload, u.t("Export artboards"))
 			if u.button("art/board/exportall", gfx.Rect{X: x, Y: r.Y, W: bw, H: r.H}, icDownload, u.t("Export artboards"), plain, true) {
 				a.exportBoards(ad, 0)
@@ -330,7 +408,7 @@ func (a *App) drawBoardOptions(ad *artDoc, vp, r gfx.Rect) {
 		u.c.Fill(sw.Inset(-max(1, u.px(1))), colBorder)
 		u.c.Fill(sw, color.RGBA{b.Fill.R, b.Fill.G, b.Fill.B, 255})
 	} else {
-		u.c.RoundOutline(sw, u.px(2), max(1, u.px(1)), colBorder)
+		u.c.Outline(sw, max(1, u.px(1)), colBorder)
 		u.c.Line(sw.X, sw.Bottom(), sw.Right(), sw.Y, max(1, u.px(1)), colDanger)
 	}
 	u.hint("art/board/swatch", u.tf("%s: click to use the foreground colour", u.t("Background")), sw)
@@ -362,7 +440,7 @@ func (a *App) boardPreset(ad *artDoc, vp gfx.Rect, w, h int) {
 	cx, cy := ad.toCanvas(vp, vp.X+vp.W/2, vp.Y+vp.H/2)
 	min := image.Pt(int(math.Round(cx))-w/2, int(math.Round(cy))-h/2)
 	a.artRun(ad, func() error {
-		b, err := ad.d.AddBoard(image.Rectangle{Min: min, Max: min.Add(image.Pt(w, h))}, a.u.tf("Artboard %d", len(ad.d.Boards)+1))
+		b, err := ad.d.AddBoard(image.Rectangle{Min: min, Max: min.Add(image.Pt(w, h))}, a.u.tf("Artboard %d", len(ad.d.Boards())+1))
 		ad.board = b.ID
 		if err == nil {
 			ad.fitTo(vp, b.Rect) // show the new board whole
@@ -375,7 +453,7 @@ func (a *App) boardPreset(ad *artDoc, vp gfx.Rect, w, h int) {
 // exportBoards writes the board id, or every board when id is 0, as PNGs next to the canvas file.
 func (a *App) exportBoards(ad *artDoc, id int) {
 	var out []namedPicture
-	for _, b := range ad.d.Boards {
+	for _, b := range ad.d.Boards() {
 		if id != 0 && b.ID != id {
 			continue
 		}
@@ -401,8 +479,10 @@ func shadeOutside(view *image.RGBA, area image.Rectangle, pages []image.Rectangl
 		// The pages crossing this row, as spans to leave clear, in order.
 		var spans [][2]int
 		for _, p := range pages {
-			if y >= p.Min.Y && y < p.Max.Y {
-				spans = append(spans, [2]int{max(p.Min.X, area.Min.X), min(p.Max.X, area.Max.X)})
+			// Only the part of a page within the area: one beside it leaves nothing, never a span backwards that
+			// would shade past the area's edge.
+			if s := [2]int{max(p.Min.X, area.Min.X), min(p.Max.X, area.Max.X)}; y >= p.Min.Y && y < p.Max.Y && s[0] < s[1] {
+				spans = append(spans, s)
 			}
 		}
 		slices.SortFunc(spans, func(a, b [2]int) int { return a[0] - b[0] })

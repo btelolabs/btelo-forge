@@ -29,10 +29,15 @@ type settings struct {
 	Phone       bool                `json:"phone"`
 	PhoneKey    string              `json:"phoneKey"`
 	PanelHidden bool                `json:"panelHidden"`
+	Zoom        float32             `json:"zoom,omitempty"` // the window's zoom; none is its own size
 	Record      recordSettings      `json:"record"`
+	Live        liveSettings        `json:"live"`
+	Camera      cameraSettings      `json:"camera"`
 	Hotkeys     hotkeySettings      `json:"hotkeys"`
-	Keys        map[string][]Hotkey `json:"keys,omitempty"` // the in-window shortcuts chosen, by command id; none means the defaults
+	Keys        map[string][]Hotkey `json:"keys,omitempty"`      // the in-window shortcuts chosen, by command id; none means the defaults
+	FileTypes   []string            `json:"fileTypes,omitempty"` // the groups of file types opened from Explorer (fileTypeGroups)
 	Paint       paintSettings       `json:"paint"`
+	Files       filesSettings       `json:"files"`
 
 	SubtitleModel    string `json:"subtitleModel"`
 	SubtitleLanguage string `json:"subtitleLanguage"`
@@ -49,7 +54,7 @@ const maxExportRecords = 200
 func (a *App) settingsPath() string { return filepath.Join(a.stateDir, "settings.json") }
 
 func defaultSettings() settings {
-	return settings{Language: English, Export: project.Export{Quality: project.Balanced}, MCP: true, Record: defaultRecordSettings(), Hotkeys: defaultHotkeys(), Paint: defaultPaintSettings()}
+	return settings{Language: English, Export: project.Export{Quality: project.Balanced}, MCP: true, Record: defaultRecordSettings(), Live: defaultLiveSettings(), Camera: defaultCameraSettings(), Hotkeys: defaultHotkeys(), Paint: defaultPaintSettings()}
 }
 
 func (a *App) loadSettings() {

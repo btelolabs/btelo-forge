@@ -3,6 +3,7 @@ package ui
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/project"
@@ -51,17 +52,34 @@ type doc struct {
 	shown      shownFrame
 	times      timeFields
 	opening    string
-	art        *artDoc // a canvas tab instead of an edit
+	file       string    // the edit file it was saved to or opened from, if any
+	art        *artDoc   // a canvas tab instead of an edit
+	files      *filesDoc // a file manager tab instead of an edit
+	board      *mindDoc  // a mind map tab instead of an edit
+	liveTab    bool      // the live stream's tab instead of an edit; there is one at most
+	// editing makes a tab with no edit yet the video editor, waiting for videos to be added or dropped.
+	editing bool
+	queued  []queuedVideo // videos to open in this tab once the one opening is in
 }
 
 func (d *doc) title(a *App) string {
 	switch {
 	case d.art != nil:
 		return a.artTitle(d.art)
+	case d.files != nil:
+		return d.files.title(&a.u)
+	case d.board != nil:
+		return d.board.title()
+	case d.liveTab:
+		return a.u.t("Live stream")
+	case d.p != nil && d.file != "":
+		return strings.TrimSuffix(filepath.Base(d.file), project.EditExt)
 	case d.p != nil:
 		return filepath.Base(d.p.Sources[0].Path)
 	case d.opening != "":
 		return filepath.Base(d.opening)
+	case d.editing:
+		return a.u.t("Edit a video")
 	}
 	return a.u.t("New tab")
 }
@@ -86,6 +104,7 @@ func (a *App) switchTab(i int) {
 		return
 	}
 	a.player.Stop()
+	a.leaveFiles(a.doc, false)
 	a.u.focus = ""
 	a.doc = a.docs[i]
 	a.requestFrame()
@@ -105,9 +124,13 @@ func (a *App) closeTab(i int) {
 			a.toast(a.u.tf("The canvas could not be saved: %s", a.describe(err)), true)
 		}
 	}
+	if d.board != nil {
+		a.closeMind(d.board)
+	}
 	if a.doc == d {
 		a.player.Stop()
 	}
+	a.leaveFiles(d, true)
 	a.docs = slices.Delete(a.docs, i, i+1)
 	if len(a.docs) == 0 {
 		a.doc = nil
@@ -197,9 +220,12 @@ func (a *App) redo() {
 	}
 }
 
+// videoSaveInterval is the least time between two saves of a video's edit while it keeps changing.
+const videoSaveInterval = 3 * time.Second
+
 func (a *App) autosave() {
 	for _, d := range a.docs {
-		if d.p == nil || !d.dirty || time.Since(d.savedAt) < time.Second {
+		if d.p == nil || !d.dirty || time.Since(d.savedAt) < videoSaveInterval {
 			continue
 		}
 		if err := d.save(a.saveDir); err != nil {

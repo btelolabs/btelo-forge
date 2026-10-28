@@ -194,6 +194,14 @@ func (p *Project) AddDrawing(image, canvas string, aspect, t float64) int {
 		X: 0.5, Y: 0.5, Size: 1, Opacity: 1})
 }
 
+// AddSmart places a smart object's picture (width over height aspect) at t for five seconds, a third of the frame
+// high: image is its picture, kept up to date as its layers change, and link its link id.
+func (p *Project) AddSmart(image, link string, aspect, t float64) int {
+	start, end := p.span(t, 5)
+	return p.placeOverlay(Overlay{Kind: ImageOverlay, Image: image, Smart: link, Aspect: aspect, Start: start, End: end,
+		X: 0.5, Y: 0.5, Size: 0.35, Opacity: 1})
+}
+
 // AddCaptions adds timed text on a new overlay track of its own, styled as subtitles, and returns the track.
 func (p *Project) AddCaptions(lines []Overlay) int {
 	tr := OverlayTrack{}

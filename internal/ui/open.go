@@ -12,6 +12,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/library"
 	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/mind"
 	"github.com/btelolabs/btelo-forge/internal/paint"
 	"github.com/btelolabs/btelo-forge/internal/project"
 )
@@ -37,13 +38,14 @@ func (a *App) chooseVideo() {
 	}
 }
 
-// chooseAnyFile opens whatever is chosen as dropping it would: a video to edit, a picture or canvas to draw on.
+// chooseAnyFile opens whatever is chosen as dropping it would: a video to edit, a picture or canvas to draw on, a
+// mind map.
 func (a *App) chooseAnyFile() {
 	var patterns []string
-	for _, e := range slices.Concat(videoExtensions, imageExtensions, []string{paint.Ext}) {
+	for _, e := range slices.Concat(videoExtensions, imageExtensions, []string{paint.Ext, mind.Ext}) {
 		patterns = append(patterns, "*"+e)
 	}
-	files := a.host.OpenFiles(a.u.t("Open a file"), [][2]string{{a.u.t("Videos, pictures and canvases"), strings.Join(patterns, ";")}, {a.u.t("All files"), "*.*"}}, true)
+	files := a.host.OpenFiles(a.u.t("Open a file"), [][2]string{{a.u.t("Videos, pictures, canvases and mind maps"), strings.Join(patterns, ";")}, {a.u.t("All files"), "*.*"}}, true)
 	a.openFiles(files, func() bool { return false })
 }
 
@@ -58,7 +60,14 @@ func (a *App) chooseImage() {
 }
 
 // handleDrops sorts dropped files: sounds become music, images overlays, anything else is opened as video.
-func (a *App) handleDrops(paths []string) { a.openFiles(paths, a.dropUpper) }
+// In a mind map tab what is dropped goes on the board where it is let go.
+func (a *App) handleDrops(paths []string) {
+	if md := a.board; md != nil && len(paths) > 0 {
+		a.mindAddFiles(md, paths, a.mindPointerOr(md))
+		return
+	}
+	a.openFiles(paths, a.dropUpper)
+}
 
 // openFiles opens files by what they are, as dropping them does: a canvas as a canvas, sounds as music, a picture as
 // a canvas in an empty tab or a layer or overlay where something is open, anything else as video, on an upper
@@ -67,8 +76,14 @@ func (a *App) openFiles(paths []string, upper func() bool) {
 	var audio []string
 	for _, p := range paths {
 		switch {
+		case isFolder(p):
+			a.openFolder(p)
 		case strings.EqualFold(filepath.Ext(p), paint.Ext):
 			a.openCanvasFile(p)
+		case strings.EqualFold(filepath.Ext(p), mind.Ext):
+			a.openMindFile(p)
+		case isEditFile(p):
+			a.openEditFile(p)
 		case library.IsAudio(p):
 			audio = append(audio, p)
 		case isImage(p) && a.p == nil && a.art == nil:
@@ -105,6 +120,11 @@ func (a *App) dropUpper() bool {
 	return false
 }
 
+// occupied reports whether the tab holds something, so what is opened next needs a tab of its own.
+func (a *App) occupied() bool {
+	return a.p != nil || a.art != nil || a.opening != "" || a.files != nil || a.board != nil || a.liveTab || a.editing
+}
+
 // openVideo probes path in the background. An empty tab opens it, restoring an unfinished edit of the same file;
 // a tab with an edit appends it to the main track, or places it at the playhead on an upper track.
 func (a *App) openVideo(path string, upper bool) {
@@ -113,9 +133,22 @@ func (a *App) openVideo(path string, upper bool) {
 		a.toast(a.u.tf("%s opens as soon as ffmpeg is ready", filepath.Base(path)), false)
 		return
 	}
-	d := a.doc
+	if a.files != nil || a.art != nil {
+		a.newTab() // a video dropped on a tab browsing files or drawing gets a tab of its own
+	}
+	a.openVideoIn(a.doc, path, upper)
+}
+
+// queuedVideo is a video waiting for the one before it to open in the same tab.
+type queuedVideo struct {
+	path  string
+	upper bool
+}
+
+// openVideoIn opens a video in tab d; several chosen or dropped at once open one after another, in order.
+func (a *App) openVideoIn(d *doc, path string, upper bool) {
 	if d.opening != "" {
-		a.toast(a.u.t("Still opening the previous file"), false)
+		d.queued = append(d.queued, queuedVideo{path, upper})
 		return
 	}
 	d.opening = path
@@ -123,6 +156,13 @@ func (a *App) openVideo(path string, upper bool) {
 		info, err := media.Probe(ctx, path)
 		a.post(func() {
 			d.opening = ""
+			defer func() {
+				if len(d.queued) > 0 && slices.Contains(a.docs, d) {
+					next := d.queued[0]
+					d.queued = d.queued[1:]
+					a.openVideoIn(d, next.path, next.upper)
+				}
+			}()
 			if err != nil {
 				a.toast(a.u.tf("Cannot open %s: %s", filepath.Base(path), a.describe(err)), true)
 				return

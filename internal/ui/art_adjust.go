@@ -162,7 +162,7 @@ func (a *App) openAdjust(ad *artDoc, kind int) {
 	}
 	s, err := ad.d.BeginFilter()
 	if err != nil {
-		a.toast(a.describe(err), true)
+		a.artFailed(ad, err)
 		return
 	}
 	k := a.adjustKinds()[kind]
@@ -192,7 +192,7 @@ func (a *App) openAdjustLayer(ad *artDoc, kind int) {
 	}
 	s, err := ad.d.BeginNewAdjustment(adjustmentOf(kind, f.values, f.on, f.curve), fmt.Sprintf("%s %d", k.title, len(ad.d.Layers())+1))
 	if err != nil {
-		a.toast(a.describe(err), true)
+		a.artFailed(ad, err)
 		return
 	}
 	f.layer, f.initial = s, s.Adjustment()
@@ -203,7 +203,7 @@ func (a *App) openAdjustLayer(ad *artDoc, kind int) {
 func (a *App) openAdjustmentSettings(ad *artDoc, id int) {
 	s, err := ad.d.BeginAdjust(id)
 	if err != nil {
-		a.toast(a.describe(err), true)
+		a.artFailed(ad, err)
 		return
 	}
 	adj := s.Adjustment()
@@ -415,7 +415,7 @@ func strconvFloat(v float64, decimals int) string { return fmt.Sprintf("%.*f", d
 // drawHistogram draws how many pixels have each brightness.
 func (a *App) drawHistogram(r gfx.Rect, h [256]int) {
 	u := &a.u
-	u.c.RoundRect(r, u.px(6), colBackground)
+	u.c.Fill(r, colBackground)
 	peak := 1
 	for _, n := range h {
 		peak = max(peak, n)
@@ -432,7 +432,7 @@ func (a *App) drawHistogram(r gfx.Rect, h [256]int) {
 // it (the ends stay).
 func (a *App) drawCurveEditor(f *adjustDialog, r gfx.Rect) {
 	u := &a.u
-	u.c.RoundRect(r, u.px(6), colBackground)
+	u.c.Fill(r, colBackground)
 	for i := 1; i < 4; i++ {
 		t := float32(i) / 4
 		u.c.Fill(gfx.Rect{X: r.X + r.W*t, Y: r.Y, W: max(1, u.px(1)), H: r.H}, colBorder)

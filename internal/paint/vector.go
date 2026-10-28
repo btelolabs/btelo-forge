@@ -21,10 +21,12 @@ type PathNode struct {
 	Smooth bool `json:"smooth,omitempty"`
 }
 
-// Subpath is a run of nodes, open or closed back to its first.
+// Subpath is a run of nodes, open or closed back to its first. Its Op says whether it starts a shape of its own and
+// how that combines with the shapes before it (see ShapeOp).
 type Subpath struct {
 	Nodes  []PathNode `json:"nodes"`
 	Closed bool       `json:"closed,omitempty"`
+	Op     ShapeOp    `json:"op,omitempty"`
 }
 
 // VectorKind is what kind of object a vector layer holds.
@@ -45,8 +47,12 @@ const (
 	PaintNone PaintKind = iota
 	PaintSolid
 	PaintLinear
-	PaintRadial
+	PaintRadial  // elliptical: round, or squashed across by Aspect
+	PaintConical // round its centre, From, starting toward To
 )
+
+// Gradient reports whether a paint is a gradient.
+func (p VectorPaint) Gradient() bool { return p.Kind >= PaintLinear && p.Kind <= PaintConical }
 
 // Stop is a colour of a gradient at a place along it, 0 to 1.
 type Stop struct {
@@ -55,13 +61,27 @@ type Stop struct {
 }
 
 // VectorPaint colours a fill or a stroke: a solid colour, or a gradient through stops from From to To (in the
-// object's own space; a radial gradient's To is on its edge).
+// object's own space; a radial gradient's To is on its edge, and its edge across that is Aspect times as far, 0
+// meaning as far: a circle).
 type VectorPaint struct {
-	Kind  PaintKind   `json:"kind"`
-	Color color.NRGBA `json:"color"`
-	Stops []Stop      `json:"stops,omitempty"`
-	From  Pt          `json:"from,omitempty"`
-	To    Pt          `json:"to,omitempty"`
+	Kind   PaintKind   `json:"kind"`
+	Color  color.NRGBA `json:"color"`
+	Stops  []Stop      `json:"stops,omitempty"`
+	From   Pt          `json:"from,omitempty"`
+	To     Pt          `json:"to,omitempty"`
+	Aspect float64     `json:"aspect,omitempty"`
+}
+
+// Across is a radial gradient's edge across its line: where its third handle is.
+func (p VectorPaint) Across() Pt {
+	return p.From.Add(p.To.Sub(p.From).Perp().Mul(p.aspect()))
+}
+
+func (p VectorPaint) aspect() float64 {
+	if p.Aspect <= 0 {
+		return 1
+	}
+	return p.Aspect
 }
 
 // StrokeAlign is where a stroke lies against its outline.
@@ -115,6 +135,13 @@ type Vector struct {
 	Stroke VectorStroke `json:"stroke"`
 	Rule   FillRule     `json:"rule,omitempty"`
 }
+
+// vectorTolerance is how far, in pixels, the flattened outlines drawn may stray from the curves, and vectorSub how
+// many lines each pixel row is sampled on.
+const (
+	vectorTolerance = 0.2
+	vectorSub       = 8
+)
 
 // kappa places a cubic's handles to follow a quarter circle closely.
 const kappa = 0.5522847498
@@ -259,18 +286,10 @@ func (v *Vector) Render(dst *image.RGBA, r image.Rectangle, scale float64) {
 	if !ok || r.Empty() {
 		return
 	}
-	const tol, sub = 0.2, 8
-	polys, closed := flatten(v.Outline(), m, tol)
 	var fill []uint8
 	needFill := v.Fill.Kind != PaintNone || v.Stroke.Align != AlignCentre
 	if needFill {
-		var shapes [][]Pt
-		for i, p := range polys {
-			if closed[i] || len(p) > 2 {
-				shapes = append(shapes, p) // an open curve is filled as if closed, as in Affinity
-			}
-		}
-		fill = coverageOf(shapes, v.Rule, r, sub)
+		fill = v.fillCoverage(r, scale)
 	}
 	if v.Fill.Kind != PaintNone {
 		paintCoverage(dst, r, fill, v.Fill, inv)
@@ -279,6 +298,7 @@ func (v *Vector) Render(dst *image.RGBA, r image.Rectangle, scale float64) {
 	if s.Paint.Kind == PaintNone || s.Width <= 0 {
 		return
 	}
+	polys, closed := flatten(v.Combined(), m, vectorTolerance)
 	width := s.Width * scale
 	allClosed := true
 	for _, c := range closed {
@@ -297,7 +317,7 @@ func (v *Vector) Render(dst *image.RGBA, r image.Rectangle, scale float64) {
 			outline = append(outline, strokePolys(piece.pts, piece.closed, width, s.Cap, s.Join, miterLimit(s))...)
 		}
 	}
-	stroke := coverageOf(outline, NonZero, r, sub)
+	stroke := coverageOf(outline, NonZero, r, vectorSub)
 	switch align {
 	case AlignInside:
 		for i := range stroke {
@@ -324,7 +344,7 @@ func paintCoverage(dst *image.RGBA, r image.Rectangle, cover []uint8, p VectorPa
 				continue
 			}
 			c := solid
-			if p.Kind == PaintLinear || p.Kind == PaintRadial {
+			if p.Gradient() {
 				c = premul(p.colorAt(inv.Map(Pt{float64(x) + 0.5, float64(y) + 0.5})))
 			}
 			i := dst.PixOffset(x, y)
@@ -337,14 +357,24 @@ func paintCoverage(dst *image.RGBA, r image.Rectangle, cover []uint8, p VectorPa
 	}
 }
 
-// colorAt is a gradient's colour at a point of the object's own space.
+// ColorAt is a gradient's colour at a point of the object's own space.
+func (p VectorPaint) ColorAt(q Pt) color.NRGBA { return p.colorAt(q) }
+
 func (p VectorPaint) colorAt(q Pt) color.NRGBA {
 	d := p.To.Sub(p.From)
+	rel := q.Sub(p.From)
 	var t float64
-	if p.Kind == PaintRadial {
-		t = q.Dist(p.From) / max(d.Len(), 1e-9)
-	} else {
-		t = q.Sub(p.From).Dot(d) / max(d.Dot(d), 1e-9)
+	switch p.Kind {
+	case PaintRadial:
+		l2 := max(d.Dot(d), 1e-18)
+		along, across := rel.Dot(d)/l2, rel.Dot(d.Perp())/l2/p.aspect()
+		t = math.Sqrt(along*along + across*across)
+	case PaintConical:
+		// Clockwise round the centre from the line, as the canvas's y points down.
+		a := math.Atan2(rel.Y, rel.X) - math.Atan2(d.Y, d.X)
+		t = math.Mod(a/(2*math.Pi)+2, 1)
+	default:
+		t = rel.Dot(d) / max(d.Dot(d), 1e-9)
 	}
 	t = min(max(t, 0), 1)
 	stops := p.Stops

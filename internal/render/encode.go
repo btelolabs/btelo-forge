@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strconv"
 
 	"github.com/btelolabs/btelo-forge/internal/media"
@@ -27,7 +28,7 @@ func (e *TargetTooSmall) Error() string {
 func (e *TargetTooSmall) Unwrap() error { return ErrTargetTooSmall }
 
 // Encoder names the ffmpeg encoder that writes codec, preferring the graphics card when hardware is set and it
-// can; it is "" when no usable encoder exists.
+// can; it is "" when no usable encoder exists. Animations are always made by the processor.
 func Encoder(codec project.Codec, hardware bool, enc media.Encoders) string {
 	var choices []string
 	switch codec {
@@ -35,10 +36,15 @@ func Encoder(codec project.Codec, hardware bool, enc media.Encoders) string {
 		choices = []string{"hevc_nvenc", "libx265"}
 	case project.AV1:
 		choices = []string{"av1_nvenc", "libsvtav1", "libaom-av1"}
+	case project.GIF:
+		choices = []string{"gif"}
+	case project.WebP:
+		// libwebp_anim stores only the changed part of each frame; plain libwebp keeps whole frames.
+		choices = []string{"libwebp_anim", "libwebp"}
 	default:
 		choices = []string{"h264_nvenc", "libx264"}
 	}
-	if !hardware {
+	if !hardware && !codec.Animated() {
 		choices = choices[1:]
 	}
 	for _, name := range choices {
@@ -80,9 +86,11 @@ const minVideoKbps = 60
 
 // Job is an export ready to run: one ffmpeg command line per pass, the last one writing the file. The passes run
 // in Dir, where two-pass encoders keep their statistics under a relative name (an absolute Windows path would
-// clash with the colons that separate encoder options).
+// clash with the colons that separate encoder options). The first Blind passes cannot report their progress:
+// ffmpeg prints none until every output has started, and a GIF palette is written only once all frames are seen.
 type Job struct {
 	Passes  [][]string
+	Blind   int
 	Length  float64
 	Encoder string
 	Dir     string
@@ -95,23 +103,46 @@ func (j *Job) Close() {
 	}
 }
 
-// OutputRate is the frame rate of the export: the canvas rate, capped by the export setting.
+// maxGIFRate is the fastest a GIF plays: its frame delays count hundredths of a second, and browsers slow any delay
+// under two hundredths to a tenth of a second.
+const maxGIFRate = 50
+
+// OutputRate is the frame rate of the export: the canvas rate, capped by the export setting and, for a GIF, by
+// what browsers play at full speed.
 func OutputRate(c project.Canvas, e project.Export) float64 {
-	if e.FPS > 0 && float64(e.FPS) < c.FPS {
-		return float64(e.FPS)
+	fps := c.FPS
+	if e.FPS > 0 && float64(e.FPS) < fps {
+		fps = float64(e.FPS)
 	}
-	return c.FPS
+	if e.Codec == project.GIF {
+		fps = min(fps, maxGIFRate)
+	}
+	return fps
+}
+
+// Extension is the file name extension of what e makes.
+func Extension(e project.Export) string {
+	switch e.Codec {
+	case project.GIF:
+		return ".gif"
+	case project.WebP:
+		return ".webp"
+	}
+	return ".mp4"
 }
 
 // PlanExport builds the passes that encode p with its overlays into output.
 func PlanExport(p *project.Project, overlays []Overlay, output string, enc media.Encoders) (*Job, error) {
-	e := p.Export
+	e := p.Export.Effective()
 	name := Encoder(e.Codec, e.Hardware, enc)
 	if name == "" {
 		return nil, ErrEncoderMissing
 	}
 	w, h := OutputSize(p.Canvas, e.Height)
 	spec := Spec{Project: p, From: 0, To: p.Duration(), Width: w, Height: h, FPS: OutputRate(p.Canvas, e), Video: true, Overlays: overlays}
+	if e.Codec.Animated() {
+		return planAnimation(spec, e, name, output)
+	}
 	audioKbps, channels := e.Audio.Bitrate()
 	spec.Audio = audioKbps > 0
 	g, err := Build(spec)
@@ -221,4 +252,75 @@ func passArgs(name string, pass int, log string) []string {
 		return []string{"-x265-params", fmt.Sprintf("log-level=error:pass=%d:stats=%s.x265", pass, log)}
 	}
 	return []string{"-pass", strconv.Itoa(pass), "-passlogfile", log}
+}
+
+// gifPalette is the palette size and dithering per quality step, measured on film and screen recordings: Floyd-
+// Steinberg diffusion looks best and is smaller than Sierra's; an ordered Bayer pattern stays put from frame to
+// frame, so unchanged areas compress away, and at scale 3 it saves about a quarter of the size for a barely
+// visible loss. Fewer colours and coarser patterns make the smaller steps.
+var gifPalette = [5]struct {
+	colors int
+	dither string
+}{
+	{256, "floyd_steinberg"},
+	{256, "bayer:bayer_scale=3"},
+	{256, "bayer:bayer_scale=5"},
+	{128, "bayer:bayer_scale=3"},
+	{64, "bayer:bayer_scale=4"},
+}
+
+// webpQuality is libwebp's lossy quality per quality step; at Balanced an animated WebP is about a seventh of the
+// size of a GIF that looks the same.
+var webpQuality = [5]int{90, 80, 70, 60, 50}
+
+// webpEffort is libwebp's compression level per speed (medium, fast, slow, slowest).
+var webpEffort = [4]int{4, 3, 5, 6}
+
+// paletteFile is the GIF palette the first pass writes into the job's folder.
+const paletteFile = "palette.png"
+
+// planAnimation builds the passes of a silent looping GIF or WebP. A GIF takes two: the first chooses the colours
+// that suit the whole clip best, the second maps every frame to them, writing only the rectangle that changed
+// from the frame before.
+func planAnimation(spec Spec, e project.Export, name, output string) (*Job, error) {
+	if e.Codec == project.WebP {
+		spec.PixFmt = "yuv420p"
+		g, err := Build(spec)
+		if err != nil {
+			return nil, err
+		}
+		args, err := g.Args("-c:v", name, "-lossless", "0", "-quality", strconv.Itoa(webpQuality[e.Quality]),
+			"-compression_level", strconv.Itoa(webpEffort[e.Speed]), "-preset", "picture", "-loop", "0",
+			"-progress", "pipe:1", "-nostats", "-f", "webp", output)
+		if err != nil {
+			return nil, err
+		}
+		return &Job{Passes: [][]string{args}, Length: g.Length, Encoder: name}, nil
+	}
+	spec.PixFmt = "rgb24"
+	pal := gifPalette[e.Quality]
+	g, err := Build(spec)
+	if err != nil {
+		return nil, err
+	}
+	first := g
+	first.Filter += fmt.Sprintf(";%spalettegen=max_colors=%d:stats_mode=full[pal]", g.VideoOut, pal.colors)
+	first.VideoOut = "[pal]"
+	measure, err := first.Args("-update", "1", "-frames:v", "1", paletteFile)
+	if err != nil {
+		return nil, err
+	}
+	second := g
+	second.Inputs = append(slices.Clip(g.Inputs), "-i", paletteFile)
+	second.Filter += fmt.Sprintf(";%s[%d:v]paletteuse=dither=%s:diff_mode=rectangle[gif]", g.VideoOut, g.inputCount(), pal.dither)
+	second.VideoOut = "[gif]"
+	args, err := second.Args("-c:v", name, "-loop", "0", "-progress", "pipe:1", "-nostats", "-f", "gif", output)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := os.MkdirTemp("", "btelo-palette-*")
+	if err != nil {
+		return nil, err
+	}
+	return &Job{Passes: [][]string{measure, args}, Blind: 1, Length: g.Length, Encoder: name, Dir: dir}, nil
 }

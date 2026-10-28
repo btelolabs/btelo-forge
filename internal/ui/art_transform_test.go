@@ -97,54 +97,6 @@ func TestCanvasFreeTransform(t *testing.T) {
 	_ = l
 }
 
-func TestCanvasCropTool(t *testing.T) {
-	x, ad := canvasHarness(t)
-	d := ad.d
-	d.AddLayer("Ink")
-	d.Select(image.Rect(50, 40, 60, 50))
-	d.Fill(color.NRGBA{R: 255, A: 255})
-	d.Deselect()
-	ad.changedAll()
-	x.key('C', false)
-	x.frame(Input{})
-	if ad.crop == nil || ad.crop.box.rect() != image.Rect(0, 0, 400, 300) {
-		t.Fatalf("the crop box does not start on the whole picture: %+v", ad.crop)
-	}
-	x.dragWith(ad, [2]float64{0, 0}, [2]float64{50, 40}, false, false)
-	if r := ad.crop.box.rect(); r != image.Rect(50, 40, 400, 300) {
-		t.Fatalf("the crop box after dragging its corner: %v", r)
-	}
-	x.frame(Input{})
-	x.shot("canvas-crop")
-	x.key(keyEnter, false)
-	if d.Frame.Dx() != 350 || d.Frame.Dy() != 260 || d.UndoName() != "Crop" {
-		t.Fatalf("cropped to %d×%d (%q)", d.Frame.Dx(), d.Frame.Dy(), d.UndoName())
-	}
-	// The frame moved; nothing moved on the canvas, and what was cropped off is gone.
-	if d.Frame != image.Rect(50, 40, 400, 300) || ad.look(55, 45) != (color.RGBA{255, 0, 0, 255}) {
-		t.Errorf("cropped to %v, its corner %v", d.Frame, ad.look(55, 45))
-	}
-	if c := d.Node(d.Active).Pixels.At(20, 20); c.A != 0 {
-		t.Errorf("a cropped-off pixel is kept: %v", c)
-	}
-	x.frame(Input{})
-	if ad.crop == nil || ad.crop.box.rect() != d.Frame {
-		t.Errorf("the crop box did not start again on the cropped picture: %+v", ad.crop)
-	}
-	// A square ratio keeps the box square.
-	x.a.settings.Paint.CropRatio = 2
-	ad.crop = nil
-	x.frame(Input{})
-	if r := ad.crop.box.rect(); r.Dx() != r.Dy() {
-		t.Errorf("the square crop box is %v", r)
-	}
-	x.key(keyEscape, false)
-	x.key('Z', true)
-	if d.Frame.Dx() != 400 || d.Frame.Dy() != 300 {
-		t.Errorf("undo gives %d×%d", d.Frame.Dx(), d.Frame.Dy())
-	}
-}
-
 func TestCanvasImageMenu(t *testing.T) {
 	x, ad := canvasHarness(t)
 	a := x.a

@@ -52,7 +52,8 @@ func (a *App) drawSelectionCard(r gfx.Rect) float32 {
 		h += u.px(34)
 	}
 	card := gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: h}
-	u.c.RoundRect(card, u.px(10), gfx.Mix(colSurface, colAccent, 0.12))
+	u.c.Fill(card, colSurface)
+	u.c.Outline(card, max(1, u.px(1)), colBorder)
 	in := card.Inset(u.px(12))
 	title := u.t("Video clip")
 	if len(ids) > 1 {

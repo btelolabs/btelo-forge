@@ -11,14 +11,15 @@ import (
 )
 
 const (
-	icClone       = "\ue982"
-	icGradient    = "\ue3e9"
-	icShapes      = "\ue574"
-	icShapeRect   = "\ue3c1"
-	icShapeCircle = "\ue40c"
-	icShapeLine   = "\ue15b"
-	icPolygon     = "\ue86b"
-	icStar        = "\ue838"
+	icClone        = "\ue982"
+	icGradient     = "\ue3e9"
+	icMaskGradient = "\ue3db"
+	icShapes       = "\ue574"
+	icShapeRect    = "\ue3c1"
+	icShapeCircle  = "\ue40c"
+	icShapeLine    = "\ue15b"
+	icPolygon      = "\ue86b"
+	icStar         = "\ue838"
 )
 
 // The shape tool's shapes, in the order of its options; each makes a vector layer, as Affinity Designer's shape
@@ -72,7 +73,7 @@ func snap45(x0, y0, x1, y1 float64) (float64, float64) {
 func (a *App) drawEnd(ad *artDoc) (from, to [2]float64) {
 	u := &a.u
 	from, to = ad.drawFrom, ad.drawTo
-	line := a.artTool == toolGradient || a.shapeKind() == shapeLine
+	line := a.artTool == toolGradient || a.artTool == toolMaskGradient || a.shapeKind() == shapeLine
 	switch {
 	case line && u.shift:
 		to[0], to[1] = snap45(from[0], from[1], to[0], to[1])
@@ -91,6 +92,11 @@ func (a *App) finishDrawing(ad *artDoc) {
 	p := &a.settings.Paint
 	from, to := a.drawEnd(ad)
 	ad.drawing = false
+	if a.artTool == toolMaskGradient {
+		g := paint.Gradient{Kind: paint.GradientKind(p.MaskGradientKind), From: from, To: to, Reverse: p.MaskGradientReverse}
+		a.artRun(ad, func() error { return ad.d.MaskGradient(g) })
+		return
+	}
 	if a.artTool == toolGradient {
 		start, end := a.gradientColours()
 		g := paint.Gradient{Kind: paint.GradientKind(p.GradientKind), From: from, To: to, Start: start, End: end,
@@ -129,7 +135,7 @@ func (a *App) showShape(ad *artDoc) {
 		}
 		s, err := ad.d.BeginVector(0, v, fmt.Sprintf("%s %d", a.u.t(shapeNames[kind]), len(ad.d.Layers())+1), "Add shape")
 		if err != nil {
-			a.toast(a.describe(err), true)
+			a.artFailed(ad, err)
 			return
 		}
 		ad.shape = s
@@ -145,7 +151,7 @@ func (a *App) newShape(kind int, from, to [2]float64) paint.Vector {
 	if kind == shapeLine {
 		path := []paint.Subpath{{Nodes: []paint.PathNode{sharpNode(paint.Pt{X: from[0], Y: from[1]}), sharpNode(paint.Pt{X: to[0], Y: to[1]})}}}
 		return paint.Vector{Kind: paint.VectorCurve, Path: path, M: paint.Identity,
-			Stroke: paint.VectorStroke{Paint: solidPaint(a.brush.Color), Width: max(p.ShapeWidth, 1), Cap: paint.CapRound}}
+			Stroke: paint.VectorStroke{Paint: solidPaint(a.shapeColours()[0]), Width: max(p.ShapeWidth, 1), Cap: paint.CapRound}}
 	}
 	x0, y0 := min(from[0], to[0]), min(from[1], to[1])
 	v := paint.Vector{Size: paint.Pt{X: math.Abs(to[0] - from[0]), Y: math.Abs(to[1] - from[1])}, M: paint.Translate(x0, y0),
@@ -161,10 +167,10 @@ func (a *App) newShape(kind int, from, to [2]float64) paint.Vector {
 		v.Kind = paint.VectorRect
 	}
 	if p.ShapeFill {
-		v.Fill = solidPaint(a.brush.Color)
+		v.Fill = solidPaint(a.shapeColours()[0])
 	}
 	if p.ShapeStroke {
-		v.Stroke = paint.VectorStroke{Paint: solidPaint(a.backgroundColor()), Width: max(p.ShapeWidth, 0)}
+		v.Stroke = paint.VectorStroke{Paint: solidPaint(a.shapeColours()[1]), Width: max(p.ShapeWidth, 0)}
 	}
 	return v
 }
@@ -190,7 +196,7 @@ func (a *App) beginClone(ad *artDoc, cx, cy float64) {
 	}
 	s, changed, err := ad.d.BeginClone(a.brush, ad.cloneOffset.X, ad.cloneOffset.Y, p.CloneAllLayers, cx, cy)
 	if err != nil {
-		a.toast(a.describe(err), true)
+		a.artFailed(ad, err)
 		u.active = ""
 		return
 	}
@@ -210,7 +216,7 @@ func (a *App) drawFillOverlay(ad *artDoc, vp gfx.Rect) {
 		from, to := a.drawEnd(ad)
 		x0, y0 := ad.toScreen(vp, from)
 		x1, y1 := ad.toScreen(vp, to)
-		if a.artTool == toolGradient || a.shapeKind() == shapeLine {
+		if a.artTool == toolGradient || a.artTool == toolMaskGradient || a.shapeKind() == shapeLine {
 			u.c.Line(x0, y0, x1, y1, w+2, gfx.Alpha(colBlack, 0.5))
 			u.c.Line(x0, y0, x1, y1, w, colWhite)
 			for _, p := range [][2]float32{{x0, y0}, {x1, y1}} {
@@ -221,7 +227,7 @@ func (a *App) drawFillOverlay(ad *artDoc, vp gfx.Rect) {
 		}
 		box := gfx.Rect{X: min(x0, x1), Y: min(y0, y1), W: max(x0, x1) - min(x0, x1), H: max(y0, y1) - min(y0, y1)}
 		if a.shapeKind() == shapeEllipse {
-			u.c.RoundOutline(box, min(box.W, box.H)/2, w, colWhite)
+			u.c.Outline(box, w, colWhite)
 		}
 		drawAnts(u, box)
 		return
@@ -282,11 +288,11 @@ func (a *App) drawGradientOptions(r gfx.Rect) {
 		bg := colSurface
 		switch {
 		case p.GradientKind == i:
-			bg = gfx.Mix(colSurface, colAccent, 0.45)
+			bg = colSelected
 		case u.hover(id, b):
 			bg = colSurfaceHi
 		}
-		u.c.RoundRect(b, u.px(6), bg)
+		u.c.Fill(b, bg)
 		a.drawGradientIcon(b.Inset(u.px(5)), paint.GradientKind(i))
 		u.hint(id, u.t(gradientNames[i]), b)
 		if u.clicked(id, b) {
@@ -307,6 +313,40 @@ func (a *App) drawGradientOptions(r gfx.Rect) {
 	if done {
 		a.saveSettings()
 	}
+}
+
+// drawMaskGradientOptions is the mask gradient tool's options bar: the gradient's shape, reversing it, and a hint.
+func (a *App) drawMaskGradientOptions(r gfx.Rect) {
+	u := &a.u
+	p := &a.settings.Paint
+	x := r.X
+	for i := range paint.GradientKinds {
+		b := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
+		id := fmt.Sprintf("art/maskgradient/kind/%d", i)
+		bg := colSurface
+		switch {
+		case p.MaskGradientKind == i:
+			bg = colSelected
+		case u.hover(id, b):
+			bg = colSurfaceHi
+		}
+		u.c.Fill(b, bg)
+		a.drawGradientIcon(b.Inset(u.px(5)), paint.GradientKind(i))
+		u.hint(id, u.t(gradientNames[i]), b)
+		if u.clicked(id, b) {
+			p.MaskGradientKind = i
+			a.saveSettings()
+		}
+		x += u.px(32)
+	}
+	x += u.px(10)
+	if on := u.checkbox("art/maskgradient/reverse", gfx.Rect{X: x, Y: r.Y, W: u.px(90), H: r.H}, u.t("Reverse"), p.MaskGradientReverse); on != p.MaskGradientReverse {
+		p.MaskGradientReverse = on
+		a.saveSettings()
+	}
+	x += u.px(100)
+	u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H},
+		u.t("Drag across the layer to fade it out: its mask goes from white, showing it, to black, hiding it"), colDim, 0)
 }
 
 // drawGradientIcon draws a small picture of a gradient shape, black to white.
@@ -349,7 +389,7 @@ func (a *App) drawCloneOptions(r gfx.Rect) {
 
 // drawShapeOptions is the shape tool's options bar: the shape, its fill (the foreground colour) and stroke (the
 // background colour), the stroke's width and a rectangle's corners.
-func (a *App) drawShapeOptions(r gfx.Rect) {
+func (a *App) drawShapeOptions(ad *artDoc, r gfx.Rect) {
 	u := &a.u
 	p := &a.settings.Paint
 	x := r.X
@@ -361,6 +401,7 @@ func (a *App) drawShapeOptions(r gfx.Rect) {
 		x += u.px(32)
 	}
 	x += u.px(12)
+	x = a.drawCombineButtons(ad, x, r)
 	kind := a.shapeKind()
 	line := kind == shapeLine
 	if !line {

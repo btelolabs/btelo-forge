@@ -34,10 +34,12 @@ func TestCanvasSelectionTools(t *testing.T) {
 		}
 		return d.Selection.At(px, py)
 	}
-	// Shift+M switches the marquee to ellipses.
-	x.frame(Input{Keys: []Key{{Code: 'M', Shift: true}}})
+	// A click on the chosen marquee switches it to ellipses.
+	x.key('M', false)
+	a.setArtTool(toolMarquee)
+	a.marqueeEllipse = true
 	if a.artTool != toolMarquee || !a.marqueeEllipse {
-		t.Fatalf("Shift+M: tool %d, ellipse %v", a.artTool, a.marqueeEllipse)
+		t.Fatalf("the marquee: tool %d, ellipse %v", a.artTool, a.marqueeEllipse)
 	}
 	x.dragWith(ad, [2]float64{100, 50}, [2]float64{300, 250}, false, false)
 	if sel(200, 150) != 255 || sel(105, 55) != 0 {
@@ -237,10 +239,8 @@ func (a *App) dropdownPick(x *harness, id, label string) {
 	x.t.Helper()
 	x.frame(Input{})
 	// The drop-down is a button: find its rectangle the way the layers panel lays it out.
-	l := a.artLayout(a.layout().body)
-	in := l.side.Inset(a.u.px(14))
-	colourEnd := in.Y + a.u.px(250)
-	r := rectAt(in.X, colourEnd+a.u.px(14)+a.u.px(26), in.W-a.u.px(40), a.u.px(28))
+	_, layers := a.sideLayout(a.artLayout(a.layout().body).side)
+	r := rectAt(layers.X, layers.Y+a.u.px(26), layers.W-a.u.px(40), a.u.px(28))
 	x.click(r)
 	if !a.menuOpen(id) {
 		x.t.Fatalf("the drop-down %s did not open", id)

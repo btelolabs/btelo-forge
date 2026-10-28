@@ -10,7 +10,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
-var settingsPages = msgs("General", "AI (MCP)", "Phone", "Hotkeys", "Extensions", "About")
+var settingsPages = msgs("General", "AI (MCP)", "Phone", "Hotkeys", "File types", "Extensions", "About")
 
 // The settings pages, by their place in settingsPages.
 const (
@@ -18,6 +18,7 @@ const (
 	settingsMCPPage
 	settingsPhonePage
 	settingsHotkeysPage
+	settingsFileTypesPage
 	settingsExtensionsPage
 	settingsAboutPage
 )
@@ -61,12 +62,12 @@ func (a *App) drawSettings() {
 		id := fmt.Sprintf("settings/page/%d", i)
 		bg, fg := colPanel, colDim
 		if i == a.settingsPage {
-			bg, fg = gfx.Mix(colSurface, colAccent, 0.2), colAccentHi
+			bg, fg = colSelected, colText
 		} else if u.hover(id, row) {
 			bg, fg = colSurface, colText
 			u.cursor = CursorHand
 		}
-		u.c.RoundRect(row, u.px(7), bg)
+		u.c.Fill(row, bg)
 		u.label(u.face(13), rectAt(row.X+u.px(12), row.Y, row.W-u.px(16), row.H), u.t(name), fg, 0)
 		if u.clicked(id, row) {
 			a.settingsPage = i
@@ -83,6 +84,8 @@ func (a *App) drawSettings() {
 		a.settingsPhone(body)
 	case settingsHotkeysPage:
 		a.settingsHotkeys(body)
+	case settingsFileTypesPage:
+		a.settingsFileTypes(body)
 	case settingsExtensionsPage:
 		a.settingsExtensions(body)
 	case settingsAboutPage:
@@ -125,7 +128,7 @@ func (a *App) settingsGeneral(r gfx.Rect) {
 		dir = u.t("Next to the original video")
 	}
 	box := rectAt(r.X, y, r.W, u.px(36))
-	u.c.RoundRect(box, u.px(7), colSurface)
+	u.c.Fill(box, colSurface)
 	u.label(u.face(12.5), box.Inset(u.px(10)), dir, colText, 0)
 	y += u.px(44)
 	if u.button("settings/dir", rectAt(r.X, y, u.px(150), u.px(32)), icFolder, u.t("Choose folder…"), plain, true) {
@@ -143,7 +146,7 @@ func (a *App) settingsGeneral(r gfx.Rect) {
 	info, failed := a.toolsStatus()
 	col := colDim
 	if failed {
-		col = gfx.Hex(0xffb4b2)
+		col = colDangerText
 	}
 	if info == "" {
 		info = u.tf("Version %s · %s", a.tools.found.Version, a.tools.found.FFmpeg)
@@ -172,12 +175,12 @@ func (a *App) settingsMCP(r gfx.Rect) {
 		if s != nil && s.mcpErr != nil {
 			msg += ": " + s.mcpErr.Error()
 		}
-		a.paragraph(r.X, y, r.W, msg, 12.5, gfx.Hex(0xffb4b2))
+		a.paragraph(r.X, y, r.W, msg, 12.5, colDangerText)
 		return
 	}
 	u.label(u.face(12), rectAt(r.X, y, u.px(90), u.px(30)), u.t("Address"), colDim, 0)
 	addr := rectAt(r.X+u.px(90), y, r.W-u.px(90), u.px(30))
-	u.c.RoundRect(addr, u.px(6), colSurface)
+	u.c.Fill(addr, colSurface)
 	u.label(u.face(12.5), addr.Inset(u.px(8)), s.mcpURL, colAccentHi, 0)
 	y += u.px(44)
 	// Each kind of work has its own server and setup, so the AI hears only about the tools it needs.
@@ -193,7 +196,7 @@ func (a *App) settingsMCP(r gfx.Rect) {
 	}
 	y += u.px(50)
 	box := rectAt(r.X, y, r.W, r.Bottom()-y)
-	u.c.RoundRect(box, u.px(8), gfx.Mix(colSurface, colBlack, 0.3))
+	u.c.Fill(box, gfx.Mix(colSurface, colBlack, 0.3))
 	inner := box.Inset(u.px(10))
 	if u.hover("settings/mcp/text", box) && u.wheel != 0 {
 		a.mcpScroll -= u.wheel * u.px(60)
@@ -207,7 +210,7 @@ func (a *App) settingsMCP(r gfx.Rect) {
 	if content > inner.H {
 		h := max(inner.H*inner.H/content, u.px(24))
 		sy := inner.Y + (inner.H-h)*a.mcpScroll/(content-inner.H)
-		u.c.RoundRect(rectAt(box.Right()-u.px(7), sy, u.px(3), h), u.px(1.5), colSurfaceHi)
+		u.c.Fill(rectAt(box.Right()-u.px(7), sy, u.px(3), h), colSurfaceHi)
 	}
 }
 
@@ -238,11 +241,11 @@ func (a *App) settingsPhone(r gfx.Rect) {
 		if s != nil && s.phoneErr != nil {
 			msg += ": " + s.phoneErr.Error()
 		}
-		a.paragraph(r.X, y, r.W, msg, 12.5, gfx.Hex(0xffb4b2))
+		a.paragraph(r.X, y, r.W, msg, 12.5, colDangerText)
 		return
 	}
 	if len(s.phoneURL) == 0 {
-		a.paragraph(r.X, y, r.W, u.t("This computer has no local network address; connect it to Wi-Fi or a router first."), 12.5, gfx.Hex(0xffb4b2))
+		a.paragraph(r.X, y, r.W, u.t("This computer has no local network address; connect it to Wi-Fi or a router first."), 12.5, colDangerText)
 		return
 	}
 	url := s.phoneURL[0]
@@ -279,7 +282,7 @@ func (a *App) settingsPhone(r gfx.Rect) {
 		dir = err.Error()
 	}
 	box := rectAt(r.X, y, r.W-u.px(160), u.px(32))
-	u.c.RoundRect(box, u.px(7), colSurface)
+	u.c.Fill(box, colSurface)
 	u.label(u.face(12), box.Inset(u.px(10)), dir, colText, 0)
 	if u.button("settings/phone/dir", rectAt(box.Right()+u.px(8), y, u.px(152), u.px(32)), icFolder, u.t("Choose folder…"), plain, true) {
 		a.chooseExportDir()

@@ -50,38 +50,41 @@ func (u *ctx) buttonWidth(glyph, text string) float32 {
 // button draws a labelled button with an optional icon and reports a click.
 func (u *ctx) button(id string, r gfx.Rect, glyph, text string, kind buttonKind, enabled bool) bool {
 	hot := enabled && u.hover(id, r)
-	bg, fg := colSurface, colText
+	bg, fg, edge := colSurface, colText, colBorder
 	switch kind {
 	case primary:
-		bg, fg = colAccent, colOnAccent
+		bg, fg, edge = colPrimary, colOnPrimary, color.RGBA{}
 		if hot {
-			bg = colAccentHi
+			bg = colPrimaryHi
 		}
 	case danger:
-		bg = gfx.Mix(colSurface, colDanger, 0.25)
+		bg, edge = gfx.Mix(colSurface, colDanger, 0.22), gfx.Mix(colBorder, colDanger, 0.35)
 		if hot {
-			bg = gfx.Mix(colSurface, colDanger, 0.45)
+			bg = gfx.Mix(colSurface, colDanger, 0.4)
 		}
 	case ghost:
-		bg = color.RGBA{}
+		bg, edge = color.RGBA{}, color.RGBA{}
 		if hot {
-			bg = colSurface
+			bg = colSurfaceHi
 		}
 	default:
 		if hot {
-			bg = colSurfaceHi
+			bg, edge = colSurfaceHi, colBorderHi
 		}
 	}
 	if !enabled {
 		fg = colFaint
 		if kind == primary {
-			bg = gfx.Mix(colSurface, colAccent, 0.3)
+			bg = gfx.Mix(colSurface, colPrimary, 0.12)
 		}
 	}
 	if u.active == id && enabled {
 		bg = gfx.Mix(bg, colBlack, 0.15)
 	}
-	u.c.RoundRect(r, u.px(6), bg)
+	u.c.Fill(r, bg)
+	if edge.A > 0 {
+		u.c.Outline(r, max(1, u.px(1)), edge)
+	}
 	if hot {
 		u.cursor = CursorHand
 	}
@@ -116,9 +119,9 @@ func (u *ctx) iconButton(id string, r gfx.Rect, glyph, hint string, on, enabled 
 		fg = colText
 	}
 	if on {
-		u.c.RoundRect(r, u.px(6), gfx.Mix(colSurface, colAccent, 0.35))
+		u.c.Fill(r, colSelected)
 	} else if hot {
-		u.c.RoundRect(r, u.px(6), colSurface)
+		u.c.Fill(r, colSurfaceHi)
 	}
 	if !enabled {
 		fg = colFaint
@@ -141,16 +144,17 @@ func (u *ctx) chips(id string, r gfx.Rect, options []string, selected int, enabl
 		cr := gfx.Rect{X: r.X + float32(i)*(w+gap), Y: r.Y, W: w, H: r.H}
 		cid := id + "/" + o
 		hot := enabled && u.hover(cid, cr)
-		bg, fg := colSurface, colDim
+		bg, fg, edge := colSurface, colDim, colBorder
 		if i == selected {
-			bg, fg = gfx.Mix(colSurface, colAccent, 0.55), colOnAccent
+			bg, fg, edge = colSelected, colText, colBorderHi
 		} else if hot {
 			bg, fg = colSurfaceHi, colText
 		}
 		if !enabled {
 			fg = colFaint
 		}
-		u.c.RoundRect(cr, u.px(5), bg)
+		u.c.Fill(cr, bg)
+		u.c.Outline(cr, max(1, u.px(1)), edge)
 		u.label(f, cr, o, fg, 0.5)
 		if hot {
 			u.cursor = CursorHand
@@ -175,7 +179,7 @@ func (u *ctx) tabs(id string, r gfx.Rect, names []string, selected int) int {
 		switch {
 		case i == selected:
 			f, fg = u.bold(13), colText
-			u.c.RoundRect(gfx.Rect{X: tr.X + u.px(8), Y: tr.Bottom() - u.px(2.5), W: tr.W - u.px(16), H: u.px(2.5)}, u.px(1.25), colAccent)
+			u.c.Fill(gfx.Rect{X: tr.X + u.px(12), Y: tr.Bottom() - u.px(2), W: tr.W - u.px(24), H: u.px(2)}, colText)
 		case hot:
 			fg = colText
 			u.cursor = CursorHand
@@ -193,20 +197,22 @@ func (u *ctx) slider(id string, r gfx.Rect, value *float64, lo, hi float64, enab
 	track := gfx.Rect{X: r.X + u.px(7), Y: r.Y + r.H/2 - u.px(2), W: r.W - u.px(14), H: u.px(4)}
 	t := float32((*value - lo) / (hi - lo))
 	t = min(max(t, 0), 1)
-	u.c.RoundRect(track, u.px(2), colSurfaceHi)
-	fill := colAccent
+	u.c.Fill(track, colSurfaceHi)
+	fill := gfx.Mix(colDim, colText, 0.6)
 	if !enabled {
 		fill = colFaint
 	}
-	u.c.RoundRect(gfx.Rect{X: track.X, Y: track.Y, W: track.W * t, H: track.H}, u.px(2), fill)
+	u.c.Fill(gfx.Rect{X: track.X, Y: track.Y, W: track.W * t, H: track.H}, fill)
 	knob := track.X + track.W*t
 	hot := enabled && (u.hover(id, r) || u.active == id)
-	radius := u.px(6)
+	half := u.px(5)
 	if hot {
-		radius = u.px(7)
+		half = u.px(6)
 		u.cursor = CursorHand
 	}
-	u.c.Circle(knob, r.Y+r.H/2, radius, colWhite)
+	k := gfx.Rect{X: knob - half, Y: r.Y + r.H/2 - half, W: 2 * half, H: 2 * half}
+	u.c.Fill(k.Inset(-max(1, u.px(1))), colBackground)
+	u.c.Fill(k, colWhite)
 	if !enabled {
 		return false, false
 	}
@@ -231,10 +237,11 @@ func (u *ctx) checkbox(id string, r gfx.Rect, text string, on bool) bool {
 	hot := u.hover(id, r)
 	box := gfx.Rect{X: r.X, Y: r.Y + (r.H-u.px(18))/2, W: u.px(18), H: u.px(18)}
 	if on {
-		u.c.RoundRect(box, u.px(4), colAccent)
-		u.icon(icCheck, box, 11, colOnAccent)
+		u.c.Fill(box, colPrimary)
+		u.icon(icCheck, box, 12, colOnPrimary)
 	} else {
-		u.c.RoundOutline(box, u.px(4), u.px(1.5), colDim)
+		u.c.Fill(box, colSurface)
+		u.c.Outline(box, max(1, u.px(1)), colBorderHi)
 	}
 	col := colDim
 	if hot {
@@ -272,8 +279,9 @@ func (u *ctx) drawTip(screen gfx.Rect) time.Duration {
 		y = u.tip.at.Y - h - u.px(6)
 	}
 	r := gfx.Rect{X: x, Y: y, W: w, H: h}
-	u.c.RoundRect(gfx.Rect{X: r.X, Y: r.Y + u.px(2), W: r.W, H: r.H}, u.px(5), gfx.Alpha(colBlack, 0.4))
-	u.c.RoundRect(r, u.px(5), gfx.Hex(0x3a3f4a))
+	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(2), W: r.W, H: r.H}, gfx.Alpha(colBlack, 0.4))
+	u.c.Fill(r, colSelected)
+	u.c.Outline(r, max(1, u.px(1)), colBorderHi)
 	u.label(f, r, u.tip.text, colText, 0.5)
 	return 0
 }
@@ -298,16 +306,17 @@ func (u *ctx) flowChipsSome(id string, r gfx.Rect, options []string, selected in
 		cr := gfx.Rect{X: x, Y: y, W: w, H: r.H}
 		cid := id + "/" + o
 		hot := on && u.hover(cid, cr)
-		bg, fg := colSurface, colDim
+		bg, fg, edge := colSurface, colDim, colBorder
 		switch {
 		case i == selected:
-			bg, fg = gfx.Mix(colSurface, colAccent, 0.55), colOnAccent
+			bg, fg, edge = colSelected, colText, colBorderHi
 		case hot:
 			bg, fg = colSurfaceHi, colText
 		case !on:
 			fg = colFaint
 		}
-		u.c.RoundRect(cr, u.px(5), bg)
+		u.c.Fill(cr, bg)
+		u.c.Outline(cr, max(1, u.px(1)), edge)
 		u.label(f, cr, o, fg, 0.5)
 		if hot {
 			u.cursor = CursorHand

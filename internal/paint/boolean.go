@@ -40,16 +40,49 @@ func snapPt(p Pt) Pt {
 }
 
 // operand is one object's filled area: its outline cut into the pieces the boolean works with, in canvas space,
-// and its fill rule. Its coverage is reckoned from those pieces, so it agrees with them exactly.
+// and its fill rule. Its coverage is reckoned from those pieces, so it agrees with them exactly. The pieces are
+// filed in bands across the y axis, each band listing those reaching into it, so finding whether a point is
+// inside reads only the pieces level with it rather than all of them.
 type operand struct {
 	edges []boolEdge
 	rule  FillRule
+	y0    float64   // the top of the first band
+	band  float64   // each band's height
+	bands [][]int32 // the pieces reaching into each band, by index into edges
+}
+
+// index files the operand's pieces in bands, about four pieces to a band.
+func (o *operand) index() {
+	if len(o.edges) == 0 {
+		return
+	}
+	y0, y1 := math.Inf(1), math.Inf(-1)
+	for _, e := range o.edges {
+		y0, y1 = min(y0, e.a.Y, e.b.Y), max(y1, e.a.Y, e.b.Y)
+	}
+	n := min(max(len(o.edges)/4, 1), 1<<14)
+	o.y0, o.band = y0, max((y1-y0)/float64(n), boolGrid)
+	o.bands = make([][]int32, n)
+	for i, e := range o.edges {
+		for k, last := o.bandOf(min(e.a.Y, e.b.Y)), o.bandOf(max(e.a.Y, e.b.Y)); k <= last; k++ {
+			o.bands[k] = append(o.bands[k], int32(i))
+		}
+	}
+}
+
+// bandOf is the band holding y, the first or last one for a y beyond them.
+func (o *operand) bandOf(y float64) int {
+	return min(max(int((y-o.y0)/o.band), 0), len(o.bands)-1)
 }
 
 // inside reports whether the operand covers p.
-func (o operand) inside(p Pt) bool {
+func (o *operand) inside(p Pt) bool {
+	if len(o.bands) == 0 {
+		return false
+	}
 	w := 0
-	for _, e := range o.edges {
+	for _, i := range o.bands[o.bandOf(p.Y)] {
+		e := o.edges[i]
 		a, b := e.a, e.b
 		if (a.Y <= p.Y) != (b.Y <= p.Y) {
 			if x := a.X + (p.Y-a.Y)*(b.X-a.X)/(b.Y-a.Y); x > p.X {
@@ -97,9 +130,13 @@ type boolEdge struct {
 func Combine(op BoolOp, objects []Vector) []Subpath {
 	ops := make([]operand, len(objects))
 	var edges []boolEdge
-	for i, v := range objects {
-		polys, _ := flatten(v.Outline(), v.M, boolTolerance)
+	for i := range objects {
+		v := &objects[i]
+		polys, _ := flatten(v.Combined(), v.M, boolTolerance)
 		ops[i].rule = v.Rule
+		if v.Compound() {
+			ops[i].rule = NonZero // the shapes' outline together winds once
+		}
 		for _, p := range polys {
 			ring := make([]Pt, 0, len(p))
 			for _, q := range p {
@@ -123,6 +160,9 @@ func Combine(op BoolOp, objects []Vector) []Subpath {
 	for _, e := range edges {
 		ops[e.of].edges = append(ops[e.of].edges, e)
 	}
+	for i := range ops {
+		ops[i].index()
+	}
 	// Keep the edges the result has inside on one side only, turned to have it on the left.
 	var kept []boolEdge
 	in := make([]bool, len(ops))
@@ -130,12 +170,12 @@ func Combine(op BoolOp, objects []Vector) []Subpath {
 		d := e.b.Sub(e.a)
 		n := d.Perp().Unit().Mul(boolGrid / 8)
 		m := e.a.Add(d.Mul(0.5))
-		for i, o := range ops {
-			in[i] = o.inside(m.Add(n))
+		for i := range ops {
+			in[i] = ops[i].inside(m.Add(n))
 		}
 		left := op.covered(in)
-		for i, o := range ops {
-			in[i] = o.inside(m.Sub(n))
+		for i := range ops {
+			in[i] = ops[i].inside(m.Sub(n))
 		}
 		right := op.covered(in)
 		switch {
@@ -355,7 +395,7 @@ func (d *Doc) Boolean(op BoolOp, ids []int) (*Node, error) {
 
 // mapPaint is a paint placed in a space that m maps to the canvas, placed in the canvas instead.
 func mapPaint(p VectorPaint, m Affine) VectorPaint {
-	if p.Kind == PaintLinear || p.Kind == PaintRadial {
+	if p.Gradient() {
 		p.From, p.To = m.Map(p.From), m.Map(p.To)
 		p.Stops = slices.Clone(p.Stops)
 	}

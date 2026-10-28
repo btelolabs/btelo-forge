@@ -18,10 +18,25 @@ func TestEveryPresetIsRecognisedAsItself(t *testing.T) {
 			}
 		}
 	}
-	size := exportPresets[len(exportPresets)-1].export(false)
+	byID := func(id string) project.Export {
+		for _, p := range exportPresets {
+			if p.id == id {
+				return p.export(false)
+			}
+		}
+		t.Fatalf("no preset %q", id)
+		return project.Export{}
+	}
+	size := byID("size")
 	size.TargetMB = 8
 	if exportPresets[matchingPreset(size, false)].id != "size" {
 		t.Fatal("the size preset should match any target size")
+	}
+	// Settings an animation ignores, kept for switching back to a video, do not make a GIF custom.
+	gif := byID("gif")
+	gif.Audio, gif.TargetMB, gif.Hardware = project.AudioHigh, 25, true
+	if k := matchingPreset(gif, false); k < 0 || exportPresets[k].id != "gif" {
+		t.Fatalf("a GIF with leftover video settings is recognised as %d", k)
 	}
 	if matchingPreset(project.Export{Quality: project.Smallest, FPS: 60}, false) != -1 {
 		t.Fatal("a mix of settings should be custom")

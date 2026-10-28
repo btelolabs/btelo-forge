@@ -6,6 +6,8 @@ var (
 	setDisplayAffinity = user32.NewProc("SetWindowDisplayAffinity")
 	registerHotKey     = user32.NewProc("RegisterHotKey")
 	unregisterHotKey   = user32.NewProc("UnregisterHotKey")
+	isWindowVisible    = user32.NewProc("IsWindowVisible")
+	getForeground      = user32.NewProc("GetForegroundWindow")
 )
 
 const wmHotkey = 0x0312
@@ -16,11 +18,41 @@ func (w *Window) Minimize() {
 	showWindow.Call(w.Handle, showMinimized)
 }
 
-// Restore brings a minimized window back and in front.
+// Restore brings a minimized or hidden window back and in front, maximized again if it was; one already showing
+// only comes to the front.
 func (w *Window) Restore() {
-	const restore = 9
-	showWindow.Call(w.Handle, restore)
+	w.show()
 	setForeground.Call(w.Handle)
+}
+
+// show makes the window visible as it was before it was hidden or minimized.
+func (w *Window) show() {
+	const showAsWas, restore = 5, 9 // SW_SHOW keeps a hidden window's maximized state; SW_RESTORE ends a minimized one
+	if r, _, _ := isWindowVisible.Call(w.Handle); r == 0 {
+		showWindow.Call(w.Handle, showAsWas)
+	}
+	if r, _, _ := isIconic.Call(w.Handle); r != 0 {
+		showWindow.Call(w.Handle, restore)
+	}
+}
+
+// Hide takes the window off the screen, the taskbar and Alt+Tab; Restore brings it back.
+func (w *Window) Hide() {
+	const hide = 0
+	showWindow.Call(w.Handle, hide)
+}
+
+// Shown reports whether the window is on the screen and in front of the others, not minimized, hidden or behind
+// another program's window.
+func (w *Window) Shown() bool {
+	if r, _, _ := isWindowVisible.Call(w.Handle); r == 0 {
+		return false
+	}
+	if r, _, _ := isIconic.Call(w.Handle); r != 0 {
+		return false
+	}
+	front, _, _ := getForeground.Call()
+	return front == w.Handle
 }
 
 // ExcludeFromCapture keeps the window out of screen recordings and screenshots (the desktop behind it shows

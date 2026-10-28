@@ -73,7 +73,7 @@ func (a *App) scrolledBy(id string, r gfx.Rect, offset, contentH *float32, draw 
 	if content > r.H {
 		h := max(r.H*r.H/content, u.px(24))
 		y := r.Y + (r.H-h)*(*offset)/(content-r.H)
-		u.c.RoundRect(gfx.Rect{X: r.Right() - u.px(4), Y: y, W: u.px(3), H: h}, u.px(1.5), colSurfaceHi)
+		u.c.Fill(gfx.Rect{X: r.Right() - u.px(4), Y: y, W: u.px(3), H: h}, colSurfaceHi)
 	}
 }
 
@@ -129,14 +129,14 @@ func (a *App) drawOverlayPanel(r gfx.Rect) float32 {
 			bg = colSurfaceHi
 			u.cursor = CursorHand
 		}
-		u.c.RoundRect(row, u.px(8), bg)
+		u.c.Fill(row, bg)
 		sw := gfx.Rect{X: row.X + u.px(10), Y: row.Y + u.px(11), W: u.px(20), H: u.px(20)}
 		glyph, label := overlayLook(o)
 		if o.Kind == project.ImageOverlay {
-			u.c.RoundRect(sw, u.px(4), colImage)
+			u.c.Fill(sw, colImage)
 			u.icon(glyph, sw, 10, colText)
 		} else {
-			u.c.RoundRect(sw, u.px(4), gfx.RGBA(o.Color))
+			u.c.Fill(sw, gfx.RGBA(o.Color))
 		}
 		u.label(u.face(12.5), gfx.Rect{X: row.X + u.px(40), Y: row.Y, W: row.W - u.px(150), H: row.H}, label, colText, 0)
 		u.label(u.face(11), gfx.Rect{X: row.Right() - u.px(110), Y: row.Y, W: u.px(100), H: row.H}, clock(o.Start)+" – "+clock(o.End), colDim, 1)
@@ -212,11 +212,11 @@ func (a *App) drawOverlayEditor(r gfx.Rect, o project.Overlay) float32 {
 		for k, c := range textColors {
 			cr := gfx.Rect{X: r.X + float32(k)*(sw+u.px(8)), Y: y, W: sw, H: sw}
 			id := fmt.Sprintf("ov/color/%d", k)
-			u.c.RoundRect(cr, sw/2, gfx.RGBA(c))
+			u.c.Fill(cr, gfx.RGBA(c))
 			if o.Color == c {
-				u.c.RoundOutline(cr.Inset(-u.px(3)), sw/2+u.px(3), u.px(2), colAccent)
+				u.c.Outline(cr.Inset(-u.px(3)), u.px(2), colText)
 			} else if u.hover(id, cr) {
-				u.c.RoundOutline(cr.Inset(-u.px(2)), sw/2+u.px(2), u.px(1), colText)
+				u.c.Outline(cr.Inset(-u.px(2)), u.px(1), colText)
 				u.cursor = CursorHand
 			}
 			if u.clicked(id, cr) {
@@ -254,8 +254,11 @@ func (a *App) drawOverlayEditor(r gfx.Rect, o project.Overlay) float32 {
 		name, id string
 		value    *string
 	}{{u.t("Start"), "ov/start", &a.times.start}, {u.t("End"), "ov/end", &a.times.end}} {
+		// The button is as wide as its words in every language; the time field takes the rest.
+		here := u.t("Use playhead")
+		hw := max(u.px(100), u.buttonWidth("", here))
 		u.label(u.face(12.5), gfx.Rect{X: r.X, Y: y, W: u.px(62), H: u.px(32)}, field.name, colDim, 0)
-		_, done := u.textBox(field.id, gfx.Rect{X: r.X + u.px(64), Y: y, W: r.W - u.px(172), H: u.px(32)}, field.value, "0:00.00", false)
+		_, done := u.textBox(field.id, gfx.Rect{X: r.X + u.px(64), Y: y, W: r.W - u.px(72) - hw, H: u.px(32)}, field.value, "0:00.00", false)
 		if done {
 			if v, ok := parseClock(*field.value); ok {
 				a.change(func() {
@@ -268,7 +271,7 @@ func (a *App) drawOverlayEditor(r gfx.Rect, o project.Overlay) float32 {
 			}
 			a.times.id = -1
 		}
-		if u.button(field.id+"/here", gfx.Rect{X: r.Right() - u.px(100), Y: y, W: u.px(100), H: u.px(32)}, "", u.t("Use playhead"), plain, true) {
+		if u.button(field.id+"/here", gfx.Rect{X: r.Right() - hw, Y: y, W: hw, H: u.px(32)}, "", here, plain, true) {
 			a.change(func() {
 				if k == 0 {
 					a.p.SetOverlayRange(o.ID, a.playhead, math.Max(o.End, a.playhead+project.MinLength))

@@ -104,9 +104,9 @@ func (u *ctx) menuRows(items []menuItem, box gfx.Rect) []gfx.Rect {
 func (a *App) drawMenuList(id string, items []menuItem, box gfx.Rect, open int) (clicked, pointed int, rows []gfx.Rect) {
 	u := &a.u
 	f := u.face(13)
-	u.c.RoundRect(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, u.px(10), gfx.Alpha(colBlack, 0.35))
-	u.c.RoundRect(box, u.px(10), colSurface)
-	u.c.RoundOutline(box, u.px(10), max(1, u.px(1)), colBorder)
+	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, gfx.Alpha(colBlack, 0.35))
+	u.c.Fill(box, colSurface)
+	u.c.Outline(box, max(1, u.px(1)), colBorder)
 	rows = u.menuRows(items, box)
 	clicked, pointed = -1, -1
 	for i, it := range items {
@@ -125,14 +125,14 @@ func (a *App) drawMenuList(id string, items []menuItem, box gfx.Rect, open int) 
 		case it.disabled:
 			fg = colFaint
 		case u.hover(rid, row) || i == open:
-			u.c.RoundRect(row, u.px(6), gfx.Mix(colSurface, colAccent, 0.35))
+			u.c.Fill(row, colSelected)
 			u.cursor = CursorHand
 		}
 		if row.Contains(u.mx, u.my) {
 			pointed = i
 		}
 		if it.checked {
-			u.icon(icCheck, gfx.Rect{X: row.X + u.px(4), Y: row.Y, W: u.px(18), H: row.H}, 13, colAccentHi)
+			u.icon(icCheck, gfx.Rect{X: row.X + u.px(4), Y: row.Y, W: u.px(18), H: row.H}, 13, colText)
 		}
 		u.label(f, gfx.Rect{X: row.X + u.px(26), Y: row.Y, W: row.W - u.px(30), H: row.H}, it.label, fg, 0)
 		switch {
@@ -208,7 +208,7 @@ func (a *App) dropdown(id string, r gfx.Rect, options []string, selected int, se
 		bg = colSurfaceHi
 		u.cursor = CursorHand
 	}
-	u.c.RoundRect(r, u.px(6), bg)
+	u.c.Fill(r, bg)
 	label := ""
 	if selected >= 0 && selected < len(options) {
 		label = options[selected]

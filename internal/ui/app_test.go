@@ -168,9 +168,9 @@ func TestPastedImagesAndTabs(t *testing.T) {
 	x.frame(Input{})
 	x.shot("07-image")
 
-	x.key('T', true)
+	x.frame(Input{Keys: []Key{{Code: 'T', Ctrl: true, Shift: true}}})
 	if len(x.a.docs) != 2 || x.a.p != nil {
-		t.Fatal("Ctrl+T should open an empty tab")
+		t.Fatal("Ctrl+Shift+T should open an empty tab")
 	}
 	x.open(clipFile(t, x.mediaDir(), "other.mp4", "testsrc2=size=320x240", "3"))
 	if x.a.docs[0].p == x.a.docs[1].p || x.a.p.Canvas.Width != 320 {

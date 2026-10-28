@@ -213,7 +213,7 @@ func (a *App) drawTimeline(r gfx.Rect) {
 	}
 	u.c.Push(t.view)
 	for _, l := range t.lanes {
-		u.c.RoundRect(l.rect, u.px(6), gfx.Mix(colPanel, colBackground, 0.55))
+		u.c.Fill(l.rect, gfx.Mix(colPanel, colBackground, 0.55))
 		a.drawLaneHeader(l)
 	}
 	u.c.Pop()
@@ -289,11 +289,11 @@ func (a *App) drawLaneHeader(l lane) {
 	id := fmt.Sprintf("hdr/%d/%d", l.group, l.track)
 	bg := colSurface
 	if selected {
-		bg = gfx.Mix(colSurface, colAccent, 0.2)
+		bg = colSelected
 	} else if u.hover(id, r) {
 		bg = colSurfaceHi
 	}
-	u.c.RoundRect(r, u.px(6), bg)
+	u.c.Fill(r, bg)
 	glyph := map[group]string{groupVideo: icVideo, groupOverlay: icFont, groupMusic: icMusic}[l.group]
 	top := gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: min(r.H, u.px(26))}
 	u.icon(glyph, gfx.Rect{X: r.X + u.px(6), Y: top.Y, W: u.px(16), H: top.H}, 11, colDim)
@@ -443,7 +443,7 @@ func (a *App) trackBackground(t tracks) {
 			a.addPick(id)
 		}
 		u.c.Fill(box, gfx.Alpha(colAccent, 0.12))
-		u.c.RoundOutline(box, u.px(2), max(1, u.px(1)), colAccentHi)
+		u.c.Outline(box, max(1, u.px(1)), colAccentHi)
 	}
 	if u.letGo("tl/empty") {
 		if !u.drag.moved {
@@ -467,7 +467,7 @@ func (a *App) drawScrollbars(t tracks) {
 	u := &a.u
 	total := math.Max(a.scrollEnd(t), t.seconds())
 	if t.seconds() < total-1e-6 {
-		u.c.RoundRect(t.bar, t.bar.H/2, colSurface)
+		u.c.Fill(t.bar, colSurface)
 		w := max(t.bar.W*float32(t.seconds()/total), u.px(30))
 		x := t.bar.X + (t.bar.W-w)*float32(t.x0/(total-t.seconds()))
 		thumb := gfx.Rect{X: x, Y: t.bar.Y, W: w, H: t.bar.H}
@@ -475,7 +475,7 @@ func (a *App) drawScrollbars(t tracks) {
 		if u.hover("tl/bar", thumb) || u.active == "tl/bar" {
 			col = colFaint
 		}
-		u.c.RoundRect(thumb, t.bar.H/2, col)
+		u.c.Fill(thumb, col)
 		if u.press("tl/bar", thumb.Inset(-u.px(4))) {
 			u.drag.values[0] = a.view.scroll
 			if a.view.pps == 0 {
@@ -496,7 +496,7 @@ func (a *App) drawScrollbars(t tracks) {
 		if u.hover("tl/vbar", thumb.Inset(-u.px(3))) || u.active == "tl/vbar" {
 			col = colFaint
 		}
-		u.c.RoundRect(thumb, bar.W/2, col)
+		u.c.Fill(thumb, col)
 		if u.press("tl/vbar", thumb.Inset(-u.px(4))) {
 			u.drag.values[0] = float64(a.view.vscroll)
 		}

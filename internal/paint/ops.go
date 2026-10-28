@@ -101,7 +101,7 @@ func (d *Doc) Delete() error {
 	case parent != d.Root:
 		d.Active = parent.ID
 	default:
-		d.Active = d.Layers()[0].ID
+		d.Active = d.someNode()
 	}
 	d.Commit("Delete layer", m)
 	return nil
@@ -137,7 +137,7 @@ func (d *Doc) MergeDown() error {
 		// An adjustment merged down changes the layer under it, as Photoshop does.
 		under := rasterOf(below)
 		if cur.Visible {
-			under = blendOnto(under, adjustRaster(under, cur.Adjust.Filter()), cur.Opacity, cur.Blend, cur.activeMask())
+			under = blendOnto(under, adjustRaster(under, cur.Adjust.Filter()), cur.Opacity, cur.Blend, cur.shownMask())
 		}
 		below.Pixels, below.Vector, below.Text = under, nil, nil
 		parent.Children = slices.Delete(parent.Children, i, i+1)
@@ -156,7 +156,7 @@ func (d *Doc) MergeDown() error {
 		plain := &Node{ID: -1, Visible: true, Opacity: 1, Pixels: under}
 		under = d.compositeOf(&Node{Children: []*Node{cur, plain}, Open: true})
 	default:
-		under = blendOnto(under, rasterOf(cur), cur.Opacity, cur.Blend, cur.activeMask())
+		under = blendOnto(under, rasterOf(cur), cur.Opacity, cur.Blend, cur.shownMask())
 	}
 	below.Pixels, below.Vector, below.Text = under, nil, nil
 	parent.Children = slices.Delete(parent.Children, i, i+1)
@@ -173,6 +173,8 @@ func (d *Doc) MergeGroup() error {
 		return ErrNoLayer
 	case !cur.IsGroup():
 		return ErrGroup
+	case cur.IsBoard():
+		return ErrMergeBoard
 	}
 	m := d.Mark()
 	mode := cur.Blend
@@ -180,7 +182,7 @@ func (d *Doc) MergeGroup() error {
 		mode = BlendNormal
 	}
 	n := &Node{ID: d.newID(), Name: cur.Name, Visible: cur.Visible, Opacity: cur.Opacity, Blend: mode, Pixels: d.compositeOf(cur),
-		Mask: cur.Mask, MaskOff: cur.MaskOff}
+		Mask: cur.Mask, MaskOff: cur.MaskOff, Clip: cur.Clip}
 	parent.Children[i] = n
 	d.Active = n.ID
 	d.Commit("Merge group", m)
@@ -197,17 +199,163 @@ func (d *Doc) Flatten(name string) {
 }
 
 // GroupChosen puts the chosen node into a new group in its place.
-func (d *Doc) GroupChosen(name string) (*Node, error) {
-	cur, parent, i := d.find(d.Active)
-	if cur == nil {
+func (d *Doc) GroupChosen(name string) (*Node, error) { return d.Group(name, []int{d.Active}) }
+
+// Group puts the nodes ids into a new group and chooses it, as Ctrl+G does in Photoshop with several layers chosen:
+// the group takes the place of the topmost of them, and they keep their order in the panel. A node inside another
+// of them goes along with it; ids no longer there are passed over.
+func (d *Doc) Group(name string, ids []int) (*Node, error) {
+	nodes := d.outermost(ids)
+	if len(nodes) == 0 {
 		return nil, ErrNoLayer
 	}
+	if slices.ContainsFunc(nodes, (*Node).IsBoard) {
+		return nil, ErrBoardInside
+	}
 	m := d.Mark()
-	g := &Node{ID: d.newID(), Name: name, Visible: true, Opacity: 1, Blend: BlendPassThrough, Children: []*Node{cur}, Open: true}
+	g := &Node{ID: d.newID(), Name: name, Visible: true, Opacity: 1, Blend: BlendPassThrough, Open: true}
+	_, parent, i := d.find(nodes[0].ID)
 	parent.Children[i] = g
+	for _, n := range nodes[1:] {
+		_, p, j := d.find(n.ID)
+		p.Children = slices.Delete(p.Children, j, j+1)
+	}
+	g.Children = nodes
 	d.Active = g.ID
 	d.Commit("Group", m)
 	return g, nil
+}
+
+// outermost are the nodes ids in panel order, top first, leaving out those inside another of them and ids no
+// longer there.
+func (d *Doc) outermost(ids []int) []*Node {
+	var out []*Node
+	var walk func(g *Node)
+	walk = func(g *Node) {
+		for _, c := range g.Children {
+			switch {
+			case slices.Contains(ids, c.ID):
+				out = append(out, c)
+			case c.IsGroup():
+				walk(c)
+			}
+		}
+	}
+	walk(d.Root)
+	return out
+}
+
+// Place is where nodes dropped on another one go.
+type Place int
+
+const (
+	PlaceAbove Place = iota // just above it, in its group
+	PlaceBelow              // just below it, in its group
+	PlaceInto               // at the top of it, a group
+)
+
+// Errors moving nodes can return.
+var (
+	ErrNotGroup    = errors.New("only a group can hold layers")
+	ErrMoveInside  = errors.New("a layer cannot go next to or inside itself")
+	ErrSmartInside = errors.New("a smart object cannot go inside a copy of itself")
+)
+
+// MoveNodes moves the nodes ids next to the node target or into it, keeping their order in the panel, as dragging
+// them in Photoshop's layers panel does; a node inside another of them goes along with it. An artboard stays at the
+// top level. It is one step of the history, and none when nothing moves.
+func (d *Doc) MoveNodes(ids []int, target int, where Place) error {
+	nodes := d.outermost(ids)
+	dest, err := d.moveTo(nodes, target, where)
+	if err != nil {
+		return err
+	}
+	m := d.Mark()
+	for _, n := range nodes {
+		_, p, j := d.find(n.ID)
+		p.Children = slices.Delete(p.Children, j, j+1)
+	}
+	at := 0
+	if where != PlaceInto {
+		_, _, at = d.find(target)
+		if where == PlaceBelow {
+			at++
+		}
+	}
+	dest.Children = slices.Insert(dest.Children, at, nodes...)
+	d.Commit("Move layer", m)
+	return nil
+}
+
+// CanMoveNodes reports why MoveNodes would refuse to move the nodes ids, or nil when it would move them.
+func (d *Doc) CanMoveNodes(ids []int, target int, where Place) error {
+	_, err := d.moveTo(d.outermost(ids), target, where)
+	return err
+}
+
+// moveTo is the group that nodes moved next to target or into it would go into, or why they cannot go there.
+func (d *Doc) moveTo(nodes []*Node, target int, where Place) (*Node, error) {
+	chain := d.path(target)
+	if len(nodes) == 0 || len(chain) < 2 {
+		return nil, ErrNoLayer
+	}
+	groups := chain[:len(chain)-1] // the target's group, and those it is in
+	if where == PlaceInto {
+		if !chain[len(chain)-1].IsGroup() {
+			return nil, ErrNotGroup
+		}
+		groups = chain
+	}
+	dest := groups[len(groups)-1]
+	// Where they go must be outside them, and not beside one of them.
+	for _, n := range chain[1:] {
+		if slices.Contains(nodes, n) {
+			return nil, ErrMoveInside
+		}
+	}
+	for _, n := range nodes {
+		if n.IsBoard() && dest != d.Root {
+			return nil, ErrBoardInside
+		}
+	}
+	// A smart object cannot hold a copy of itself, or it would hold itself without end.
+	for _, g := range groups {
+		if g.IsSmart() && slices.ContainsFunc(nodes, func(n *Node) bool { return holdsLink(n, g.Smart.ID) }) {
+			return nil, ErrSmartInside
+		}
+	}
+	return dest, nil
+}
+
+// path is the chain of nodes from the root down to the node id, both included, or nil when it is not there.
+func (d *Doc) path(id int) []*Node {
+	if id == d.Root.ID {
+		return []*Node{d.Root}
+	}
+	var walk func(g *Node, chain []*Node) []*Node
+	walk = func(g *Node, chain []*Node) []*Node {
+		chain = append(chain, g)
+		for _, c := range g.Children {
+			if c.ID == id {
+				return append(slices.Clone(chain), c)
+			}
+			if c.IsGroup() {
+				if out := walk(c, chain); out != nil {
+					return out
+				}
+			}
+		}
+		return nil
+	}
+	return walk(d.Root, nil)
+}
+
+// holdsLink reports whether n is, or holds, a smart object with the link id.
+func holdsLink(n *Node, id string) bool {
+	if n.IsSmart() && n.Smart.ID == id {
+		return true
+	}
+	return slices.ContainsFunc(n.Children, func(c *Node) bool { return holdsLink(c, id) })
 }
 
 // Ungroup moves the chosen group's children into its place.
@@ -224,7 +372,7 @@ func (d *Doc) Ungroup() error {
 	if len(cur.Children) > 0 {
 		d.Active = cur.Children[0].ID
 	} else {
-		d.Active = d.Layers()[0].ID
+		d.Active = d.someNode()
 	}
 	d.Commit("Ungroup", m)
 	return nil
@@ -238,6 +386,18 @@ func (d *Doc) Move(up bool) error {
 		return ErrNoLayer
 	}
 	m := d.Mark()
+	if cur.IsBoard() {
+		// A board stays at the top level: it steps past its neighbour, open group or not.
+		j := i + 1
+		if up {
+			j = i - 1
+		}
+		if j >= 0 && j < len(parent.Children) {
+			parent.Children[i], parent.Children[j] = parent.Children[j], parent.Children[i]
+		}
+		d.Commit("Move layer", m)
+		return nil
+	}
 	parent.Children = slices.Delete(parent.Children, i, i+1)
 	switch {
 	case up && i > 0 && parent.Children[i-1].IsGroup() && parent.Children[i-1].Open:
@@ -476,7 +636,7 @@ func (d *Doc) clear(name string) error {
 			own = &l.Pixels.p
 		}
 		bpp := own.bpp
-		for _, r := range d.workArea(own, 0) {
+		for _, r := range d.areaOf(l, toMask, 0) {
 			sel := d.selectionIn(r)
 			own.tilesOver(r, func(pix []uint8, part image.Rectangle, corner image.Point) {
 				for y := part.Min.Y; y < part.Max.Y; y++ {

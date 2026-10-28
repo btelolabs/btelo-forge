@@ -17,7 +17,7 @@ import (
 
 // canvasHarness is an editor with a 400×300 canvas open, framed at the origin with a white background layer, as a
 // screenshot opens; it saves into a test folder.
-func canvasHarness(t *testing.T) (*harness, *artDoc) {
+func canvasHarness(t testing.TB) (*harness, *artDoc) {
 	t.Helper()
 	x := newHarness(t)
 	x.a.settings.ExportDir = x.mediaDir()
@@ -236,11 +236,16 @@ func TestNewCanvasHasNoSize(t *testing.T) {
 	}
 	x.frame(Input{})
 	x.shot("canvas-zoomed-out")
-	// Ctrl+N from the canvas makes another, in a tab of its own.
-	tabs := len(a.docs)
+	// Ctrl+N adds a layer; Ctrl+Alt+N makes another canvas, in a tab of its own.
+	layers := len(ad.d.Layers())
 	x.key('N', true)
+	if len(ad.d.Layers()) != layers+1 {
+		t.Error("Ctrl+N did not add a layer")
+	}
+	tabs := len(a.docs)
+	x.frame(Input{Keys: []Key{{Code: 'N', Ctrl: true, Alt: true}}})
 	if len(a.docs) != tabs+1 || a.art == ad {
-		t.Error("Ctrl+N did not open another canvas")
+		t.Error("Ctrl+Alt+N did not open another canvas")
 	}
 }
 

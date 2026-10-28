@@ -1,6 +1,7 @@
 {
   "version": 1,
   "minimum": "6.0",
+  "system": false,
   "downloads": [
     {
       "name": "BtbN FFmpeg 9.0 (GPL)",

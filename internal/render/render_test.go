@@ -61,16 +61,16 @@ func TestCutTakesEveryTrackInsideTheRange(t *testing.T) {
 func TestDestinationNumbersExistingCuts(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "旅行 vlog.mov")
-	first := Destination(source, "")
+	first := Destination(source, "", ".mp4")
 	if first != filepath.Join(dir, "旅行 vlog.cut.mp4") {
 		t.Fatal(first)
 	}
 	os.WriteFile(first, nil, 0o644)
-	if second := Destination(source, ""); filepath.Base(second) != "旅行 vlog.cut-2.mp4" {
+	if second := Destination(source, "", ".mp4"); filepath.Base(second) != "旅行 vlog.cut-2.mp4" {
 		t.Fatal(second)
 	}
 	other := t.TempDir()
-	if got := Destination(source, other); got != filepath.Join(other, "旅行 vlog.cut.mp4") {
+	if got := Destination(source, other, ".mp4"); got != filepath.Join(other, "旅行 vlog.cut.mp4") {
 		t.Fatal(got)
 	}
 }
@@ -174,7 +174,7 @@ func TestEncodeStacksTracksAppendsSourcesAndMixes(t *testing.T) {
 	png.Encode(f, img)
 	f.Close()
 
-	out := Destination(red.Path, "")
+	out := Destination(red.Path, "", ".mp4")
 	var last float64
 	err := Encode(context.Background(), p, []Overlay{{Path: caption, X: 0, Y: 0, Start: 3.2, End: 4}}, out, "Music:", func(f float64) { last = f })
 	if err != nil {
@@ -214,7 +214,7 @@ func TestUpperClipsPastTheMainTrackPlayOverBlack(t *testing.T) {
 	blue := solid(t, dir, "blue.mp4", "blue", "320x180", "2", false)
 	p := project.New(red, project.Export{})
 	p.Place(p.AddSource(blue), 3) // 3–5, with a black gap at 2–3
-	out := Destination(red.Path, "")
+	out := Destination(red.Path, "", ".mp4")
 	if err := Encode(context.Background(), p, nil, out, "", nil); err != nil {
 		t.Fatal(err)
 	}

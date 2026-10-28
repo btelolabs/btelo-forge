@@ -14,15 +14,18 @@ func (d *Doc) paintArea(name string, pieces []image.Rectangle, src func(x, y int
 	if err != nil {
 		return err
 	}
+	m := d.Mark()
+	d.paintAreaOn(l, pieces, src)
+	d.Commit(name, m)
+	return nil
+}
+
+// paintAreaOn lays colour over layer l, or its mask while it is edited, as paintArea does, without recording it.
+func (d *Doc) paintAreaOn(l *Node, pieces []image.Rectangle, src func(x, y int) (c [4]uint32, cover uint32)) {
 	toMask := d.EditMask && l.Mask != nil
 	if pieces == nil {
-		if toMask {
-			pieces = d.workArea(&l.Mask.p, 0)
-		} else {
-			pieces = d.workArea(&l.Pixels.p, 0)
-		}
+		pieces = d.areaOf(l, toMask, 0)
 	}
-	m := d.Mark()
 	if !toMask {
 		d.dropText(l)
 	}
@@ -68,8 +71,6 @@ func (d *Doc) paintArea(name string, pieces []image.Rectangle, src func(x, y int
 			}
 		})
 	}
-	d.Commit(name, m)
-	return nil
 }
 
 // piecesOf are the canvas areas of a mask's tiles: where it can be other than its fill.
@@ -166,9 +167,37 @@ func (d *Doc) DrawGradient(g Gradient) error {
 	if math.Hypot(g.To[0]-g.From[0], g.To[1]-g.From[1]) < 1 {
 		return nil // a click without a drag draws nothing, as in Photoshop
 	}
+	return d.paintArea("Gradient", nil, g.source())
+}
+
+// MaskGradient fades the chosen layer or group out along a gradient from white, showing it, to black, hiding it,
+// laid on its mask, which it is given when it has none, as one step. It works over what the layer shows, within the
+// selection, and leaves the mask being edited.
+func (d *Doc) MaskGradient(g Gradient) error {
+	if math.Hypot(g.To[0]-g.From[0], g.To[1]-g.From[1]) < 1 {
+		return nil
+	}
+	n := d.Node(d.Active)
+	if n == nil {
+		return ErrNoLayer
+	}
+	m := d.Mark()
+	if n.Mask == nil {
+		n.Mask, n.MaskOff = NewMask(255), false
+	}
+	d.EditMask = true
+	g.Start, g.End = color.NRGBA{R: 255, G: 255, B: 255, A: 255}, color.NRGBA{A: 255}
+	g.Opacity = 1
+	d.paintAreaOn(n, nil, g.source())
+	d.Commit("Mask gradient", m)
+	return nil
+}
+
+// source is the gradient as paintArea's colour at each pixel.
+func (g Gradient) source() func(x, y int) ([4]uint32, uint32) {
 	op := min(max(g.Opacity, 0), 1)
 	s, e := g.Start, g.End
-	return d.paintArea("Gradient", nil, func(x, y int) ([4]uint32, uint32) {
+	return func(x, y int) ([4]uint32, uint32) {
 		t := g.At(float64(x)+0.5, float64(y)+0.5)
 		mix := func(a, b uint8) float64 { return float64(a) + (float64(b)-float64(a))*t }
 		alpha := mix(s.A, e.A)
@@ -189,5 +218,5 @@ func (d *Doc) DrawGradient(g Gradient) error {
 			out[ch] = min(out[ch], out[3])
 		}
 		return out, uint32(math.Round(op * 255))
-	})
+	}
 }

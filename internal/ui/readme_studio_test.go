@@ -62,8 +62,8 @@ func TestReadmeStudioScreens(t *testing.T) {
 		x.c.Resize(1920, 1280)
 		x.scale = 1.25
 		x.a.u.lang = lang
-		x.a.settings.ExportDir = filepath.Join(os.Getenv("USERPROFILE"), "Videos")
-		x.click(x.recordButton())
+		x.a.settings.ExportDir = filepath.Join(realHome, "Videos")
+		x.click(x.recordCard())
 		x.pump(time.Minute, func() bool { return x.a.rec.listed })
 		x.a.settings.Record.Microphone = true
 		x.frame(Input{})

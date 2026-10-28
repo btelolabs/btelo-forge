@@ -248,6 +248,18 @@ func (b *builder) mainSound(w window, inputs []int) string {
 	return "[am]"
 }
 
+// inputCount is the number of inputs, which is the index the next one gets.
+func (g Graph) inputCount() int {
+	n := 0
+	for i := 0; i < len(g.Inputs); i++ {
+		if g.Inputs[i] == "-i" {
+			n++
+			i++ // the path, whatever it is called
+		}
+	}
+	return n
+}
+
 // Args joins the global flags, inputs, graph and output options, refusing command lines Windows cannot run.
 func (g Graph) Args(output ...string) ([]string, error) {
 	args := []string{"-v", "error", "-nostdin", "-y"}

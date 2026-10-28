@@ -141,9 +141,15 @@ func (a *App) syncPlayback() {
 }
 
 func (a *App) drawPreview(r gfx.Rect) {
+	a.u.c.Fill(r, colBackground)
+	a.drawPicture(r, a.u.px(14), true)
+}
+
+// drawPicture shows the frame at the playhead fitted inside r less inset, with its text and images; edit lets
+// them be selected and dragged.
+func (a *App) drawPicture(r gfx.Rect, inset float32, edit bool) {
 	u := &a.u
-	u.c.Fill(r, gfx.Hex(0x0a0b0c))
-	v := a.canvasRect(r.Inset(u.px(14)))
+	v := a.canvasRect(r.Inset(inset))
 	a.shown.canvas = evenSize(v)
 	a.fetchFrame(v)
 	u.c.Fill(v, colBlack)
@@ -165,7 +171,7 @@ func (a *App) drawPreview(r gfx.Rect) {
 	}
 	u.c.Push(v)
 	defer u.c.Pop()
-	a.drawOverlays(v)
+	a.drawOverlays(v, edit)
 }
 
 // overlayImage draws an overlay for a w×h frame, with ok false when there is nothing to show.
@@ -181,8 +187,9 @@ func (a *App) overlayImage(o project.Overlay, w, h int) (caption.Image, bool) {
 	return img, img.Bounds().Dx() > 0
 }
 
-// drawOverlays shows the text and images visible at the playhead and lets them be selected and dragged into place.
-func (a *App) drawOverlays(v gfx.Rect) {
+// drawOverlays shows the text and images visible at the playhead and, with edit, lets them be selected and dragged
+// into place.
+func (a *App) drawOverlays(v gfx.Rect, edit bool) {
 	u := &a.u
 	vw, vh := int(math.Round(float64(v.W))), int(math.Round(float64(v.H)))
 	var rects []gfx.Rect
@@ -197,6 +204,9 @@ func (a *App) drawOverlays(v gfx.Rect) {
 		rects = append(rects, rect)
 		items = append(items, o)
 	}
+	if !edit {
+		return
+	}
 	hit := -1
 	for i := len(rects) - 1; i >= 0; i-- {
 		if rects[i].Contains(u.mx, u.my) {
@@ -207,9 +217,9 @@ func (a *App) drawOverlays(v gfx.Rect) {
 	for i, rect := range rects {
 		box := rect.Inset(-u.px(4))
 		if a.sel.kind == selOverlay && a.sel.id == items[i].ID {
-			u.c.RoundOutline(box, u.px(4), u.px(2), colAccent)
+			u.c.Outline(box, u.px(2), colAccent)
 		} else if i == hit && u.active == "" {
-			u.c.RoundOutline(box, u.px(4), u.px(1), gfx.Alpha(colText, 0.6))
+			u.c.Outline(box, u.px(1), gfx.Alpha(colText, 0.6))
 		}
 	}
 	if hit >= 0 && u.active == "" && !u.blocked {
@@ -294,13 +304,13 @@ func (a *App) drawTransport(r gfx.Rect) {
 	}
 	pr := gfx.Rect{X: x, Y: y, W: u.px(38), H: u.px(32)}
 	hot := u.hover("play", pr)
-	bg := colAccent
+	bg := colPrimary
 	if hot {
-		bg = colAccentHi
+		bg = colPrimaryHi
 		u.cursor = CursorHand
 	}
-	u.c.RoundRect(pr, u.px(16), bg)
-	u.icon(glyph, pr, 14, colOnAccent)
+	u.c.Fill(pr, bg)
+	u.icon(glyph, pr, 14, colOnPrimary)
 	u.hint("play", hint, pr)
 	if u.clicked("play", pr) {
 		a.togglePlay()

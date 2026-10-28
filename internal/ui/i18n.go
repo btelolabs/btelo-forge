@@ -10,6 +10,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/media"
 	"github.com/btelolabs/btelo-forge/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/project"
 	"github.com/btelolabs/btelo-forge/internal/render"
 	"github.com/btelolabs/btelo-forge/internal/transcribe"
 )
@@ -121,6 +122,8 @@ var knownErrors = []struct {
 	{media.ErrMissingTool, "ffmpeg / ffprobe not found"},
 	{render.ErrTooLong, "Too many segments to export in one go; merge some of them and try again"},
 	{errToolsNotReady, "ffmpeg is still being prepared"},
+	{project.ErrNotEdit, "This is not an edit file, or it is damaged"},
+	{project.ErrSourceChanged, "The video this edit starts from has changed since it was saved"},
 	{render.ErrEncoderMissing, "This ffmpeg cannot encode the chosen format; pick another format or install a full ffmpeg build"},
 	{render.ErrCredits, "The video was exported, but its credits file could not be written"},
 	{paint.ErrHidden, "The chosen layer is hidden; show it to paint on it"},
@@ -130,6 +133,14 @@ var knownErrors = []struct {
 	{paint.ErrLastLayer, "A picture keeps at least one layer"},
 	{paint.ErrTooBig, "The picture is too large; its sides can be up to 16384 pixels"},
 	{paint.ErrNotACanvas, "This is not a canvas file, or it is damaged"},
+	{paint.ErrVectorLayer, "The chosen layer is a vector layer: rasterize it to paint on it"},
+	{paint.ErrNotVector, "Choose a vector layer, or a layer with a vector mask"},
+	{paint.ErrBoardInside, "An artboard stays at the top of the layers, not inside a group"},
+	{paint.ErrMergeBoard, "An artboard cannot be merged; ungroup it first"},
+	{paint.ErrNoClip, "The chosen layer has no vector mask"},
+	{paint.ErrNoShape, "Choose the nodes of a shape after the first one"},
+	{paint.ErrSmartBoard, "An artboard cannot be a smart object, nor be in one"},
+	{paint.ErrNotSmart, "The chosen layer is not a smart object"},
 	{capture.ErrUnsupported, "Screen recording is not supported on this system"},
 	{capture.ErrNoEncoder, "Neither the graphics card nor ffmpeg's own encoder could record this screen"},
 	{capture.ErrNoDisplay, "No screen that can be recorded is attached to this computer"},
@@ -137,6 +148,8 @@ var knownErrors = []struct {
 	{capture.ErrSystemSound, "The computer's sound could not be recorded"},
 	{capture.ErrMicrophone, "The microphone could not be recorded; check that it is plugged in and that Windows lets apps use it (Settings → Privacy → Microphone)"},
 	{capture.ErrNothingRecorded, "Nothing was recorded"},
+	{capture.ErrNoTargets, "Choose at least one destination to stream to"},
+	{capture.ErrTargetAddress, "The server address must start with rtmp://, rtmps:// or srt://"},
 }
 
 var gfxShade = gfx.Alpha(colBlack, 0.55)
@@ -149,8 +162,8 @@ func rectCentered(s gfx.Rect, w, h float32) gfx.Rect {
 
 // panel draws a dialog card.
 func panel(u *ctx, r gfx.Rect) {
-	u.c.RoundRect(r, u.px(14), colPanel)
-	u.c.RoundOutline(r, u.px(14), u.px(1), colBorder)
+	u.c.Fill(r, colPanel)
+	u.c.Outline(r, u.px(1), colBorder)
 }
 
 // trackWords are the genre and mood names the library uses; they are data, translated for display.

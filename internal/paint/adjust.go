@@ -47,19 +47,20 @@ func (d *Doc) BeginFilter() (*FilterSession, error) {
 	return f, nil
 }
 
-// own is the plane being filtered, as it was.
-func (f *FilterSession) own() *plane {
+// area is where a filter reaching reach pixels around each one acts: over the pixels as they were, or over what
+// the layer shows for its mask.
+func (f *FilterSession) area(reach int) []image.Rectangle {
 	if f.toMask {
-		return &f.beforeMask.p
+		return f.d.maskArea(f.l, reach)
 	}
-	return &f.beforePix.p
+	return f.d.workArea(&f.beforePix.p, reach)
 }
 
 // Area spans what a filter reading nothing around a pixel can change, for a histogram of it.
-func (f *FilterSession) Area() image.Rectangle { return spanOf(f.d.workArea(f.own(), 0)) }
+func (f *FilterSession) Area() image.Rectangle { return spanOf(f.area(0)) }
 
 // Pieces are the areas Area spans, one a tile, for reading what is there without reading what is not.
-func (f *FilterSession) Pieces() []image.Rectangle { return f.d.workArea(f.own(), 0) }
+func (f *FilterSession) Pieces() []image.Rectangle { return f.area(0) }
 
 // source is the pixels as they were over r, a mask as grey. Past a frame's edge the edge goes on, as Photoshop's
 // filters see the canvas's edge, so a blur does not darken it.
@@ -95,7 +96,7 @@ func (f *FilterSession) source(r image.Rectangle) *image.RGBA {
 // Compute works fn out on the pixels as they were, without showing it; it only reads, so it may run on another
 // goroutine while the picture is drawn.
 func (f *FilterSession) Compute(fn Filter) Result {
-	pieces := f.d.workArea(f.own(), fn.reach)
+	pieces := f.area(fn.reach)
 	out := make(Result, 0, len(pieces))
 	for _, r := range pieces {
 		out = append(out, fn.apply(f.source(r.Inset(-fn.reach)), r))

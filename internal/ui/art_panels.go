@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,27 +18,42 @@ import (
 
 // paintSettings are the brush and recent colours, kept between runs and shared by every canvas.
 type paintSettings struct {
-	Size       float64  `json:"size"`
-	Hardness   float64  `json:"hardness"`
-	Opacity    float64  `json:"opacity"`
-	Flow       float64  `json:"flow"`
-	Smooth     float64  `json:"smoothing"`
-	Angle      float64  `json:"angle"`
-	Round      float64  `json:"roundness"`
-	Spacing    float64  `json:"spacing"`
-	Tip        int      `json:"tip"`
-	Color      string   `json:"color"`      // the foreground colour
-	Background string   `json:"background"` // the background colour
-	Recent     []string `json:"recent,omitempty"`
+	Size     float64 `json:"size"`
+	Hardness float64 `json:"hardness"`
+	Opacity  float64 `json:"opacity"`
+	Flow     float64 `json:"flow"`
+	Smooth   float64 `json:"smoothing"`
+	Angle    float64 `json:"angle"`
+	Round    float64 `json:"roundness"`
+	Spacing  float64 `json:"spacing"`
+	Tip      int     `json:"tip"`
+	ShapeTip string  `json:"shapeTip,omitempty"` // the picture tip's file in the brushes folder, when Tip is paint.TipShaped
+
+	// The vector brush's tip: its own, round unless chosen otherwise.
+	VBrushSize  float64  `json:"vbrushSize,omitempty"`
+	VBrushTip   int      `json:"vbrushTip,omitempty"`
+	VBrushAngle float64  `json:"vbrushAngle,omitempty"`
+	VBrushRound float64  `json:"vbrushRound,omitempty"`
+	VBrushShape string   `json:"vbrushShape,omitempty"`
+	Tips        []string `json:"tips,omitempty"`   // the picture tips made, oldest first
+	Preset      string   `json:"preset,omitempty"` // the brush preset whose tip the brush has, when Tip is paint.TipShaped
+	SizeJitter  float64  `json:"sizeJitter,omitempty"`
+	AngleJit    float64  `json:"angleJitter,omitempty"`
+	Scatter     float64  `json:"scatter,omitempty"`
+	Follow      bool     `json:"followStroke,omitempty"`
+	Color       string   `json:"color"`      // the foreground colour
+	Background  string   `json:"background"` // the background colour
+
+	// SameSize keeps the brush's size when another preset or picture tip is chosen; without it each brush has its own
+	// size, kept in Sizes by brushKey, at first the preset's or the tip's.
+	SameSize bool               `json:"sameSize,omitempty"`
+	Sizes    map[string]float64 `json:"brushSizes,omitempty"`
 
 	SelMode        int     `json:"selectMode"` // paint.SelectMode
 	Feather        float64 `json:"feather"`
 	WandTolerance  int     `json:"wandTolerance"`
 	WandContiguous bool    `json:"wandContiguous"`
 	WandAllLayers  bool    `json:"wandAllLayers"`
-
-	CropRatio int  `json:"cropRatio"` // into cropRatios
-	CropKeep  bool `json:"cropKeep"`  // crop without deleting the cropped pixels
 
 	FillOpacity    float64 `json:"fillOpacity"` // the paint bucket's
 	FillTolerance  int     `json:"fillTolerance"`
@@ -49,6 +65,12 @@ type paintSettings struct {
 	GradientOpacity float64 `json:"gradientOpacity"`
 	GradientReverse bool    `json:"gradientReverse"`
 	GradientDither  bool    `json:"gradientDither"`
+
+	SmartOnly    bool `json:"smartOnly,omitempty"`    // the layers panel shows only the smart objects
+	NoAutoSelect bool `json:"noAutoSelect,omitempty"` // the move tool moves the chosen layer, not what is clicked
+
+	MaskGradientKind    int  `json:"maskGradientKind"` // paint.GradientKind of the mask gradient tool's
+	MaskGradientReverse bool `json:"maskGradientReverse"`
 
 	CloneAligned   bool `json:"cloneAligned"`
 	CloneAllLayers bool `json:"cloneAllLayers"`
@@ -88,21 +110,42 @@ func (p paintSettings) brush() paint.Brush {
 	b := paint.DefaultBrush()
 	b.Size, b.Hardness, b.Opacity, b.Tip = p.Size, p.Hardness, p.Opacity, paint.Tip(p.Tip)
 	b.Flow, b.Smooth, b.Angle, b.Round = p.Flow, p.Smooth, p.Angle, p.Round
+	b.SizeJitter, b.AngleJitter, b.Scatter, b.Follow = p.SizeJitter, p.AngleJit, p.Scatter, p.Follow
 	if p.Spacing > 0 {
 		b.Spacing = p.Spacing
 	}
-	if rgb, err := parseColor(p.Color); err == nil {
-		b.Color = color.NRGBA{R: rgb[0], G: rgb[1], B: rgb[2], A: 255}
+	if c, err := parseNRGBA(p.Color); err == nil {
+		b.Color = c
 	}
 	return b
 }
 
-func hexColor(c color.NRGBA) string { return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B) }
+// hexColor writes a colour as #rrggbb, or #rrggbbaa when it is partly transparent.
+func hexColor(c color.NRGBA) string {
+	if c.A < 255 {
+		return fmt.Sprintf("#%02x%02x%02x%02x", c.R, c.G, c.B, c.A)
+	}
+	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
+}
+
+// parseNRGBA reads a colour written #rrggbb, opaque, or #rrggbbaa.
+func parseNRGBA(s string) (color.NRGBA, error) {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "#")
+	v, err := strconv.ParseUint(s, 16, 32)
+	switch {
+	case err == nil && len(s) == 6:
+		return color.NRGBA{R: uint8(v >> 16), G: uint8(v >> 8), B: uint8(v), A: 255}, nil
+	case err == nil && len(s) == 8:
+		return color.NRGBA{R: uint8(v >> 24), G: uint8(v >> 16), B: uint8(v >> 8), A: uint8(v)}, nil
+	}
+	return color.NRGBA{}, fmt.Errorf("color %q is not #rrggbb or #rrggbbaa", s)
+}
 
 // colorPicker is the colour panel's state: hue, saturation and value, kept apart from the brush colour so dragging
 // the value to black does not lose the hue.
 type colorPicker struct {
 	h, s, v float64
+	a       float64 // the opacity, 0 to 1
 	hex     string
 	square  *image.RGBA // the saturation and value square for hue sq
 	sqHue   float64
@@ -116,6 +159,20 @@ func (a *App) saveBrush() {
 	p := &a.settings.Paint
 	p.Size, p.Hardness, p.Opacity, p.Flow, p.Smooth = b.Size, b.Hardness, b.Opacity, b.Flow, b.Smooth
 	p.Angle, p.Round, p.Spacing, p.Tip, p.Color = b.Angle, b.Round, b.Spacing, int(b.Tip), hexColor(b.Color)
+	p.SizeJitter, p.AngleJit, p.Scatter, p.Follow = b.SizeJitter, b.AngleJitter, b.Scatter, b.Follow
+	p.Preset = ""
+	if preset, ok := a.chosenPreset(); ok {
+		p.Preset, p.ShapeTip = preset.ID, ""
+	}
+	if b.Tip != paint.TipShaped {
+		p.ShapeTip = ""
+	}
+	if !p.SameSize {
+		if p.Sizes == nil {
+			p.Sizes = map[string]float64{}
+		}
+		p.Sizes[a.brushKey()] = b.Size
+	}
 	a.saveSettings()
 }
 
@@ -126,14 +183,13 @@ func (a *App) setBrushColor(c color.NRGBA) {
 	if !a.pickBackground {
 		a.picker.hex = "" // the panel takes the new colour
 	}
-	a.rememberColor(c)
 	a.saveBrush()
 }
 
 // backgroundColor is the background colour: what the eraser leaves on a mask, Ctrl+Backspace fills with, X swaps in.
 func (a *App) backgroundColor() color.NRGBA {
-	if rgb, err := parseColor(a.settings.Paint.Background); err == nil {
-		return color.NRGBA{R: rgb[0], G: rgb[1], B: rgb[2], A: 255}
+	if c, err := parseNRGBA(a.settings.Paint.Background); err == nil {
+		return c
 	}
 	return color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 }
@@ -162,37 +218,31 @@ func (a *App) resetColors() {
 	a.saveBrush()
 }
 
-// pickerColor is the colour the panel edits: the foreground or the background.
+// pickerColor is the colour the panel edits: the foreground or the background, or the chosen vector layer's fill
+// or stroke.
 func (a *App) pickerColor() color.NRGBA {
+	if ad, n := a.paintedVector(); n != nil {
+		return ad.vectorColour(n, a.pickBackground)
+	}
 	if a.pickBackground {
 		return a.backgroundColor()
 	}
 	return a.brush.Color
 }
 
-// setPickerColor sets the colour the panel edits.
+// setPickerColor sets the colour the panel edits, its opacity with it.
 func (a *App) setPickerColor(c color.NRGBA) {
-	c.A = 255
+	if ad, n := a.paintedVector(); n != nil {
+		a.setVectorColour(ad, n, a.pickBackground, c)
+		return
+	}
 	if a.pickBackground {
 		a.settings.Paint.Background = hexColor(c)
-		a.rememberColor(c)
 		a.saveSettings()
 		return
 	}
 	a.brush.Color = c
-	a.rememberColor(c)
 	a.saveBrush()
-}
-
-// rememberColor puts a colour at the front of the recent ones.
-func (a *App) rememberColor(c color.NRGBA) {
-	hex := hexColor(c)
-	r := slices.DeleteFunc(slices.Clone(a.settings.Paint.Recent), func(s string) bool { return s == hex })
-	r = append([]string{hex}, r...)
-	if len(r) > 12 {
-		r = r[:12]
-	}
-	a.settings.Paint.Recent = r
 }
 
 func rgbToHSV(c color.NRGBA) (h, s, v float64) {
@@ -246,26 +296,41 @@ func (a *App) drawArtSide(ad *artDoc, r gfx.Rect) {
 	u := &a.u
 	u.c.Fill(r, colPanel)
 	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y, W: max(1, u.px(1)), H: r.H}, colBorder)
-	in := r.Inset(u.px(14))
-	y := a.drawColorPicker(gfx.Rect{X: in.X, Y: in.Y, W: in.W, H: u.px(250)})
-	a.drawLayers(ad, gfx.Rect{X: in.X, Y: y + u.px(14), W: in.W, H: in.Bottom() - y - u.px(14)})
+	picker, layers := a.sideLayout(r)
+	a.drawColorPicker(picker)
+	a.drawLayers(ad, layers)
 }
 
-// drawColorPicker is the colour panel, editing the foreground or the background colour; it returns where it ends.
-func (a *App) drawColorPicker(r gfx.Rect) float32 {
+// sideLayout splits the side panel: the colour panel at the top, the layers (or history) panel under it to the
+// bottom, with a narrow margin all round.
+func (a *App) sideLayout(side gfx.Rect) (picker, layers gfx.Rect) {
+	u := &a.u
+	in := gfx.Rect{X: side.X + u.px(12), Y: side.Y + u.px(12), W: side.W - u.px(24), H: side.H - u.px(20)}
+	picker = gfx.Rect{X: in.X, Y: in.Y, W: in.W, H: u.px(224)}
+	top := picker.Bottom() + u.px(14)
+	return picker, gfx.Rect{X: in.X, Y: top, W: in.W, H: in.Bottom() - top}
+}
+
+// colourSwatchArea is where the colour panel puts its foreground and background swatches, under the opacity.
+func (a *App) colourSwatchArea(picker gfx.Rect) gfx.Rect {
+	u := &a.u
+	return gfx.Rect{X: picker.X, Y: picker.Bottom() - u.px(40), W: u.px(48), H: u.px(40)}
+}
+
+// drawColorPicker is the colour panel: the square, the hue and the opacity edit the foreground or the background
+// colour (a chosen vector layer's fill or stroke), whichever of the two swatches under them is in front.
+func (a *App) drawColorPicker(r gfx.Rect) {
 	u := &a.u
 	p := &a.picker
 	cur := a.pickerColor()
-	if p.hex == "" {
+	// The panel follows its colour when it changes elsewhere, as undo or another layer chosen does, unless the colour
+	// is being typed or dragged here.
+	if p.hex == "" || u.focus != "art/hex" && u.active != "art/sv" && u.active != "art/hue" && u.active != "art/alpha" && p.hex != hexColor(cur) {
 		p.h, p.s, p.v = rgbToHSV(cur)
+		p.a = float64(cur.A) / 255
 		p.hex = hexColor(cur)
 	}
-	title := u.t("Foreground colour")
-	if a.pickBackground {
-		title = u.t("Background colour")
-	}
-	u.heading(gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: u.px(20)}, title)
-	sq := gfx.Rect{X: r.X, Y: r.Y + u.px(26), W: r.W, H: u.px(130)}
+	sq := gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: u.px(130)}
 	size := sq.Pixels().Size()
 	if p.square == nil || p.sqHue != p.h || p.sqSize != size {
 		p.square, p.sqHue, p.sqSize = image.NewRGBA(image.Rectangle{Max: size}), p.h, size
@@ -279,8 +344,8 @@ func (a *App) drawColorPicker(r gfx.Rect) float32 {
 	u.c.Blit(p.square, sq.Pixels().Min.X, sq.Pixels().Min.Y, true)
 	mark := func(x, y float32) {
 		ring := gfx.Rect{X: x - u.px(6), Y: y - u.px(6), W: u.px(12), H: u.px(12)}
-		u.c.RoundOutline(ring, u.px(6), u.px(2), colWhite)
-		u.c.RoundOutline(ring.Inset(-u.px(1)), u.px(7), u.px(1), gfx.Alpha(colBlack, 0.6))
+		u.c.Outline(ring, u.px(2), colWhite)
+		u.c.Outline(ring.Inset(-u.px(1)), u.px(1), gfx.Alpha(colBlack, 0.6))
 	}
 	mark(sq.X+float32(p.s)*sq.W, sq.Y+float32(1-p.v)*sq.H)
 	changed := false
@@ -311,11 +376,32 @@ func (a *App) drawColorPicker(r gfx.Rect) float32 {
 		changed = true
 	}
 	done = u.letGo("art/hue") || done
+	// The opacity, over a checkerboard: from clear to the colour.
+	alpha := gfx.Rect{X: r.X, Y: strip.Bottom() + u.px(8), W: r.W, H: u.px(12)}
+	drawTransparency(u, alpha)
+	solid := hsvToRGB(p.h, p.s, p.v)
+	steps := max(int(alpha.W/u.px(2)), 1)
+	for i := range steps {
+		k := (float32(i) + 0.5) / float32(steps)
+		u.c.Fill(gfx.Rect{X: alpha.X + float32(i)*alpha.W/float32(steps), Y: alpha.Y, W: alpha.W/float32(steps) + 1, H: alpha.H},
+			gfx.Alpha(color.RGBA{solid.R, solid.G, solid.B, 255}, k))
+	}
+	ax := alpha.X + float32(p.a)*alpha.W
+	u.c.Fill(gfx.Rect{X: ax - u.px(2), Y: alpha.Y - u.px(2), W: u.px(4), H: alpha.H + u.px(4)}, colWhite)
+	u.hint("art/alpha", u.t("Opacity of the colour"), alpha)
+	u.press("art/alpha", alpha)
+	if u.dragging("art/alpha") || u.active == "art/alpha" && u.down {
+		p.a = min(max(float64((u.mx-alpha.X)/alpha.W), 0), 1)
+		changed = true
+	}
+	done = u.letGo("art/alpha") || done
 	if changed || done {
 		// The colour follows the drag; the panel keeps its own hue, so dragging to grey or black does not lose it.
 		h, s, v := p.h, p.s, p.v
 		c := hsvToRGB(h, s, v)
-		if done {
+		c.A = uint8(math.Round(p.a * 255))
+		_, vec := a.paintedVector()
+		if done || vec != nil {
 			a.setPickerColor(c)
 		} else if a.pickBackground {
 			a.settings.Paint.Background = hexColor(c)
@@ -324,41 +410,16 @@ func (a *App) drawColorPicker(r gfx.Rect) float32 {
 		}
 		p.h, p.s, p.v, p.hex = h, s, v, hexColor(c)
 	}
-	y := strip.Bottom() + u.px(12)
-	cur = a.pickerColor()
-	sw := gfx.Rect{X: r.X, Y: y, W: u.px(30), H: u.px(30)}
-	u.c.RoundRect(sw, u.px(6), color.RGBA{cur.R, cur.G, cur.B, 255})
-	u.c.RoundOutline(sw, u.px(6), max(1, u.px(1)), colBorder)
-	if _, done := u.textBox("art/hex", gfx.Rect{X: sw.Right() + u.px(8), Y: y, W: u.px(96), H: u.px(30)}, &p.hex, "#rrggbb", false); done {
-		if rgb, err := parseColor(p.hex); err == nil {
-			a.setPickerColor(color.NRGBA{R: rgb[0], G: rgb[1], B: rgb[2], A: 255})
+	// The foreground and background swatches, and the colour edited written out.
+	sw := a.colourSwatchArea(r)
+	a.drawColourSwatches(sw)
+	hex := gfx.Rect{X: sw.Right() + u.px(10), Y: sw.Y + (sw.H-u.px(30))/2, W: r.Right() - sw.Right() - u.px(10), H: u.px(30)}
+	if _, done := u.textBox("art/hex", hex, &p.hex, "#rrggbbaa", false); done {
+		if c, err := parseNRGBA(p.hex); err == nil {
+			a.setPickerColor(c)
 		}
 		p.hex = ""
 	}
-	y += u.px(38)
-	x := r.X
-	for i, hex := range a.settings.Paint.Recent {
-		rgb, err := parseColor(hex)
-		if err != nil {
-			continue
-		}
-		cell := gfx.Rect{X: x, Y: y, W: u.px(20), H: u.px(20)}
-		if cell.Right() > r.Right() {
-			break
-		}
-		u.c.RoundRect(cell, u.px(4), color.RGBA{rgb[0], rgb[1], rgb[2], 255})
-		id := fmt.Sprintf("art/recent/%d", i)
-		if u.hover(id, cell) {
-			u.cursor = CursorHand
-			u.c.RoundOutline(cell, u.px(4), max(1, u.px(1)), colText)
-		}
-		if u.clicked(id, cell) {
-			a.setPickerColor(color.NRGBA{R: rgb[0], G: rgb[1], B: rgb[2], A: 255})
-			p.hex = ""
-		}
-		x += cell.W + u.px(4)
-	}
-	return y + u.px(20)
 }
 
 // layerRow is one line of the layers panel.
@@ -373,6 +434,22 @@ func layerRows(g *paint.Node, depth int, out []layerRow) []layerRow {
 		if c.IsGroup() && c.Open {
 			out = layerRows(c, depth+1, out)
 		}
+	}
+	return out
+}
+
+// smartRows are the smart objects under g, each at the left, open ones with their layers, as the layers panel
+// lists them while it shows only smart objects.
+func smartRows(g *paint.Node, out []layerRow) []layerRow {
+	for _, c := range g.Children {
+		if c.IsSmart() {
+			out = append(out, layerRow{c, 0})
+			if c.Open {
+				out = layerRows(c, 1, out)
+			}
+			continue
+		}
+		out = smartRows(c, out)
 	}
 	return out
 }
@@ -444,16 +521,29 @@ func (a *App) drawLayers(ad *artDoc, r gfx.Rect) {
 	y += u.px(32)
 	cmds := gfx.Rect{X: r.X, Y: r.Bottom() - u.px(36), W: r.W, H: u.px(36)}
 	list := gfx.Rect{X: r.X, Y: y, W: r.W, H: cmds.Y - y - u.px(8)}
-	u.c.RoundRect(list, u.px(8), colBackground)
+	u.c.Fill(list, colBackground)
 	u.c.Push(list)
 	rowH := u.px(36)
 	rows := layerRows(d.Root, 0, nil)
+	ad.sliceRows = map[int]paint.Slice{}
+	for _, s := range d.Slices() {
+		ad.sliceRows[s.ID] = s
+	}
+	if a.settings.Paint.SmartOnly {
+		rows = smartRows(d.Root, nil)
+		if len(rows) == 0 {
+			u.label(u.face(12), list.Inset(u.px(12)), u.t("No smart objects here: a group becomes one with Layer › Convert to smart object"), colDim, 0)
+		}
+	}
 	maxScroll := max(float32(len(rows))*rowH-list.H, 0)
 	if u.hover("art/layers", list) && u.wheel != 0 {
 		a.layersScroll -= u.wheel * rowH * 2
 		u.wheel = 0
 	}
 	a.layersScroll = min(max(a.layersScroll, 0), maxScroll)
+	if ad.layerDrag != nil {
+		a.dragLayers(ad, list, rows, rowH, maxScroll)
+	}
 	for i, row := range rows {
 		n := row.n
 		rr := gfx.Rect{X: list.X, Y: list.Y + float32(i)*rowH - a.layersScroll, W: list.W, H: rowH}
@@ -462,6 +552,7 @@ func (a *App) drawLayers(ad *artDoc, r gfx.Rect) {
 		}
 		a.drawLayerRow(ad, n, row.depth, rr)
 	}
+	a.drawLayerDrop(ad, list, rowH)
 	u.c.Pop()
 	a.drawLayerCommands(ad, cmds)
 }
@@ -471,14 +562,23 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 	u := &a.u
 	d := ad.d
 	id := fmt.Sprintf("art/layer/%d", n.ID)
+	// A press on the row or a thumbnail that moves drags the layer to a new place.
+	if ad.layerDrag == nil && slices.ContainsFunc([]string{id, id + "/pixels", id + "/mask", id + "/clip"}, u.dragging) && u.drag.moved {
+		ad.startLayerDrag(n)
+	}
 	chosen := n.ID == d.Active
 	switch {
 	case chosen:
-		u.c.Fill(rr, gfx.Mix(colSurface, colAccent, 0.3))
+		u.c.Fill(rr, colSelected)
 	case slices.Contains(ad.picked, n.ID):
-		u.c.Fill(rr, gfx.Mix(colSurface, colAccent, 0.16))
+		u.c.Fill(rr, gfx.Mix(colSurfaceHi, colSelected, 0.5))
 	case u.hover(id, rr):
 		u.c.Fill(rr, colSurface)
+	case n.IsSmart():
+		u.c.Fill(rr, gfx.Mix(colBackground, colSuccess, 0.08)) // a smart object stands out
+	}
+	if n.IsSmart() {
+		u.c.Fill(gfx.Rect{X: rr.X, Y: rr.Y + u.px(6), W: u.px(3), H: rr.H - u.px(12)}, colSuccess)
 	}
 	x := rr.X + u.px(4) + float32(depth)*u.px(16)
 	eye := gfx.Rect{X: x, Y: rr.Y, W: u.px(24), H: rr.H}
@@ -505,23 +605,35 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 			d.SetOpenGroup(n.ID, !n.Open)
 			ad.dirty = true
 		}
-		u.icon(icGroup, gfx.Rect{X: fold.Right(), Y: rr.Y, W: u.px(20), H: rr.H}, 14, colWarning)
+		if n.IsSmart() {
+			ir := gfx.Rect{X: fold.Right(), Y: rr.Y, W: u.px(20), H: rr.H}
+			u.icon(icSmart, ir, 15, colSuccess)
+			u.hint(id+"/smart", u.tf("Smart object, link id %s: its %d copies here, and those in other canvases and videos, change together",
+				n.Smart.ID, len(d.SmartCopies(n.Smart.ID))), ir)
+		} else if n.IsBoard() {
+			u.icon(icBoard, gfx.Rect{X: fold.Right(), Y: rr.Y, W: u.px(20), H: rr.H}, 14, colAccent)
+			u.hint(id+"/board", u.t("Artboard: what is in it is cut to it and exports with it"), gfx.Rect{X: fold.Right(), Y: rr.Y, W: u.px(20), H: rr.H})
+		} else {
+			u.icon(icGroup, gfx.Rect{X: fold.Right(), Y: rr.Y, W: u.px(20), H: rr.H}, 14, colWarning)
+		}
 		x = fold.Right() + u.px(24)
 	} else {
 		thumb := gfx.Rect{X: x, Y: rr.Y + u.px(5), W: thumbW, H: thumbH}
 		a.drawLayerThumb(ad, n, thumb)
 		if chosen && !editing {
-			u.c.RoundOutline(thumb.Inset(-u.px(2)), u.px(4), max(1, u.px(1.5)), colWhite)
+			u.c.Outline(thumb.Inset(-u.px(2)), max(1, u.px(1.5)), colWhite)
 		}
 		if n.Adjust != nil {
 			u.hint(id+"/pixels", u.t("Adjustment layer: double-click to change its settings"), thumb)
 		}
+		a.ctrlSelect(ad, id, thumb, func(mode paint.SelectMode) error { return d.SelectContent(n.ID, mode) })
 		if u.press(id+"/pixels", thumb) && n.Adjust != nil && u.double {
 			u.letGo(id + "/pixels")
 			d.Choose(n.ID)
 			a.openAdjustmentSettings(ad, n.ID)
 		}
 		if u.clicked(id+"/pixels", thumb) {
+			ad.picked = nil
 			d.Choose(n.ID)
 			d.EditMask = n.Adjust != nil // an adjustment layer has only its mask to paint
 		}
@@ -531,14 +643,16 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 		mt := gfx.Rect{X: x, Y: rr.Y + u.px(5), W: thumbW, H: thumbH}
 		a.drawMaskThumb(ad, n, mt)
 		if editing {
-			u.c.RoundOutline(mt.Inset(-u.px(2)), u.px(4), max(1, u.px(1.5)), colWhite)
+			u.c.Outline(mt.Inset(-u.px(2)), max(1, u.px(1.5)), colWhite)
 		}
 		if n.MaskOff {
 			u.c.Line(mt.X, mt.Y, mt.Right(), mt.Bottom(), u.px(2), colDanger)
 			u.c.Line(mt.X, mt.Bottom(), mt.Right(), mt.Y, u.px(2), colDanger)
 		}
-		u.hint(id+"/mask", u.t("Layer mask: click to paint on it, Shift+click to turn it off or on"), mt)
+		u.hint(id+"/mask", u.t("Layer mask: click to paint on it, Shift+click to turn it off or on, Ctrl+click to select by it"), mt)
+		a.ctrlSelect(ad, id+"/mask", mt, func(mode paint.SelectMode) error { return d.SelectMask(n.ID, mode) })
 		if u.clicked(id+"/mask", mt) {
+			ad.picked = nil
 			d.Choose(n.ID)
 			if u.shift {
 				d.SetMaskOff(n.ID, !n.MaskOff)
@@ -549,7 +663,40 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 		}
 		x = mt.Right() + u.px(6)
 	}
+	if n.Clip != nil {
+		ct := gfx.Rect{X: x, Y: rr.Y + u.px(5), W: thumbW, H: thumbH}
+		a.drawClipThumb(ad, n, ct)
+		if chosen && a.artTool == toolNode && !d.EditMask {
+			u.c.RoundOutline(ct.Inset(-u.px(2)), u.px(4), max(1, u.px(1.5)), colWhite)
+		}
+		u.hint(id+"/clip", u.t("Vector mask: the layer shows inside its outline; click to edit it with the node tool, Ctrl+click to select inside it"), ct)
+		a.ctrlSelect(ad, id+"/clip", ct, func(mode paint.SelectMode) error { return d.SelectVectorMask(n.ID, mode) })
+		if u.clicked(id+"/clip", ct) {
+			ad.picked = nil
+			d.Choose(n.ID)
+			d.EditMask = false
+			a.setArtTool(toolNode)
+		}
+		x = ct.Right() + u.px(6)
+	}
 	right := rr.Right() - u.px(6)
+	if s, ok := ad.sliceRows[n.ID]; ok {
+		right = a.sliceIcon(ad, s, id, rr, right)
+	}
+	if n.IsSmart() {
+		// The link id, so copies are told by it; a click copies it.
+		f := u.bold(11)
+		label := "#" + n.Smart.ID
+		chip := gfx.Rect{X: right - f.Measure(label) - u.px(12), Y: rr.Y + (rr.H-u.px(20))/2, W: f.Measure(label) + u.px(12), H: u.px(20)}
+		u.c.RoundRect(chip, u.px(5), gfx.Mix(colBackground, colSuccess, 0.18))
+		u.label(f, chip, label, colSuccess, 0.5)
+		u.hint(id+"/link", u.t("The link id: smart objects with the same one share their layers; click to copy it"), chip)
+		if u.clicked(id+"/link", chip) {
+			d.Choose(n.ID)
+			a.copyLinkID(ad)
+		}
+		right = chip.X - u.px(6)
+	}
 	if n.Style != nil {
 		// Effects show as fx, as in Photoshop; a click opens them.
 		fx := gfx.Rect{X: right - u.px(20), Y: rr.Y, W: u.px(20), H: rr.H}
@@ -567,7 +714,7 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 	}
 	name := gfx.Rect{X: x, Y: rr.Y + u.px(4), W: right - x, H: rr.H - u.px(8)}
 	if ad.renaming == n.ID {
-		if _, done := u.textBox("art/rename", name, &ad.rename, "", false); done || u.focus != "art/rename" {
+		if _, done := u.inlineBox("art/rename", name, &ad.rename, 12.5, u.px(4)); done || u.focus != "art/rename" {
 			if strings.TrimSpace(ad.rename) != "" && ad.rename != n.Name {
 				d.Rename(n.ID, strings.TrimSpace(ad.rename))
 				ad.dirty = true
@@ -586,24 +733,60 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 		a.openMenu("art/layer/context", gfx.Rect{X: u.rightAt.X, Y: u.rightAt.Y, W: 1, H: 1}, a.layerContextMenu(ad))
 		u.rightAt = nil
 	}
+	if a.ctrlSelect(ad, id, rr, func(mode paint.SelectMode) error { return d.SelectContent(n.ID, mode) }) {
+		return
+	}
 	if u.press(id, rr) {
-		if u.ctrl {
-			// Ctrl+click chooses more layers besides the chosen one, or lets one go, as in Photoshop.
+		if u.shift && n.ID != d.Active {
+			// Shift+click chooses more layers besides the chosen one, or lets one go, as booleans need.
 			ad.togglePicked(n.ID)
 			u.letGo(id)
 			return
 		}
-		ad.picked = nil
+		ad.layerHeld = 0
+		if len(ad.picked) > 0 && (n.ID == d.Active || slices.Contains(ad.picked, n.ID)) {
+			// One of several chosen layers: they stay chosen, to be dragged together, until the press ends
+			// without a drag.
+			ad.layerHeld = n.ID
+		} else {
+			ad.picked = nil
+		}
 		if u.double {
 			ad.renaming, ad.rename = n.ID, n.Name
-			u.setFocus("art/rename")
+			u.focusEdit("art/rename", n.Name, false)
 		}
 		if d.Active != n.ID {
+			if i := slices.Index(ad.picked, n.ID); i >= 0 {
+				ad.picked[i] = d.Active // the chosen stay chosen, this one leading them
+			}
 			d.Choose(n.ID)
 			d.EditMask = n.Adjust != nil
 		}
 	}
-	u.letGo(id)
+	if u.letGo(id) && ad.layerHeld == n.ID {
+		ad.picked, ad.layerHeld = nil, 0
+	}
+}
+
+// ctrlSelect makes a selection with sel when a Ctrl+press lands in r, as Ctrl+click on a layer's name or thumbnail
+// does in Photoshop: a new selection, with Shift added to it, with Alt taken from it, with both where they meet. It
+// holds the press under its own id, so the layer is not chosen as a plain click on r would choose it.
+func (a *App) ctrlSelect(ad *artDoc, id string, r gfx.Rect, sel func(paint.SelectMode) error) bool {
+	u := &a.u
+	if !u.ctrl || !u.press(id+"/select", r) {
+		return false
+	}
+	mode := paint.SelectNew
+	switch {
+	case u.shift && u.alt:
+		mode = paint.SelectIntersect
+	case u.shift:
+		mode = paint.SelectAdd
+	case u.alt:
+		mode = paint.SelectSubtract
+	}
+	a.artRun(ad, func() error { return sel(mode) })
+	return true
 }
 
 // layerContextMenu is the right-click menu of the layers panel: the Layer menu's commands.
@@ -645,7 +828,7 @@ func (a *App) thumbFor(ad *artDoc, key int, of any, size image.Point, make func(
 // pages, what is painted, or else a tile.
 func thumbExtent(ad *artDoc, n *paint.Node) image.Rectangle {
 	pages := ad.d.Frame
-	for _, b := range ad.d.Boards {
+	for _, b := range ad.d.Boards() {
 		pages = pages.Union(b.Rect)
 	}
 	own := paint.ReachOf(n)
@@ -678,7 +861,7 @@ func thumbLevel(e image.Rectangle, size image.Point) (int, image.Rectangle) {
 // drawLayerThumb is a small picture of a layer's pixels over the picture's area.
 func (a *App) drawLayerThumb(ad *artDoc, n *paint.Node, r gfx.Rect) {
 	u := &a.u
-	u.c.RoundRect(r, u.px(3), checkLight)
+	u.c.Fill(r, checkLight)
 	dst := a.thumbArea(ad, n, r)
 	u.c.Fill(dst, checkDark)
 	size := dst.Pixels().Size()
@@ -727,16 +910,44 @@ func (a *App) drawMaskThumb(ad *artDoc, n *paint.Node, r gfx.Rect) {
 	u.c.Image(img, dst)
 }
 
+// clipThumbKey keeps vector mask thumbnails apart from the layers' and masks' own.
+const clipThumbKey = 1 << 40
+
+// drawClipThumb is a small picture of a vector mask, white inside its outline and black beyond.
+func (a *App) drawClipThumb(ad *artDoc, n *paint.Node, r gfx.Rect) {
+	u := &a.u
+	dst := a.thumbArea(ad, n, r)
+	size := dst.Pixels().Size()
+	if size.X <= 0 || size.Y <= 0 {
+		return
+	}
+	img := a.thumbFor(ad, clipThumbKey+n.ID, n.Clip, size, func(t *image.RGBA) {
+		e := thumbExtent(ad, n)
+		shape := *n.Clip
+		shape.Fill, shape.Stroke = solidPaint(color.NRGBA{R: 255, G: 255, B: 255, A: 255}), paint.VectorStroke{}
+		shape.M = shape.M.Then(paint.Translate(-float64(e.Min.X), -float64(e.Min.Y))).Then(paint.Affine{A: float64(size.X) / float64(e.Dx()), E: float64(size.Y) / float64(e.Dy())})
+		draw.Draw(t, t.Rect, image.Black, image.Point{}, draw.Src)
+		shape.Render(t, t.Rect, 1)
+	})
+	u.c.Image(img, dst)
+}
+
 func (a *App) drawLayerCommands(ad *artDoc, r gfx.Rect) {
 	u := &a.u
 	d := ad.d
 	x := r.X
-	cmds := []struct {
+	type cmd struct {
 		id, glyph, hint string
 		run             func() error
-	}{
-		{"new", icNewLayer, withKey(u.t("New layer"), "Ctrl+Shift+N"), func() error { d.AddLayer(a.layerName()); return nil }},
-		{"group", icNewGroup, u.t("New group"), func() error { d.AddGroup(a.groupName()); return nil }},
+	}
+	// With several layers chosen, the group button puts them into a group, as Affinity Designer's does.
+	group := cmd{"group", icNewGroup, u.t("New group"), func() error { d.AddGroup(a.groupName()); return nil }}
+	if len(ad.picked) > 0 {
+		group = cmd{"group", icNewGroup, withKey(u.t("Group layers"), a.keyHint("draw.group-layers", keys(key('G', "c")))), func() error { return a.groupChosen(ad, a.groupName()) }}
+	}
+	cmds := []cmd{
+		{"new", icNewLayer, withKey(u.t("New layer"), a.keyHint("draw.new-layer", keys(newLayerKeys...))), func() error { d.AddLayer(a.layerName()); return nil }},
+		group,
 		{"mask", icMask, u.t("Add layer mask"), d.AddMask},
 		{"dup", icDuplicate, withKey(u.t("Duplicate layer"), "Ctrl+J"), func() error { _, err := d.Duplicate(u.t(" copy")); return err }},
 		{"up", icUp, u.t("Move up"), func() error { return d.Move(true) }},
@@ -744,9 +955,17 @@ func (a *App) drawLayerCommands(ad *artDoc, r gfx.Rect) {
 		{"style", icEffects, u.t("Layer style…"), func() error { a.openStyle(ad); return nil }},
 		{"delete", icDelete, u.t("Delete layer"), d.Delete},
 	}
+	// Showing only the smart objects, at the start: a toggle rather than a command.
+	only := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: u.px(30)}
+	if u.iconButton("art/cmd/smartonly", only, icSmartFilter, u.t("Show only the smart objects"), a.settings.Paint.SmartOnly, true) {
+		a.settings.Paint.SmartOnly = !a.settings.Paint.SmartOnly
+		a.layersScroll = 0
+		a.saveSettings()
+	}
+	x = only.Right() + u.px(6)
 	// The buttons share what room the panel has, the menu of more commands at the end.
 	gap, moreW := u.px(2), u.px(30)
-	w := min(u.px(32), (r.W-moreW-gap*float32(len(cmds)))/float32(len(cmds)))
+	w := min(u.px(32), (r.Right()-x-moreW-gap*float32(len(cmds)))/float32(len(cmds)))
 	for _, b := range cmds {
 		br := gfx.Rect{X: x, Y: r.Y, W: w, H: u.px(30)}
 		if u.iconButton("art/cmd/"+b.id, br, b.glyph, b.hint, false, ad.stroke == nil) {

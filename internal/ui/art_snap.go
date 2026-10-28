@@ -62,7 +62,7 @@ func (ad *artDoc) snapTargetsOf(skip, skipBoard int, own []paint.Pt) snapTargets
 		b.Stroke = paint.VectorStroke{} // the object's own outline, not its stroke's reach
 		s.boxTargets(b.Bounds())
 	}
-	for _, b := range ad.d.Boards {
+	for _, b := range ad.d.Boards() {
 		if b.ID != skipBoard && b.Rect.Overlaps(view) {
 			s.boxTargets(rectOfImage(b.Rect))
 		}

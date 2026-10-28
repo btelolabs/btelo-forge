@@ -29,3 +29,25 @@ func BenchmarkFrame(b *testing.B) {
 		x.frame(Input{})
 	}
 }
+
+// BenchmarkCanvasZoom draws a busy canvas at a new zoom every frame, so the whole view is drawn again each time.
+func BenchmarkCanvasZoom(b *testing.B) {
+	x, ad := canvasHarness(b)
+	x.c.Resize(1800, 1125)
+	d := ad.d
+	for i := range 40 {
+		d.AddVector(solidSquare(float64(i%8)*45, float64(i/8)*55, 40, red), "Shape")
+	}
+	x.frame(Input{})
+	if path := os.Getenv("FORGE_PROFILE"); path != "" {
+		f, _ := os.Create(path)
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ad.zoom = 1.5 + float64(i%7)*0.25
+		ad.fit = false
+		x.frame(Input{})
+	}
+}

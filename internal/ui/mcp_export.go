@@ -41,11 +41,11 @@ func (a *App) av1() bool { return a.encoders != nil && codecAvailable(a.encoders
 
 // exportIn changes the export settings: a preset first, then any single setting on top of it.
 type exportIn struct {
-	Preset   *string  `json:"preset,omitempty" jsonschema:"high, balanced, small, strong, extreme or size (see export_options)"`
+	Preset   *string  `json:"preset,omitempty" jsonschema:"high, balanced, small, strong, extreme, size, webp or gif (see export_options)"`
 	Height   *int     `json:"height,omitempty" jsonschema:"the short side of the picture is at most this many pixels (never upscaled); 0 keeps the original; common: 2160, 1440, 1080, 720, 480, 360"`
 	FPS      *int     `json:"fps,omitempty" jsonschema:"frames per second at most (never raised); 0 keeps the original; common: 60, 30, 24, 15"`
 	Quality  *string  `json:"quality,omitempty" jsonschema:"high, balanced, small, smaller or smallest (ignored when target_mb is set)"`
-	Codec    *string  `json:"codec,omitempty" jsonschema:"h264 (plays anywhere), h265 (smaller) or av1 (smallest)"`
+	Codec    *string  `json:"codec,omitempty" jsonschema:"h264 (plays anywhere), h265 (smaller), av1 (smallest), gif (silent 256-colour loop) or webp (silent full-colour loop, far smaller than gif)"`
 	Speed    *string  `json:"speed,omitempty" jsonschema:"fast, medium, slow or slowest; slower makes smaller files"`
 	Audio    *string  `json:"audio,omitempty" jsonschema:"high (192k), normal (128k), low (96k), voice (64k mono) or none"`
 	Hardware *bool    `json:"hardware,omitempty" jsonschema:"encode on the NVIDIA graphics card when it can"`
@@ -123,6 +123,15 @@ func (a *App) apply(e project.Export, in exportIn) (project.Export, error) {
 		}
 		e.TargetMB = *in.TargetMB
 	}
+	if e.Codec.Animated() {
+		if in.TargetMB != nil && *in.TargetMB > 0 {
+			return e, fmt.Errorf("a %s animation cannot aim for a file size; choose a quality instead", codecIDs[e.Codec])
+		}
+		if in.Hardware != nil && *in.Hardware {
+			return e, fmt.Errorf("a %s animation is always made by the processor", codecIDs[e.Codec])
+		}
+		e.Hardware = false
+	}
 	if a.encoders != nil {
 		if !codecAvailable(a.encoders, e.Codec, false) {
 			return e, fmt.Errorf("this computer's ffmpeg cannot encode %s", codecIDs[e.Codec])
@@ -165,7 +174,7 @@ func (a *App) addExportTools(s *mcp.Server) {
 			}
 			return a.exportView(e), nil
 		})
-	tool(s, a, "export", "Encode the active edit to an MP4 (next to the source, or in the default export folder), optionally changing the settings first like set_export. Runs in the background; poll export_status.",
+	tool(s, a, "export", "Encode the active edit to an MP4, or a GIF or WebP animation when the settings ask for one (next to the source, or in the default export folder), optionally changing the settings first like set_export. Runs in the background; poll export_status.",
 		func(in exportIn) (any, error) {
 			if a.p == nil {
 				return nil, errNoProject

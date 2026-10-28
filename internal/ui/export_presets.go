@@ -38,6 +38,12 @@ var exportPresets = []exportPreset{
 	{"size", "Fit a size", "Aim for a file of a chosen size, encoded in two passes", func(bool) project.Export {
 		return project.Export{Quality: project.Balanced, Codec: project.HEVC, Speed: project.Slow, Audio: project.AudioNormal, TargetMB: defaultTargetMB}
 	}},
+	{"webp", "Animated WebP", "480p · 24 fps · silent, full colour, about a seventh of a GIF; plays in browsers and chat apps", func(bool) project.Export {
+		return project.Export{Height: 480, FPS: 24, Quality: project.Balanced, Codec: project.WebP, Speed: project.Slow, Audio: project.AudioNone}
+	}},
+	{"gif", "GIF", "480p · 15 fps · silent, 256 colours; plays everywhere, best for short clips", func(bool) project.Export {
+		return project.Export{Height: 480, FPS: 15, Quality: project.Balanced, Codec: project.GIF, Audio: project.AudioNone}
+	}},
 }
 
 // presetWords marks the preset texts for translation.
@@ -45,10 +51,13 @@ var presetWords = msgs("High quality", "Original size, best picture", "Balanced"
 	"Small file", "H.265 at the original size, about half the size of Balanced", "Strong compression",
 	"720p · 30 fps · H.265 · slow encoding, for sharing", "Extreme compression",
 	"480p · 24 fps · AV1 (H.265 when AV1 is missing) · voice-quality sound, the smallest file", "Fit a size",
-	"Aim for a file of a chosen size, encoded in two passes")
+	"Aim for a file of a chosen size, encoded in two passes", "Animated WebP",
+	"480p · 24 fps · silent, full colour, about a seventh of a GIF; plays in browsers and chat apps", "GIF",
+	"480p · 15 fps · silent, 256 colours; plays everywhere, best for short clips")
 
 // matchingPreset is the preset e is exactly, or -1 for custom settings; the size preset matches any size.
 func matchingPreset(e project.Export, av1 bool) int {
+	e = e.Effective()
 	for i, p := range exportPresets {
 		want := p.export(av1)
 		if want.TargetMB > 0 && e.TargetMB > 0 {
@@ -69,14 +78,14 @@ var (
 	rateNames       = msgs("Original", "60 fps", "30 fps", "24 fps", "15 fps")
 	qualityIDs      = []string{"high", "balanced", "small", "smaller", "smallest"}
 	qualityNames    = msgs("Best", "Balanced", "Small", "Smaller", "Smallest")
-	codecIDs        = []string{"h264", "h265", "av1"}
-	codecNames      = msgs("H.264 · plays anywhere", "H.265 · smaller", "AV1 · smallest")
+	codecIDs        = []string{"h264", "h265", "av1", "gif", "webp"}
+	codecNames      = msgs("H.264 · plays anywhere", "H.265 · smaller", "AV1 · smallest", "GIF animation", "WebP animation")
 	speedIDs        = []string{"medium", "fast", "slow", "slowest"}
 	speedOrder      = []project.Speed{project.Fast, project.Medium, project.Slow, project.Slowest}
 	speedNames      = msgs("Fast", "Normal", "Slow · smaller", "Slowest · smallest")
 	audioIDs        = []string{"high", "normal", "low", "voice", "none"}
 	audioNames      = msgs("192 kbit/s", "128 kbit/s", "96 kbit/s", "Voice · 64 kbit/s mono", "No sound")
-	codecShortNames = []string{"H.264", "H.265", "AV1"}
+	codecShortNames = []string{"H.264", "H.265", "AV1", "GIF", "WebP"}
 )
 
 // codecAvailable reports whether codec can be encoded, in software or on the graphics card as asked.

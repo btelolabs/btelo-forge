@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "platforms": [
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "servers": [
+        {"name": {"en": "Primary", "zh": "主服务器"}, "url": "rtmp://a.rtmp.youtube.com/live2"},
+        {"name": {"en": "Primary, encrypted", "zh": "主服务器（加密）"}, "url": "rtmps://a.rtmps.youtube.com:443/live2"},
+        {"name": {"en": "Backup", "zh": "备用服务器"}, "url": "rtmp://b.rtmp.youtube.com/live2?backup=1"}
+      ],
+      "help": {
+        "en": "In YouTube Studio choose Create → Go live → Stream, and copy the stream key.",
+        "zh": "在 YouTube 工作室选择「创建 → 开始直播 → 直播」，复制串流密钥。"
+      },
+      "page": "https://studio.youtube.com"
+    },
+    {
+      "id": "twitch",
+      "name": "Twitch",
+      "servers": [
+        {"name": {"en": "Nearest (recommended)", "zh": "就近接入（推荐）"}, "url": "rtmp://ingest.global-contribute.live-video.net/app"}
+      ],
+      "help": {
+        "en": "In the Twitch Creator Dashboard open Settings → Stream and copy the primary stream key.",
+        "zh": "在 Twitch 创作者仪表板打开「设置 → 直播」，复制主串流密钥。"
+      },
+      "page": "https://dashboard.twitch.tv/settings/stream",
+      "maxKbps": 6000
+    },
+    {
+      "id": "facebook",
+      "name": "Facebook Live",
+      "servers": [
+        {"name": {"en": "Default", "zh": "默认"}, "url": "rtmps://live-api-s.facebook.com:443/rtmp/"}
+      ],
+      "help": {
+        "en": "In Facebook Live Producer choose Streaming software and copy the stream key.",
+        "zh": "在 Facebook 直播制作工具中选择「直播软件」，复制串流密钥。"
+      },
+      "page": "https://www.facebook.com/live/producer"
+    },
+    {
+      "id": "kick",
+      "name": "Kick",
+      "help": {
+        "en": "In the Kick dashboard open Settings → Stream URL & Key and copy both.",
+        "zh": "在 Kick 后台打开「设置 → Stream URL & Key」，复制推流地址和密钥。"
+      },
+      "page": "https://dashboard.kick.com"
+    },
+    {
+      "id": "bilibili",
+      "name": {"en": "Bilibili", "zh": "哔哩哔哩"},
+      "servers": [
+        {"name": {"en": "Default", "zh": "默认"}, "url": "rtmp://live-push.bilivideo.com/live-bvc/"}
+      ],
+      "help": {
+        "en": "In Bilibili's live centre (My live room → Start live), start the room and copy the server address and stream key.",
+        "zh": "在 B 站「直播中心 → 我的直播间 → 开播设置」开播后，复制服务器地址和串流密钥。"
+      },
+      "page": "https://link.bilibili.com/p/center/index#/my-room/start-live"
+    },
+    {
+      "id": "douyin",
+      "name": {"en": "Douyin", "zh": "抖音"},
+      "portrait": true,
+      "help": {
+        "en": "Douyin streams from other software once third-party streaming is enabled for the account; copy the push address and key it gives (they may change with every broadcast).",
+        "zh": "抖音需要账号开通第三方推流权限；开播时选择第三方推流，复制推流地址和推流密钥（每次开播可能变化）。"
+      }
+    },
+    {
+      "id": "kuaishou",
+      "name": {"en": "Kuaishou", "zh": "快手"},
+      "portrait": true,
+      "help": {
+        "en": "Enable streaming software (push streaming) in Kuaishou's live tools and copy the push address and key.",
+        "zh": "在快手直播伴侣或直播后台开通推流开播，复制推流地址和推流码。"
+      }
+    },
+    {
+      "id": "wechat-channels",
+      "name": {"en": "WeChat Channels", "zh": "视频号"},
+      "portrait": true,
+      "help": {
+        "en": "In the Channels assistant (channels.weixin.qq.com) create a live stream with push streaming and copy the push address and key.",
+        "zh": "在视频号助手（channels.weixin.qq.com）创建直播并选择推流直播，复制推流地址和推流密钥。"
+      },
+      "page": "https://channels.weixin.qq.com"
+    },
+    {
+      "id": "huya",
+      "name": {"en": "Huya", "zh": "虎牙"},
+      "help": {
+        "en": "In Huya's streamer settings choose third-party streaming and copy the push address and key.",
+        "zh": "在虎牙主播后台的开播设置中选择第三方推流，复制推流地址和推流码。"
+      },
+      "page": "https://i.huya.com"
+    },
+    {
+      "id": "douyu",
+      "name": {"en": "Douyu", "zh": "斗鱼"},
+      "help": {
+        "en": "In Douyu's streamer centre open the third-party streaming settings and copy the RTMP address and live code.",
+        "zh": "在斗鱼主播中心的直播设置中打开第三方推流，复制 RTMP 地址和直播码。"
+      },
+      "page": "https://mp.douyu.com"
+    },
+    {
+      "id": "xiaohongshu",
+      "name": {"en": "Xiaohongshu", "zh": "小红书"},
+      "portrait": true,
+      "help": {
+        "en": "Once streaming software is enabled for the account, copy the push address and key from Xiaohongshu's live tools.",
+        "zh": "账号开通电脑推流后，在小红书直播工具里复制推流地址和推流密钥。"
+      }
+    },
+    {
+      "id": "custom",
+      "name": {"en": "Custom server", "zh": "自定义服务器"},
+      "help": {
+        "en": "Any server that takes RTMP, RTMPS or SRT: paste its address and stream key.",
+        "zh": "任何支持 RTMP、RTMPS 或 SRT 的服务器：填入它的地址和串流密钥。"
+      }
+    }
+  ]
+}

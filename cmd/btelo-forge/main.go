@@ -56,6 +56,16 @@ func run(background bool, capture string, deadline time.Duration, files []string
 	if err != nil {
 		return err
 	}
+	// Files opened from Explorer while the app runs become tabs of its window; automated runs keep to themselves.
+	interactive := !background && capture == ""
+	for i, f := range files {
+		if abs, err := filepath.Abs(f); err == nil {
+			files[i] = abs
+		}
+	}
+	if interactive && forwardFiles(files) {
+		return nil
+	}
 	w, err := openWindow(ui.ProductName, 1440, 900, background)
 	if err != nil {
 		return err
@@ -72,15 +82,16 @@ func run(background bool, capture string, deadline time.Duration, files []string
 	_ = rewritePaths(filepath.Join(stateDir, "edits"), moves)
 	app := ui.New(w, fonts, cacheDir, stateDir)
 	defer app.Close()
-	for _, f := range files {
-		app.Open(f)
+	app.OpenFromSystem(files)
+	if interactive {
+		takeFiles(w)
 	}
 	canvas := gfx.NewCanvas(1, 1)
 	var next time.Duration
 	draw := func(in ui.Input) error {
 		width, height := w.Size()
 		if width == 0 || height == 0 {
-			// Minimized: nothing to draw, but background work and a recording still need looking after.
+			// Minimized or hidden: nothing to draw, but background work and a recording still need looking after.
 			next = app.Tick(in)
 			return nil
 		}

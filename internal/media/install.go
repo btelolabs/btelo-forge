@@ -35,10 +35,13 @@ import (
 //go:embed ffmpeg.json
 var DefaultToolsJSON []byte
 
-// ToolsConfig says which ffmpeg is good enough and where to download one when the computer has none.
+// ToolsConfig says which ffmpeg is good enough and where to download one. The app uses its own ffmpeg, one shipped
+// beside it or downloaded, so that every computer records, streams and exports with the same build; System lets it
+// use one installed on the computer as well.
 type ToolsConfig struct {
 	Version   int        `json:"version"`
 	Minimum   string     `json:"minimum"`
+	System    bool       `json:"system,omitempty"`
 	Downloads []Download `json:"downloads"`
 
 	minimum [2]int
@@ -190,7 +193,7 @@ func installDir(root string, d Download) string {
 }
 
 // candidates lists the folders and programs to try, best first: next to this program, the downloads of the
-// configuration, then whatever the system has.
+// configuration, then, when the configuration allows it, whatever the system has.
 func candidates(c *ToolsConfig, root string) []Tools {
 	var out []Tools
 	pair := func(dir string) Tools {
@@ -201,6 +204,9 @@ func candidates(c *ToolsConfig, root string) []Tools {
 	}
 	for _, d := range c.For(runtime.GOOS, runtime.GOARCH) {
 		out = append(out, pair(installDir(root, d)))
+	}
+	if !c.System {
+		return out
 	}
 	ffmpeg, err1 := exec.LookPath("ffmpeg")
 	ffprobe, err2 := exec.LookPath("ffprobe")
@@ -406,11 +412,12 @@ func unpackPrograms(archive, dir string) error {
 // FormatGuide explains the ffmpeg configuration to people and to AI assistants that edit it.
 const FormatGuide = `ffmpeg configuration (JSON)
 
-{"version": 1, "minimum": "6.0", "downloads": [download, ...]}
+{"version": 1, "minimum": "6.0", "system": false, "downloads": [download, ...]}
 
-The app uses the first ffmpeg and ffprobe it finds whose version is at least minimum, looking next to the program,
-then in the folders of the downloads below, then on the system (PATH, and Homebrew on macOS). When there is none it
-downloads one: the downloads for this computer are tried in order until one works.
+The app uses its own ffmpeg, so that recording, streaming and exporting work the same on every computer: the first
+ffmpeg and ffprobe whose version is at least minimum, looking next to the program, then in the folders of the
+downloads below. When there is none it downloads one: the downloads for this computer are tried in order until one
+works. "system": true also accepts an ffmpeg installed on the computer (PATH, and Homebrew on macOS), after those.
 
 download  {"name", "os": windows | darwin | linux, "arch": amd64 | arm64, "archives": [archive, ...]}
 archive   {"url": a .zip holding ffmpeg and/or ffprobe anywhere inside, "size": bytes (for progress, optional),

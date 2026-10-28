@@ -59,7 +59,7 @@ nodes and handles (Shift adds to the chosen nodes, a box chooses those in it, Al
 double-click toggles it, a click on the outline adds a node, Delete removes, the arrows nudge) and turns a smart
 shape into a curve on its first edit; its context bar edits the fill and stroke (paint, width, alignment, caps,
 joins, dashes). An edit under way is a `VectorSession`: shown as it goes, recorded as one step when it ends, and a
-curve left with no outline takes its layer with it. The pencil (N) draws freehand and fits the line with a few
+curve left with no outline takes its layer with it. The vector brush (P) draws freehand and fits the line with a few
 smooth curves (`FitPath` in `fit.go`, Schneider's method: least-squares cubics with Newton reparameterisation,
 split at the worst point, sharp at corners).
 
@@ -77,7 +77,8 @@ artboards and the frame, else along their edges and middle lines each way on its
 
 ## Retouching, adjustment layers, layer styles and warps
 
-The retouching brushes (`retouch.go`) are dodge, burn and sponge (O) and blur, sharpen and smudge (R). All but
+The retouching brushes (`retouch.go`) are dodge, burn and sponge (O) and blur, sharpen and smudge (a place of their
+own without a key; R renames the chosen layer). All but
 smudge follow the brush's model: the stroke's coverage lays on a full effect worked out from the pixels as they
 were when the stroke began (dodge and burn by tone range with an exposure, the sponge to or from grey, blur three box
 blurs, sharpen an unsharp mask from the same blur), so one stroke never goes past its strength. Smudge carries a
@@ -113,6 +114,19 @@ artboard tool shares the move tool's place (Shift+V): a drag makes a board, a pr
 it, its handles resize it, and its options name it, size it from presets or typed numbers, set its background and
 export it. Boards are part of the picture's state, so they undo, and resizing or turning the canvas maps them. The
 view darkens the pasteboard beyond the frame and the boards.
+
+## Slices
+
+Slices (`slices.go`) follow the Krita named-assets plugin, with a name ending in `.png` as the mark (K adds or
+takes it away for the chosen nodes, as one step). `folder/name.png` exports into that folder beside the canvas
+file; `name_WxH.png` gives a size; a group whose name has a `WxH` part is a folder group, not a file: what is
+directly in it exports, marked or not, into its other folders at its size, and a folder group in it adds its folders
+and size. A size in the name beats one among its folders, which beats the folder group's. A slice is the node alone
+(its own opacity, its masks and effects), cut to what it shows, or an artboard's frame; a size pads it with
+transparency or crops it about the centre and never scales. Names that would leave the folder, are not portable
+file names, or export to the same file as another (case aside) are refused before anything is written; Export
+slices keeps a copy of each file it replaces under `.slice-backups/<time>/`. The ⓘ by a slice in the layers panel
+explains what it exports, at what size and why.
 
 ## Files
 

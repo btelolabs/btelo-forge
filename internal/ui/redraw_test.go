@@ -15,11 +15,7 @@ func TestInputIsShownWithoutWaitingForMoreInput(t *testing.T) {
 	}
 	l := x.a.layout()
 	gear := l.tabs.Right() - x.a.u.px(40)
-	end := gear
-	if x.a.recorder() != nil {
-		record, _ := x.a.recordButtons(gear, 0, 0) // the recording buttons sit between them
-		end = record.X
-	}
+	end := x.a.liveControlRect(gear, 0, 0).X // the live stream, while live, sits between them
 	toggle := end - x.a.u.px(36) + x.a.u.px(16)
 	y := l.tabs.Y + x.a.u.px(20)
 	x.a.Frame(Input{X: toggle, Y: y, Down: true, Pointer: []Pointer{{X: toggle, Y: y, Down: true}}}, x.c, x.scale)

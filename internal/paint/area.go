@@ -66,6 +66,74 @@ func (d *Doc) workArea(own *plane, reach int) []image.Rectangle {
 	return out
 }
 
+// areaOf is where an operation on the chosen node's pixels, or on its mask when toMask, acts (see workArea and
+// maskArea).
+func (d *Doc) areaOf(n *Node, toMask bool, reach int) []image.Rectangle {
+	if toMask {
+		return d.maskArea(n, reach)
+	}
+	return d.workArea(&n.Pixels.p, reach)
+}
+
+// maskArea is where an operation on n's mask acts: over what n shows, grown by reach, within the selection and the
+// frame. Beyond what its layer shows a mask hides nothing, so the work follows the layer's size and never the
+// canvas's. An adjustment layer's mask hides its effect on everything under it, so it acts as on pixels.
+func (d *Doc) maskArea(n *Node, reach int) []image.Rectangle {
+	limit, bounded := contentReach(n)
+	if !bounded {
+		return d.workArea(&n.Mask.p, reach)
+	}
+	if limit.Empty() {
+		return nil
+	}
+	limit = limit.Inset(-reach)
+	if !d.Frame.Empty() {
+		limit = limit.Intersect(d.Frame)
+	}
+	if sel := d.Selection; sel != nil && sel.Fill() == 0 {
+		limit = limit.Intersect(sel.TileBounds())
+	}
+	if limit.Empty() {
+		return nil
+	}
+	var out []image.Rectangle
+	k0, k1 := keysOver(limit)
+	for ky := k0.Y; ky <= k1.Y; ky++ {
+		for kx := k0.X; kx <= k1.X; kx++ {
+			if r := tileRect(image.Pt(kx, ky)).Intersect(limit); !r.Empty() {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
+// contentReach is a quick bound of where n shows anything: a layer's reach, a group's children's. It is unbounded
+// for an adjustment layer, which changes everything under it, and so for a pass-through group holding one; in any
+// other group an adjustment changes only what the group's own layers show.
+func contentReach(n *Node) (image.Rectangle, bool) {
+	switch {
+	case n.Board != nil:
+		return n.Board.Rect, true // what is in a board is cut to it, and its background fills it
+	case n.Adjust != nil:
+		return image.Rectangle{}, false
+	case !n.IsGroup():
+		return reachOfNode(n), true
+	}
+	var r image.Rectangle
+	for _, c := range n.Children {
+		cr, bounded := contentReach(c)
+		if !bounded {
+			if n.Blend == BlendPassThrough {
+				return image.Rectangle{}, false
+			}
+			continue
+		}
+		r = r.Union(cr)
+	}
+	return r, true
+}
+
 // spanOf is the rectangle that spans pieces, for reporting what changed.
 func spanOf(pieces []image.Rectangle) image.Rectangle {
 	var r image.Rectangle

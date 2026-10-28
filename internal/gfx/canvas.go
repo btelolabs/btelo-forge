@@ -64,6 +64,15 @@ func (c *Canvas) Push(r Rect) {
 	c.clip = c.clip.Intersect(r.Pixels())
 }
 
+// ResetClip drops every clip pushed, drawing on the whole canvas again, as after a frame that stopped part way.
+func (c *Canvas) ResetClip() {
+	c.clips = c.clips[:0]
+	c.clip = c.Img.Rect
+}
+
+// Clip is the rectangle drawing is limited to now.
+func (c *Canvas) Clip() image.Rectangle { return c.clip }
+
 // Pop restores the clip from before the last Push.
 func (c *Canvas) Pop() {
 	c.clip = c.clips[len(c.clips)-1]
@@ -142,6 +151,11 @@ func (c *Canvas) RoundRect(r Rect, radius float32, col color.RGBA) {
 	c.roundShape(r, radius, -1, col)
 }
 
+// Outline strokes the inside edge of r with a line of width w, square-cornered and anti-aliased.
+func (c *Canvas) Outline(r Rect, w float32, col color.RGBA) {
+	c.roundShape(r, 0, w, col)
+}
+
 // RoundOutline strokes the inside edge of r with a line of width w.
 func (c *Canvas) RoundOutline(r Rect, radius, w float32, col color.RGBA) {
 	c.roundShape(r, radius, w, col)
@@ -171,11 +185,12 @@ func (c *Canvas) roundShape(r Rect, radius, width float32, col color.RGBA) {
 	}
 	// Pixels whose centre lies within spanHalf of cx form the row's span.
 	spanHalf := hx - radius - margin
+	// Both ends stay within the clip, in order, even when the span lies wholly to one side of it: an end left of
+	// the clip would start a row's pixels on the row before.
 	x0, x1 := b.Max.X, b.Max.X
 	if spanHalf > 0 {
-		x0 = max(b.Min.X, int(math.Ceil(float64(cx-spanHalf-0.5))))
-		x1 = min(b.Max.X, int(math.Floor(float64(cx+spanHalf-0.5)))+1)
-		x0 = min(x0, x1)
+		x0 = min(max(b.Min.X, int(math.Ceil(float64(cx-spanHalf-0.5)))), b.Max.X)
+		x1 = min(max(x0, int(math.Floor(float64(cx+spanHalf-0.5)))+1), b.Max.X)
 	}
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		qy := float32(math.Abs(float64(float32(y)+0.5-cy))) - hy

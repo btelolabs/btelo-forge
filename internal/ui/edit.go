@@ -79,9 +79,7 @@ func (a *App) deleteSelection() {
 // focusBody puts the caret in the selected text overlay's editor with its text selected.
 func (a *App) focusBody(body string) {
 	a.showPanel(tabOverlays)
-	a.u.setFocus("overlay/body")
-	a.u.edit = editor{text: []rune(body), multiline: true}
-	a.u.edit.anchor, a.u.edit.caret = 0, len(a.u.edit.text)
+	a.u.focusEdit("overlay/body", body, true)
 }
 
 func (a *App) addText() {
@@ -113,6 +111,10 @@ func (a *App) addImage(path string) {
 // paste adds what the clipboard holds: an image, files, or text as a caption.
 func (a *App) paste() {
 	img, files, text := a.host.Paste()
+	if n := a.pastedNode(img, files); n != nil && n.IsSmart() && a.p != nil {
+		a.addSmartOverlay(n.Smart.ID) // its picture, following its layers
+		return
+	}
 	switch {
 	case img != nil && a.p != nil:
 		path, err := a.storeImage(img)

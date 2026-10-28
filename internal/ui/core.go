@@ -3,6 +3,7 @@ package ui
 import (
 	"image"
 	"image/color"
+	"slices"
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/gfx"
@@ -18,24 +19,30 @@ const (
 	CursorResize
 	CursorMove
 	CursorCross
+	CursorResizeCorner // a bottom-right corner, dragged to resize
 )
 
 // Key codes the UI reacts to (Windows virtual keys).
 const (
-	keyBack   = 0x08
-	keyTab    = 0x09
-	keyEnter  = 0x0d
-	keyEscape = 0x1b
-	keySpace  = 0x20
-	keyPageUp = 0x21
-	keyPageDn = 0x22
-	keyEnd    = 0x23
-	keyHome   = 0x24
-	keyLeft   = 0x25
-	keyUp     = 0x26
-	keyRight  = 0x27
-	keyDown   = 0x28
-	keyDelete = 0x2e
+	keyBack     = 0x08
+	keyTab      = 0x09
+	keyEnter    = 0x0d
+	keyEscape   = 0x1b
+	keySpace    = 0x20
+	keyPageUp   = 0x21
+	keyPageDn   = 0x22
+	keyEnd      = 0x23
+	keyHome     = 0x24
+	keyLeft     = 0x25
+	keyUp       = 0x26
+	keyRight    = 0x27
+	keyDown     = 0x28
+	keyDelete   = 0x2e
+	keyNum0     = 0x60 // the number pad's 0; its 1 to 9 follow
+	keyNumPlus  = 0x6b
+	keyNumMinus = 0x6d
+	keyEquals   = 0xbb // = and +
+	keyMinus    = 0xbd // - and _
 )
 
 // Key is one key press.
@@ -62,16 +69,18 @@ type Input struct {
 	Shift   bool
 	Alt     bool
 	Keys    []Key
+	Up      []uint16 // the keys let go, by code, for keys that act while they are held
 	Typed   []rune
 	Dropped []string
-	Hotkeys []int // the hotkey actions pressed, system-wide
+	Opened  []string // files opened from outside, as from Explorer, while the app runs
+	Hotkeys []int    // the hotkey actions pressed, system-wide
 	// Inactive is set while the window does not have the keyboard focus; nothing then animates for the eye alone.
 	Inactive bool
 }
 
 // acted reports whether the input carries anything the frame may act on, as opposed to only a pointer position.
 func (in Input) acted() bool {
-	return len(in.Pointer) > 0 || in.Wheel != 0 || len(in.Keys) > 0 || len(in.Typed) > 0 || len(in.Dropped) > 0 || len(in.Hotkeys) > 0
+	return len(in.Pointer) > 0 || in.Wheel != 0 || len(in.Keys) > 0 || len(in.Up) > 0 || len(in.Typed) > 0 || len(in.Dropped) > 0 || len(in.Opened) > 0 || len(in.Hotkeys) > 0
 }
 
 // Host is what the UI needs from the window it runs in.
@@ -93,38 +102,54 @@ type Host interface {
 
 // ctx is the per-frame immediate-mode state.
 type ctx struct {
-	c        *gfx.Canvas
-	fonts    gfx.Fonts
-	s        float32
-	mx, my   float32
-	down     bool
-	pressed  bool
-	pressX   float32
-	pressY   float32
-	double   bool
-	rightAt  *Pointer
-	wheel    float32
-	shift    bool
-	ctrl     bool
-	alt      bool
-	inactive bool // the window does not have the keyboard focus
-	keys     []Key
-	typed    []rune
-	active   string
-	focus    string
-	cursor   Cursor
-	blocked  bool
-	drag     dragState
-	host     Host
-	lang     Language
+	c         *gfx.Canvas
+	fonts     gfx.Fonts
+	s         float32
+	mx, my    float32
+	down      bool
+	pressed   bool
+	pressX    float32
+	pressY    float32
+	double    bool
+	rightAt   *Pointer
+	rightDown bool // the right button is held
+	wheel     float32
+	shift     bool
+	ctrl      bool
+	alt       bool
+	inactive  bool // the window does not have the keyboard focus
+	keys      []Key
+	held      []uint16 // the keys held down, by code, as their presses and releases came
+	heldWas   []uint16 // those held as the frame began, before its presses and releases
+	up        []uint16 // those let go this frame
+	typed     []rune
+	active    string
+	focus     string
+	cursor    Cursor
+	blocked   bool
+	drag      dragState
+	host      Host
+	lang      Language
 
 	tip        tip
 	tipSeen    bool
 	edit       editor
-	focusDrawn bool // the focused text box was drawn this frame
+	editOwner  string     // the box the editor holds the words of (beginEdit)
+	editScroll [2]float32 // how far that box's words are scrolled, sideways and down
+	editDrag   bool       // a press in that box chooses as it is dragged
+	focusDrawn bool       // the focused text box was drawn this frame
 	caretBlink time.Time
+	caretSeen  caretSeen // the caret as last drawn, so moving it shows it again
 	imeAt      [3]float32
 	blinking   bool
+}
+
+// isHeld reports whether the key with code is held down.
+func (u *ctx) isHeld(code uint16) bool { return slices.Contains(u.held, code) }
+
+// repeated reports whether a press is the keyboard repeating a key held since before this frame.
+func (u *ctx) repeated(k Key) bool {
+	return slices.Contains(u.heldWas, k.Code) && !slices.Contains(u.up, k.Code)
 }
 
 // dragState remembers where a drag began and what it started from.
@@ -139,6 +164,9 @@ func (u *ctx) begin(in Input) {
 	u.mx, u.my, u.down = in.X, in.Y, in.Down
 	u.pressed, u.double, u.rightAt = false, false, nil
 	for i, p := range in.Pointer {
+		if p.Right {
+			u.rightDown = p.Down
+		}
 		switch {
 		case p.Right && p.Down && u.rightAt == nil:
 			u.rightAt = &in.Pointer[i]
@@ -150,6 +178,18 @@ func (u *ctx) begin(in Input) {
 		u.drag = dragState{x: u.pressX, y: u.pressY}
 	}
 	u.wheel, u.ctrl, u.shift, u.alt, u.keys, u.typed, u.inactive = in.Wheel, in.Ctrl, in.Shift, in.Alt, in.Keys, in.Typed, in.Inactive
+	u.heldWas, u.up = append(u.heldWas[:0], u.held...), in.Up
+	for _, k := range in.Keys {
+		if !slices.Contains(u.held, k.Code) {
+			u.held = append(u.held, k.Code)
+		}
+	}
+	for _, c := range in.Up {
+		u.held = slices.DeleteFunc(u.held, func(h uint16) bool { return h == c })
+	}
+	if in.Inactive {
+		u.held = u.held[:0] // keys let go in another window are never reported
+	}
 	u.cursor = CursorArrow
 }
 

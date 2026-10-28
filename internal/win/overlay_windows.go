@@ -20,6 +20,7 @@ var (
 	getWindowLong         = user32.NewProc("GetWindowLongPtrW")
 	setWindowLong         = user32.NewProc("SetWindowLongPtrW")
 	setWindowPos          = user32.NewProc("SetWindowPos")
+	isWindow              = user32.NewProc("IsWindow")
 	overlayClassOnce      sync.Once
 	overlayClassErr       error
 	overlayClass, _       = syscall.UTF16PtrFromString("BteloForgeOverlay")
@@ -55,7 +56,9 @@ type overlayState struct {
 	bits         []byte // the DIB section's premultiplied BGRA pixels
 	size         image.Point
 	clickThru    bool
-	forwardClose bool // a request to close goes to the main window
+	forwardClose bool    // a request to close goes to the main window
+	keyboard     bool    // it takes the keyboard (TakeKeyboard)
+	before       uintptr // the window in front before it took the keyboard
 }
 
 // OpenOverlay creates a borderless, always-on-top window whose pixels can be partly transparent: the region picker,
@@ -92,6 +95,11 @@ func OpenOverlay(o OverlayOptions) (*Window, error) {
 	}
 	w := &Window{Handle: hwnd, cursor: Arrow, overlay: &overlayState{bounds: b, clickThru: o.ClickThrough, forwardClose: !o.Activate}}
 	windows.Store(hwnd, w)
+	// No overlay takes text: without an IME its keys come as themselves, as the brush keys over a drawing need.
+	if err := associateIME(hwnd, false); err != nil {
+		w.Close()
+		return nil, err
+	}
 	if o.Excluded {
 		if err := w.ExcludeFromCapture(true); err != nil {
 			w.Close()
@@ -221,6 +229,31 @@ func (w *Window) SetClickThrough(on bool) {
 		ex &^= exTransparent
 	}
 	setWindowLong.Call(w.Handle, gwlExStyle, ex)
+}
+
+// TakeKeyboard brings an overlay opened without Activate in front to take the keyboard, as drawing on the screen
+// does, or gives the keyboard back to the window that had it. While it has the keyboard, a request to close (Alt+F4)
+// closes the overlay rather than the app.
+func (w *Window) TakeKeyboard(on bool) {
+	o := w.overlay
+	if o == nil || o.keyboard == on {
+		return
+	}
+	o.keyboard, o.forwardClose = on, !on
+	ex, _, _ := getWindowLong.Call(w.Handle, gwlExStyle)
+	if on {
+		o.before, _, _ = getForeground.Call()
+		setWindowLong.Call(w.Handle, gwlExStyle, ex&^exNoActivate)
+		setForeground.Call(w.Handle)
+		return
+	}
+	setWindowLong.Call(w.Handle, gwlExStyle, ex|exNoActivate)
+	if front, _, _ := getForeground.Call(); front == w.Handle && o.before != 0 && o.before != w.Handle {
+		if alive, _, _ := isWindow.Call(o.before); alive != 0 {
+			setForeground.Call(o.before)
+		}
+	}
+	o.before = 0
 }
 
 // MoveOverlay puts the overlay at r, such as a toolbar being dragged.

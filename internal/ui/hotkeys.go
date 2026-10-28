@@ -20,11 +20,12 @@ const (
 	hotkeyRecord = iota // start or stop recording
 	hotkeyPause
 	hotkeyScreenshot
-	hotkeyDraw // draw on the screen, or give the mouse back while keeping the drawing
+	hotkeyDraw   // draw on the screen, or give the mouse back while keeping the drawing
+	hotkeyWindow // hide the window, or bring it back and in front
 	hotkeyCount
 )
 
-var hotkeyNames = msgs("Start or stop recording", "Pause or resume recording", "Take a screenshot", "Draw on the screen")
+var hotkeyNames = msgs("Start or stop recording", "Pause or resume recording", "Take a screenshot", "Draw on the screen", "Show or hide this window")
 
 // hotkeySettings are the hotkeys the user chose, kept between runs.
 type hotkeySettings struct {
@@ -32,21 +33,23 @@ type hotkeySettings struct {
 	Pause      Hotkey `json:"pause"`
 	Screenshot Hotkey `json:"screenshot"`
 	Draw       Hotkey `json:"draw"`
+	Window     Hotkey `json:"window"`
 }
 
 // defaultHotkeys avoid the combinations other programs often take, such as Ctrl+Alt+R and NVIDIA's Alt+F9.
 func defaultHotkeys() hotkeySettings {
-	const f9, f10, f11, f12 = 0x78, 0x79, 0x7a, 0x7b
+	const f8, f9, f10, f11, f12 = 0x77, 0x78, 0x79, 0x7a, 0x7b
 	return hotkeySettings{
 		Record:     Hotkey{Ctrl: true, Shift: true, Key: f9},
 		Pause:      Hotkey{Ctrl: true, Shift: true, Key: f10},
 		Screenshot: Hotkey{Ctrl: true, Shift: true, Key: f12},
 		Draw:       Hotkey{Ctrl: true, Shift: true, Key: f11},
+		Window:     Hotkey{Ctrl: true, Shift: true, Key: f8},
 	}
 }
 
 func (h *hotkeySettings) list() [hotkeyCount]*Hotkey {
-	return [hotkeyCount]*Hotkey{&h.Record, &h.Pause, &h.Screenshot, &h.Draw}
+	return [hotkeyCount]*Hotkey{&h.Record, &h.Pause, &h.Screenshot, &h.Draw, &h.Window}
 }
 
 // hotkeyState is what registering the hotkeys found, and the one being chosen in Settings.
@@ -166,7 +169,23 @@ func (a *App) handleHotkeys(pressed []int) {
 			}
 		case hotkeyDraw:
 			a.toggleScreenDraw()
+		case hotkeyWindow:
+			a.toggleWindow()
 		}
+	}
+}
+
+// toggleWindow hides the window when it is in front, and otherwise brings it back and in front: a window behind
+// another program's comes forward rather than vanishing, as people expect of a key that shows an app.
+func (a *App) toggleWindow() {
+	host := a.recorder()
+	if host == nil {
+		return
+	}
+	if host.Shown() {
+		host.Hide()
+	} else {
+		host.Restore()
 	}
 }
 
@@ -177,20 +196,28 @@ func (a *App) settingsHotkeys(r gfx.Rect) {
 	domain := a.keyDomainTabs(rectAt(r.X, r.Y, r.W, u.px(34)))
 	r = rectAt(r.X, r.Y+u.px(46), r.W, r.H-u.px(46))
 	if domain != domainRecording {
-		y := a.paragraph(r.X, r.Y, r.W, u.t(domainHelp[domain]), 12.5, colDim) + u.px(10)
+		y := a.paragraph(r.X, r.Y, r.W, a.domainHelp(domain), 12.5, colDim) + u.px(10)
 		a.settingsKeys(domain, rectAt(r.X, y, r.W, r.Bottom()-y))
 		return
 	}
 	a.settingsRecordingHotkeys(r)
 }
 
-// domainHelp explains each in-window domain's keys at the top of its page.
-var domainHelp = msgs(
-	"These keys work in every tab. Click a command's keys, then press the new combination.",
-	"These keys work while a video is being edited. Click a command's keys, then press the new combination.",
-	"These keys work on a canvas, as Photoshop's and Affinity Designer's do. Click a command's keys, then press the new combination.")
+// domainHelp explains an in-window domain's keys at the top of its page.
+func (a *App) domainHelp(domain int) string {
+	u := &a.u
+	switch domain {
+	case domainVideo:
+		return u.t("These keys work while a video is being edited. Click a command's keys, then press the new combination.")
+	case domainDrawing:
+		return u.t("These keys work on a canvas, as Photoshop's and Affinity Designer's do. Click a command's keys, then press the new combination.")
+	case domainFiles:
+		return u.t("These keys work in the resource manager, as gdu's and vim's do, the same whether a list shows rows or pictures: on the item under the pointer or the cursor, or on the marked items. Click a command's keys, then press the new combination.")
+	}
+	return u.t("These keys work in every tab. Click a command's keys, then press the new combination.")
+}
 
-// settingsRecordingHotkeys chooses the recording hotkeys, which work system-wide.
+// settingsRecordingHotkeys chooses the hotkeys that work system-wide: recording's, and showing the window.
 func (a *App) settingsRecordingHotkeys(r gfx.Rect) {
 	u := &a.u
 	h := &a.hotkeys
@@ -215,9 +242,9 @@ func (a *App) settingsRecordingHotkeys(r gfx.Rect) {
 				bg = colSurfaceHi
 			}
 		}
-		u.c.RoundRect(box, u.px(7), bg)
+		u.c.Fill(box, bg)
 		if capturing {
-			u.c.RoundOutline(box, u.px(7), u.px(1.5), colAccent)
+			u.c.Outline(box, u.px(1.5), colAccent)
 		}
 		u.label(u.bold(12.5), box.Inset(u.px(12)), text, fg, 0.5)
 		if u.clicked(id, box) && !capturing {

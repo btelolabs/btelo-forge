@@ -14,7 +14,7 @@ func TestCanvasRetouchTools(t *testing.T) {
 	d.Deselect()
 	ad.changedAll()
 	a.brush.Size, a.brush.Hardness = 40, 0.8
-	// O picks dodge, Shift+O burn then sponge; R picks blur, Shift+R sharpen then smudge.
+	// O picks dodge, Shift+O burn then sponge. Blur, sharpen and smudge share a place without a key: R names the layer.
 	x.key('O', false)
 	if a.artTool != toolDodge {
 		t.Fatalf("O chose %d", a.artTool)
@@ -23,10 +23,13 @@ func TestCanvasRetouchTools(t *testing.T) {
 	if a.artTool != toolBurn {
 		t.Fatalf("Shift+O chose %d", a.artTool)
 	}
-	x.frame(Input{Keys: []Key{{Code: 'R', Shift: true}}})
-	x.frame(Input{Keys: []Key{{Code: 'R', Shift: true}}})
-	if a.artTool != toolSmudge {
-		t.Fatalf("Shift+R twice chose %d", a.artTool)
+	x.key('R', false)
+	if a.artTool != toolBurn || ad.renaming != d.Active || a.u.focus != "art/rename" {
+		t.Fatalf("R chose %d and renaming %d, want the burn tool kept and the layer named", a.artTool, ad.renaming)
+	}
+	x.key(keyEscape, false)
+	if nextInSlot(toolBlur) != toolSharpen || nextInSlot(toolSharpen) != toolSmudge || len(toolDefaultKeys(toolBlur)) != 0 {
+		t.Error("blur, sharpen and smudge should share a place with no key")
 	}
 	// Dodge lightens where it is dragged.
 	x.key('O', false)
@@ -47,10 +50,7 @@ func TestCanvasRetouchTools(t *testing.T) {
 		t.Errorf("burnt %v (%q)", c, d.UndoName())
 	}
 	// Smudge drags the dodged band down into the grey.
-	x.key('R', false)
-	for a.artTool != toolSmudge {
-		x.frame(Input{Keys: []Key{{Code: 'R', Shift: true}}})
-	}
+	a.setArtTool(toolSmudge)
 	x.dragWith(ad, [2]float64{180, 100}, [2]float64{180, 150}, false, false)
 	if c := ad.look(180, 130); c.R <= 125 || d.UndoName() != "Smudge" {
 		t.Errorf("smudged %v (%q)", c, d.UndoName())

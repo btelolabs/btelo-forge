@@ -234,3 +234,44 @@ func TestDamagedVectorsAreRefused(t *testing.T) {
 		}
 	}
 }
+
+// A new vector layer starts empty and stays so through an edit that adds nothing, and through saving; an edit that
+// takes away a curve's last outline still takes its layer.
+func TestEmptyVectorLayer(t *testing.T) {
+	d := New("Layer 1")
+	n := d.AddVectorLayer("Drawing 2", solidRed)
+	if d.Active != n.ID || len(d.Layers()) != 2 || d.UndoName() != "New vector layer" {
+		t.Fatalf("new vector layer %+v, step %q", n, d.UndoName())
+	}
+	s, err := d.BeginVector(n.ID, Vector{}, "", "Move node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.End()
+	if d.Node(n.ID) == nil {
+		t.Fatal("an edit that added nothing removed the empty vector layer")
+	}
+	var buf bytes.Buffer
+	if err := d.Snapshot().Save(&buf); err != nil {
+		t.Fatal(err)
+	}
+	e, err := Load(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := e.Node(n.ID); m == nil || m.Vector == nil || len(m.Vector.Path) != 0 || m.Vector.Fill.Color != solidRed.Color {
+		t.Fatalf("the empty vector layer came back as %+v", m)
+	}
+
+	if err := d.AddShape(n.ID, Vector{Kind: VectorRect, Size: Pt{X: 10, Y: 10}, M: Identity}, OpAdd); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = d.BeginVector(n.ID, Vector{}, "", "Delete node")
+	v := s.Vector()
+	v.Path = nil
+	s.Set(v)
+	s.End()
+	if d.Node(n.ID) != nil {
+		t.Error("deleting the last outline should take the layer")
+	}
+}

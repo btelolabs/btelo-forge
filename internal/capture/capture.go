@@ -210,20 +210,29 @@ func ProbeEncoder(ctx context.Context, d Display, fps int) (Encoder, error) {
 
 // hasGrabber checks that the ffmpeg in use has ddagrab; a build made without Direct3D 11 lacks it.
 func hasGrabber(ctx context.Context) error {
+	ok, err := hasFilter(ctx, "ddagrab")
+	if err == nil && !ok {
+		err = ErrNoGrabber
+	}
+	return err
+}
+
+// hasFilter reports whether the ffmpeg in use has a filter.
+func hasFilter(ctx context.Context, name string) (bool, error) {
 	cmd, err := media.Command(ctx, "ffmpeg", "-hide_banner", "-filters")
 	if err != nil {
-		return err
+		return false, err
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		return err
+		return false, err
 	}
 	for _, line := range strings.Split(string(out), "\n") {
-		if f := strings.Fields(line); len(f) >= 2 && f[1] == "ddagrab" {
-			return nil
+		if f := strings.Fields(line); len(f) >= 2 && f[1] == name {
+			return true, nil
 		}
 	}
-	return ErrNoGrabber
+	return false, nil
 }
 
 func tryEncoder(ctx context.Context, o Options) error {

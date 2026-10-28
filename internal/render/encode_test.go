@@ -9,7 +9,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/btelolabs/btelo-forge/internal/anim"
 	"github.com/btelolabs/btelo-forge/internal/media"
 	"github.com/btelolabs/btelo-forge/internal/project"
 )
@@ -223,4 +225,74 @@ func codecOf(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func TestAnimationPlans(t *testing.T) {
+	enc := media.Encoders{"libx264": true, "gif": true, "libwebp_anim": true}
+	// Settings only a video uses are ignored: the animation is silent and aims for no size.
+	gifJob := planFor(t, project.Export{Codec: project.GIF, Quality: project.High, FPS: 60, Height: 480, TargetMB: 25, Audio: project.AudioHigh}, enc)
+	if len(gifJob.Passes) != 2 || gifJob.Blind != 1 || gifJob.Dir == "" {
+		t.Fatalf("%d passes, %d blind", len(gifJob.Passes), gifJob.Blind)
+	}
+	measure, final := strings.Join(gifJob.Passes[0], " "), strings.Join(gifJob.Passes[1], " ")
+	if !strings.Contains(measure, "palettegen=max_colors=256:stats_mode=full[pal]") || !hasArgs(gifJob.Passes[0], "-frames:v", "1", paletteFile) {
+		t.Fatalf("%s", measure)
+	}
+	if !strings.Contains(final, "[1:v]paletteuse=dither=floyd_steinberg:diff_mode=rectangle[gif]") || !hasArgs(gifJob.Passes[1], "-i", paletteFile) ||
+		!hasArgs(gifJob.Passes[1], "-f", "gif", "out.mp4") || strings.Contains(final, "aac") || !strings.Contains(final, "scale=854:480") {
+		t.Fatalf("%s", final)
+	}
+	webpJob := planFor(t, project.Export{Codec: project.WebP, Quality: project.Smallest, Speed: project.Slowest, Hardware: true}, enc)
+	if len(webpJob.Passes) != 1 || webpJob.Blind != 0 || !hasArgs(webpJob.Passes[0], "-c:v", "libwebp_anim") ||
+		!hasArgs(webpJob.Passes[0], "-quality", "50") || !hasArgs(webpJob.Passes[0], "-compression_level", "6") ||
+		!hasArgs(webpJob.Passes[0], "-loop", "0") || strings.Contains(strings.Join(webpJob.Passes[0], " "), "aac") {
+		t.Fatalf("%q", webpJob.Passes[0])
+	}
+	if got := Extension(project.Export{Codec: project.WebP}); got != ".webp" {
+		t.Fatal(got)
+	}
+	if r := OutputRate(project.Canvas{FPS: 60}, project.Export{Codec: project.WebP}); r != 60 {
+		t.Fatalf("a WebP keeps 60 fps, got %v", r)
+	}
+	if r := OutputRate(project.Canvas{FPS: 60}, project.Export{Codec: project.GIF}); r != maxGIFRate {
+		t.Fatalf("a GIF plays at most %d fps, got %v", maxGIFRate, r)
+	}
+}
+
+func TestAnimationsEncode(t *testing.T) {
+	if err := media.Available(); err != nil {
+		t.Skip(err)
+	}
+	enc, err := media.AvailableEncoders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	src := detailed(t, dir, "2")
+	for _, codec := range []project.Codec{project.GIF, project.WebP} {
+		if Encoder(codec, false, enc) == "" {
+			t.Logf("no encoder for %v on this computer", codec)
+			continue
+		}
+		e := project.Export{Codec: codec, Height: 180, FPS: 10, Quality: project.Balanced}
+		out := filepath.Join(dir, "anim"+Extension(e))
+		var progress []float64
+		if err := Encode(context.Background(), project.New(src, e), nil, out, "", func(f float64) { progress = append(progress, f) }); err != nil {
+			t.Fatal(err)
+		}
+		if codec == project.GIF && (progress[0] != Analysing || !slices.IsSorted(progress[1:])) || progress[len(progress)-1] != 1 {
+			t.Fatalf("progress %v", progress)
+		}
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, err := anim.Decode(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.W != 320 || a.H != 180 || a.Len() != 20 || a.Duration() != 2*time.Second {
+			t.Fatalf("%v: %d×%d, %d frames, %v", codec, a.W, a.H, a.Len(), a.Duration())
+		}
+	}
 }

@@ -89,11 +89,15 @@ func (p *plane) drop(k image.Point) {
 }
 
 // snapshot copies the tile map and freezes every tile, so the copy and the original share them until either writes.
+// A tile once frozen stays so and is only read, so a frozen tile is not written again: snapshots of frozen planes,
+// such as shared layers saved on another goroutine, may be taken anywhere at once.
 func (p *plane) snapshot() plane {
 	c := *p
 	c.tiles = make(map[image.Point]*tile, len(p.tiles))
 	for k, t := range p.tiles {
-		t.frozen = true
+		if !t.frozen {
+			t.frozen = true
+		}
 		c.tiles[k] = t
 	}
 	c.mips = nil

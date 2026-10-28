@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/gfx"
@@ -12,6 +13,7 @@ type toastAction struct {
 }
 
 type toast struct {
+	kind    string // a toast of the same kind replaces it, or none
 	text    string
 	err     bool
 	actions []toastAction
@@ -19,6 +21,14 @@ type toast struct {
 }
 
 func (a *App) toast(text string, err bool) { a.toastActions(text, err, nil) }
+
+// toastOnly shows text in place of any toast of the same kind, so that pressing a key again and again shows only
+// the latest.
+func (a *App) toastOnly(kind, text string) {
+	a.toasts = slices.DeleteFunc(a.toasts, func(t toast) bool { return t.kind == kind })
+	a.toast(text, false)
+	a.toasts[len(a.toasts)-1].kind = kind
+}
 
 func (a *App) toastActions(text string, err bool, actions []toastAction) {
 	life := 4 * time.Second
@@ -92,15 +102,16 @@ func (a *App) drawToasts() {
 	f := u.face(13)
 	for i, r := range boxes {
 		t := a.toasts[i]
-		u.c.RoundRect(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, u.px(10), gfx.Alpha(colBlack, 0.45))
-		bg := gfx.Hex(0x2b3040)
+		u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, gfx.Alpha(colBlack, 0.45))
+		bg, edge := colSurfaceHi, colBorderHi
 		if t.err {
-			bg = gfx.Mix(bg, colDanger, 0.35)
+			bg, edge = gfx.Mix(colSurfaceHi, colDanger, 0.22), gfx.Mix(colBorderHi, colDanger, 0.4)
 		}
-		u.c.RoundRect(r, u.px(10), bg)
+		u.c.Fill(r, bg)
+		u.c.Outline(r, max(1, u.px(1)), edge)
 		glyph, col := icCheck, colSuccess
 		if t.err {
-			glyph, col = icClose, gfx.Hex(0xffb4b2)
+			glyph, col = icClose, colDangerText
 		} else if len(t.actions) == 0 {
 			glyph, col = icSettings, colDim
 		}
@@ -114,10 +125,10 @@ func (a *App) drawToasts() {
 			hot := b.Contains(u.mx, u.my)
 			bgc := colSurfaceHi
 			if hot {
-				bgc = colAccent
+				bgc = colSelected
 				u.cursor = CursorHand
 			}
-			u.c.RoundRect(b, u.px(6), bgc)
+			u.c.Fill(b, bgc)
 			u.label(f, b, t.actions[k].label, colText, 0.5)
 		}
 	}

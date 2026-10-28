@@ -23,7 +23,12 @@ const (
 	H264 Codec = iota // plays everywhere
 	HEVC              // about half the size of H.264 at the same quality
 	AV1               // smaller still; needs a recent player
+	GIF               // a silent animation that plays everywhere, in 256 colours
+	WebP              // a silent animation in full colour, far smaller than a GIF; plays in browsers and chat apps
 )
+
+// Animated reports whether the codec makes a silent looping animation rather than a video.
+func (c Codec) Animated() bool { return c == GIF || c == WebP }
 
 // Speed trades encoding time for file size: slower presets find a smaller file at the same quality.
 type Speed int
@@ -90,8 +95,17 @@ func (e *Export) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Effective is e without the settings its format does not use: an animation is silent, cannot aim for a size and
+// is made by the processor. They stay in the saved settings, so switching back to a video brings them back.
+func (e Export) Effective() Export {
+	if e.Codec.Animated() {
+		e.Audio, e.TargetMB, e.Hardware = AudioNone, 0, false
+	}
+	return e
+}
+
 // Valid reports whether every field holds a known value.
 func (e Export) Valid() bool {
 	return e.Height >= 0 && e.FPS >= 0 && e.TargetMB >= 0 && e.Quality >= High && e.Quality <= Smallest &&
-		e.Codec >= H264 && e.Codec <= AV1 && e.Speed >= Medium && e.Speed <= Slowest && e.Audio >= AudioHigh && e.Audio <= AudioNone
+		e.Codec >= H264 && e.Codec <= WebP && e.Speed >= Medium && e.Speed <= Slowest && e.Audio >= AudioHigh && e.Audio <= AudioNone
 }
