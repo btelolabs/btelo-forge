@@ -113,7 +113,8 @@ func TestRecordFromTheWindowAndEditIt(t *testing.T) {
 	if a.rec.rec == nil {
 		t.Fatalf("the recording did not start; toasts %+v", a.toasts)
 	}
-	if !h.minimized || !h.excluded {
+	// By default the window is recorded too: how the app is used is often what is being recorded.
+	if !h.minimized || h.excluded {
 		t.Errorf("window while recording: minimized %v, left out %v", h.minimized, h.excluded)
 	}
 	path := a.rec.rec.Path()
@@ -227,9 +228,28 @@ func TestRecordSettingsDefaultForOldSettingsFiles(t *testing.T) {
 	if got, want := x.a.settings.Record, defaultRecordSettings(); got != want {
 		t.Errorf("fresh settings %+v, want %+v", got, want)
 	}
-	os.WriteFile(x.a.settingsPath(), []byte(`{"language":"zh","mcp":true}`), 0o600)
+	if err := os.MkdirAll(filepath.Dir(x.a.settingsPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(x.a.settingsPath(), []byte(`{"language":"zh","mcp":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	x.a.loadSettings()
 	if got := x.a.settings.Record; got != defaultRecordSettings() {
 		t.Errorf("settings from before recording %+v", got)
+	}
+	// The window was left out of recordings by default once; that old default does not carry over.
+	if err := os.WriteFile(x.a.settingsPath(), []byte(`{"record":{"fps":60,"cursor":true,"minimize":true,"hideWindow":true}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	x.a.loadSettings()
+	if r := x.a.settings.Record; r.HideWindow || r.FPS != 60 {
+		t.Errorf("settings with the old default %+v: the window is still left out, or the rest was lost", r)
+	}
+	x.a.settings.Record.HideWindow = true
+	x.a.saveSettings()
+	x.a.loadSettings()
+	if !x.a.settings.Record.HideWindow {
+		t.Error("choosing to leave the window out is not kept")
 	}
 }

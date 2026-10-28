@@ -37,6 +37,16 @@ func (a *App) chooseVideo() {
 	}
 }
 
+// chooseAnyFile opens whatever is chosen as dropping it would: a video to edit, a picture or canvas to draw on.
+func (a *App) chooseAnyFile() {
+	var patterns []string
+	for _, e := range slices.Concat(videoExtensions, imageExtensions, []string{paint.Ext}) {
+		patterns = append(patterns, "*"+e)
+	}
+	files := a.host.OpenFiles(a.u.t("Open a file"), [][2]string{{a.u.t("Videos, pictures and canvases"), strings.Join(patterns, ";")}, {a.u.t("All files"), "*.*"}}, true)
+	a.openFiles(files, func() bool { return false })
+}
+
 func (a *App) chooseImage() {
 	var patterns []string
 	for _, e := range imageExtensions {

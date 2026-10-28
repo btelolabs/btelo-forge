@@ -69,7 +69,8 @@ Free, open source, offline, and driven by AI over MCP.</p>
   frames straight to the graphics card's encoder (NVIDIA NVENC, AMD AMF or Media Foundation), so recording a
   3440×1440 screen at 60 fps takes about 3% of one processor core.
 - The whole screen or a region; pause and resume; hotkeys that work from any program (Ctrl+Shift+F9 starts and
-  stops); the editor can keep itself out of the picture.
+  stops). The editor's own window is recorded too, so its use can be shown; it can also keep itself out of the
+  picture. The recording toolbar never appears in it.
 - Recordings open in a tab, ready to cut.
 - Screenshots of a screen or a dragged region, and drawing on the screen itself, with or without recording.
 

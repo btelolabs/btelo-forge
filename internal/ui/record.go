@@ -35,11 +35,13 @@ type recordSettings struct {
 	MicrophoneID string `json:"microphoneId"` // "" follows the system's default microphone
 	Region       bool   `json:"region"`       // pick a region of the screen when recording starts
 	Minimize     bool   `json:"minimize"`
-	HideWindow   bool   `json:"hideWindow"`
+	// HideWindow leaves this window out of recordings and screenshots. It is off by default — recording how the app
+	// is used is a common reason to record — and named anew so that the old default, on, is not carried over.
+	HideWindow bool `json:"leaveWindowOut"`
 }
 
 func defaultRecordSettings() recordSettings {
-	return recordSettings{FPS: 30, Cursor: true, SystemAudio: true, Minimize: true, HideWindow: true}
+	return recordSettings{FPS: 30, Cursor: true, SystemAudio: true, Minimize: true}
 }
 
 var recordRates = []int{30, 60}
