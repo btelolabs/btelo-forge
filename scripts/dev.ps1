@@ -80,7 +80,14 @@ try {
         $shortcut.WindowStyle = 7
         $shortcut.Save()
         # The shortcut from before the app was renamed, which this one replaces.
-        Remove-Item (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Btelo Video Cut（开发版）.lnk') -Force -ErrorAction SilentlyContinue
+        $oldLink = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Btelo Video Cut（开发版）.lnk'
+        if (Test-Path -LiteralPath $oldLink) {
+            Remove-Item -LiteralPath $oldLink -Force
+            # Explorer can keep showing a shortcut deleted from outside it until the desktop is refreshed, so tell
+            # the shell it is gone (SHCNE_DELETE, SHCNF_PATHW | SHCNF_FLUSH).
+            Add-Type -Namespace BteloForge -Name Shell -MemberDefinition '[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern void SHChangeNotify(int eventId, uint flags, string item1, System.IntPtr item2);'
+            [BteloForge.Shell]::SHChangeNotify(0x4, 0x1005, $oldLink, [IntPtr]::Zero)
+        }
         Write-Host "桌面快捷方式已创建：$link"
         return
     }
