@@ -231,7 +231,8 @@ func TestUndoCopyAndRename(t *testing.T) {
 	if _, err := Rename(to, "dst"); err == nil {
 		t.Error("renaming over a folder was allowed")
 	}
-	if _, err := Rename(to, `..\x`); err == nil {
+	// A folder in the name, written with this system's separator: on macOS a backslash is a plain letter.
+	if _, err := Rename(to, ".."+string(filepath.Separator)+"x"); err == nil {
 		t.Error("a name with a folder in it was allowed")
 	}
 	if r := Undo(context.Background(), Action{Kind: Renamed, Pairs: []Pair{{filepath.Join(root, "f.txt"), to}}}, &Progress{}); r.Err() != nil || read(t, filepath.Join(root, "f.txt")) != "x" {

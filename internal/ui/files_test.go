@@ -698,8 +698,9 @@ func TestExpandPath(t *testing.T) {
 	t.Setenv("FORGE_TEST_DIR", filepath.Join("C:", "x"))
 	home, _ := os.UserHomeDir()
 	for in, want := range map[string]string{
-		`  "C:\a b\c"  `:           filepath.Clean(`C:\a b\c`),
-		`%FORGE_TEST_DIR%\y`:       filepath.Join("C:", "x", "y"),
+		`  "C:\a b\c"  `: filepath.Clean(`C:\a b\c`),
+		// The separator this system has: on macOS a backslash is a plain letter.
+		`%FORGE_TEST_DIR%` + string(filepath.Separator) + "y": filepath.Join("C:", "x", "y"),
 		`$FORGE_TEST_DIR/y`:        filepath.Join("C:", "x", "y"),
 		`%NOT_SET_ANYWHERE%\y`:     filepath.Clean(`%NOT_SET_ANYWHERE%\y`),
 		"~":                        home,
