@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -137,7 +138,8 @@ func TestParseSpan(t *testing.T) {
 }
 
 func TestJoinCutsEverySegmentToItsSpan(t *testing.T) {
-	paths := []string{`C:\rec\it's.part1.mkv`, `C:\rec\it's.part2.mkv`}
+	// Paths as this system writes them; the list names them with forward slashes on every system.
+	paths := []string{filepath.FromSlash("C:/rec/it's.part1.mkv"), filepath.FromSlash("C:/rec/it's.part2.mkv")}
 	spans := []span{{start: 0.3, videoEnd: 2.333, soundEnd: 1.983, sound: true}, {start: 0.267, videoEnd: 2.3}}
 	list := concatList(paths, spans)
 	want := `file 'C:/rec/it'\''s.part1.mkv'` + "\ninpoint 0.300000\noutpoint 1.983000\n" +
@@ -147,7 +149,7 @@ func TestJoinCutsEverySegmentToItsSpan(t *testing.T) {
 	}
 	args := strings.Join(joinArgs("list.txt", paths, spans, "out.mp4"), " ")
 	for _, want := range []string{
-		`-f concat -safe 0 -i list.txt -i C:\rec\it's.part1.mkv -filter_complex`,
+		"-f concat -safe 0 -i list.txt -i " + paths[0] + " -filter_complex",
 		"[1:a]atrim=start=0.300000:end=1.983000,asetpts=PTS-STARTPTS[a0];",
 		"anullsrc=r=48000:cl=stereo,atrim=duration=2.033000,asetpts=PTS-STARTPTS[a1];",
 		"[a0][a1]concat=n=2:v=0:a=1[a]", "-map 0:v -map [a] -c:v copy -c:a aac",
