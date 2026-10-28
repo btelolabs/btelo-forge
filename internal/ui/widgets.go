@@ -234,8 +234,36 @@ func checkboxWidth(u *ctx, text string) float32 { return u.px(18+8+6) + u.face(1
 
 // checkbox is a small toggle with a label; it returns the new state.
 func (u *ctx) checkbox(id string, r gfx.Rect, text string, on bool) bool {
-	hot := u.hover(id, r)
 	box := gfx.Rect{X: r.X, Y: r.Y + (r.H-u.px(18))/2, W: u.px(18), H: u.px(18)}
+	col := u.checkMark(id, r, box, on)
+	u.label(u.face(13), gfx.Rect{X: box.Right() + u.px(8), Y: r.Y, W: r.W - box.W - u.px(8), H: r.H}, text, col, 0)
+	if u.clicked(id, r) {
+		return !on
+	}
+	return on
+}
+
+// checkboxWrapped is a checkbox at x, y in a width w whose words wrap onto as many lines as they need; it returns
+// whether it is on, and how tall it is.
+func (u *ctx) checkboxWrapped(id string, x, y, w float32, text string, on bool) (bool, float32) {
+	f := u.face(13)
+	lines := f.Wrap(text, w-u.px(26))
+	lineH := u.px(20)
+	r := gfx.Rect{X: x, Y: y, W: w, H: max(u.px(26), float32(len(lines))*lineH+u.px(6))}
+	box := gfx.Rect{X: x, Y: y + u.px(4), W: u.px(18), H: u.px(18)}
+	col := u.checkMark(id, r, box, on)
+	for i, line := range lines {
+		u.label(f, gfx.Rect{X: box.Right() + u.px(8), Y: y + u.px(3) + float32(i)*lineH, W: w - u.px(26), H: lineH}, line, col, 0)
+	}
+	if u.clicked(id, r) {
+		on = !on
+	}
+	return on, r.H
+}
+
+// checkMark draws a checkbox's box, and returns the colour its words take: brighter while the pointer is over r.
+func (u *ctx) checkMark(id string, r, box gfx.Rect, on bool) color.RGBA {
+	hot := u.hover(id, r)
 	if on {
 		u.c.Fill(box, colPrimary)
 		u.icon(icCheck, box, 12, colOnPrimary)
@@ -243,16 +271,11 @@ func (u *ctx) checkbox(id string, r gfx.Rect, text string, on bool) bool {
 		u.c.Fill(box, colSurface)
 		u.c.Outline(box, max(1, u.px(1)), colBorderHi)
 	}
-	col := colDim
 	if hot {
-		col = colText
 		u.cursor = CursorHand
+		return colText
 	}
-	u.label(u.face(13), gfx.Rect{X: box.Right() + u.px(8), Y: r.Y, W: r.W - box.W - u.px(8), H: r.H}, text, col, 0)
-	if u.clicked(id, r) {
-		return !on
-	}
-	return on
+	return colDim
 }
 
 // panelTitle draws a small section heading.

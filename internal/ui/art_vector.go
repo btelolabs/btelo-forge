@@ -12,6 +12,9 @@ import (
 
 // The pen and the node tool, in the manner of Affinity Designer's: the pen draws a curve node by node, the node tool
 // edits any vector layer's nodes and handles, and both share a context bar that edits the object's fill and stroke.
+// The node tool works as Photoshop's two selection tools in one: at first it chooses whole shapes (a click chooses
+// the shape there, Shift+click more shapes or layers, a drag moves them, a box chooses the shapes it reaches), and a
+// double-click on a shape goes into it to edit its nodes one by one, until Esc or a click on nothing comes out.
 
 const (
 	icPen      = "\ue746"
@@ -52,6 +55,7 @@ type nodeEdit struct {
 	s       *paint.VectorSession
 	box     [2][2]float64 // a drag over nothing: the box of nodes to choose, in canvas pixels
 	snapFor int           // the layer, plus one, the snap targets were gathered for in this drag
+	direct  bool          // editing the nodes one by one, after a double-click on a shape; else choosing shapes
 }
 
 // penVector is the curve the pen starts with a node at p: stroked with the foreground colour and, as its option
@@ -165,7 +169,7 @@ func (ad *artDoc) nodeState() *nodeEdit {
 		ad.nodes = &nodeEdit{}
 	}
 	if ad.nodes.layer != ad.d.Active && ad.nodes.s == nil {
-		ad.nodes.layer, ad.nodes.sel = ad.d.Active, nil
+		ad.nodes.layer, ad.nodes.sel, ad.nodes.direct = ad.d.Active, nil, false
 	}
 	return ad.nodes
 }
@@ -173,9 +177,10 @@ func (ad *artDoc) nodeState() *nodeEdit {
 // canvasOf maps a point of an object's own space to the canvas.
 func canvasOf(v *paint.Vector, p paint.Pt) paint.Pt { return v.M.Map(p) }
 
-// nodePointer is the node tool: a press takes a chosen node's handle, a node (Shift adds it to the chosen ones,
-// a double-click makes it smooth or sharp), the outline (adding a node there) or another object; a drag over
-// nothing chooses the nodes in a box. Alt while dragging a handle breaks a smooth node.
+// nodePointer is the node tool. Choosing shapes, a press takes a shape (shapePress). Editing nodes, a press takes a
+// chosen node's handle, a node (Shift adds it to the chosen ones, a double-click makes it smooth or sharp), the
+// outline (adding a node there) or another object; a drag over nothing chooses the nodes in a box, and a click on
+// nothing goes back to choosing shapes. Alt while dragging a handle breaks a smooth node.
 func (a *App) nodePointer(ad *artDoc, vp gfx.Rect) {
 	u := &a.u
 	const id = "art/view"
@@ -238,11 +243,13 @@ func (a *App) nodePointer(ad *artDoc, vp gfx.Rect) {
 		var hout, onHandle bool
 		var nr paint.NodeRef
 		var onNode bool
-		if n != nil {
+		if n != nil && ne.direct {
 			hr, hout, onHandle = grabbedHandle()
 			nr, onNode = grabbedNode()
 		}
 		switch {
+		case !ne.direct:
+			a.shapePress(ad, vp, n, v, p, slack)
 		case onHandle:
 			ne.grab, ne.handle, ne.out, ne.name = nodeGrabHandle, hr, hout, "Move handle"
 			if nd, ok := nodeOf(v, hr); ok {
@@ -291,14 +298,9 @@ func (a *App) nodePointer(ad *artDoc, vp gfx.Rect) {
 			}
 		default:
 			if other := ad.d.VectorAt(p, slack); other != 0 && (n == nil || other != n.ID) {
-				// Another object: chosen instead, or with Shift besides, as booleans need.
-				if u.shift && n != nil {
-					ad.togglePicked(other)
-				} else {
-					ad.d.Choose(other)
-					ad.picked = nil
-					ad.nodeState()
-				}
+				// Another object: its shape chosen instead, or with Shift the layer besides, as combining needs.
+				ne.direct = false
+				a.shapePress(ad, vp, n, v, p, slack)
 				break
 			}
 			if !u.shift {
@@ -351,14 +353,25 @@ func (a *App) nodePointer(ad *artDoc, vp gfx.Rect) {
 			ne.s.End()
 			ne.s = nil
 			ad.changedAll()
+		case ne.grab == nodeGrabBox && ne.direct && !u.drag.moved:
+			ne.direct, ne.sel = false, nil // a click on nothing goes back to choosing shapes
 		case ne.grab == nodeGrabBox && n != nil:
 			x0, x1 := min(ne.box[0][0], ne.box[1][0]), max(ne.box[0][0], ne.box[1][0])
 			y0, y1 := min(ne.box[0][1], ne.box[1][1]), max(ne.box[0][1], ne.box[1][1])
-			for si, s := range v.Path {
-				for ni, nd := range s.Nodes {
-					c := canvasOf(&v, nd.P)
-					r := paint.NodeRef{Sub: si, Node: ni}
-					if c.X >= x0 && c.X <= x1 && c.Y >= y0 && c.Y <= y1 && !slices.Contains(ne.sel, r) {
+			in := func(r paint.NodeRef) bool {
+				nd, _ := nodeOf(v, r)
+				c := canvasOf(&v, nd.P)
+				return c.X >= x0 && c.X <= x1 && c.Y >= y0 && c.Y <= y1
+			}
+			for i := range v.Shapes() {
+				refs := v.ShapeNodes(i)
+				if !ne.direct && slices.ContainsFunc(refs, in) {
+					refs = slices.DeleteFunc(refs, func(r paint.NodeRef) bool { return slices.Contains(ne.sel, r) })
+					ne.sel = append(ne.sel, refs...) // a shape the box reaches, whole
+					continue
+				}
+				for _, r := range refs {
+					if ne.direct && in(r) && !slices.Contains(ne.sel, r) {
 						ne.sel = append(ne.sel, r)
 					}
 				}
@@ -366,6 +379,85 @@ func (a *App) nodePointer(ad *artDoc, vp gfx.Rect) {
 		}
 		ne.grab = nodeGrabNone
 	}
+}
+
+// shapePress is a press of the node tool choosing shapes: on a shape of the chosen object or of another it chooses
+// that shape whole and takes it to drag (Shift adds it to the chosen ones, or takes it away; Shift on another layer
+// chooses that layer besides, as combining needs); a double-click goes into the shape to edit its nodes; on nothing
+// it starts a box choosing the shapes it reaches.
+func (a *App) shapePress(ad *artDoc, vp gfx.Rect, n *paint.Node, v paint.Vector, p paint.Pt, slack float64) {
+	u := &a.u
+	d := ad.d
+	ne := ad.nodeState()
+	shape := -1
+	if n != nil {
+		shape = v.ShapeAt(p, slack)
+	}
+	if shape < 0 {
+		other := d.VectorAt(p, slack)
+		switch {
+		case other == 0:
+			if !u.shift {
+				ne.sel, ad.picked = nil, nil
+			}
+			ne.grab, ne.box = nodeGrabBox, [2][2]float64{{p.X, p.Y}, {p.X, p.Y}}
+			return
+		case u.shift && n != nil:
+			ad.togglePicked(other)
+			return
+		}
+		d.Choose(other)
+		d.EditMask = false
+		ad.picked = nil
+		ne = ad.nodeState()
+		if n = d.Node(other); n == nil || n.EditedVector() == nil {
+			return
+		}
+		v = n.EditedVector().ToCurve()
+		if shape = v.ShapeAt(p, slack); shape < 0 {
+			return
+		}
+	}
+	inv, ok := v.M.Inverse()
+	if !ok {
+		return
+	}
+	if u.double {
+		// Into the shape, to edit its nodes; the node pressed is chosen.
+		ne.direct, ne.sel = true, nil
+		for _, r := range v.ShapeNodes(shape) {
+			if nd, _ := nodeOf(v, r); a.near(ad, vp, canvasOf(&v, nd.P)) {
+				ne.sel = []paint.NodeRef{r}
+				break
+			}
+		}
+		return
+	}
+	refs := v.ShapeNodes(shape)
+	whole := !slices.ContainsFunc(refs, func(r paint.NodeRef) bool { return !slices.Contains(ne.sel, r) })
+	switch {
+	case u.shift && whole:
+		ne.sel = slices.DeleteFunc(ne.sel, func(r paint.NodeRef) bool { return slices.Contains(refs, r) })
+		return
+	case u.shift:
+		for _, r := range refs {
+			if !slices.Contains(ne.sel, r) {
+				ne.sel = append(ne.sel, r)
+			}
+		}
+	case !whole:
+		ne.sel = refs
+	}
+	// The drag moves the chosen shapes; the node of this one nearest the press is what snaps.
+	ne.start, ne.from, ne.press, ne.anchor = v, inv.Map(p), p, p
+	best := math.Inf(1)
+	for _, r := range refs {
+		nd, _ := nodeOf(v, r)
+		if c := canvasOf(&v, nd.P); c.Dist(p) < best {
+			best, ne.anchor = c.Dist(p), c
+		}
+	}
+	ne.grab, ne.name = nodeGrabNodes, "Move shape"
 }
 
 // nodeOf is node r of a curve, and whether there is one.
@@ -394,6 +486,10 @@ func (a *App) nodeKeys(ad *artDoc, k Key) bool {
 	}
 	ne := ad.nodeState()
 	n, ok := ad.editedVector()
+	if k.Code == keyEscape && ne.direct {
+		ne.direct, ne.sel = false, nil // out of the shape, back to choosing shapes
+		return true
+	}
 	if !ok || len(ne.sel) == 0 {
 		return false
 	}
@@ -459,7 +555,7 @@ func (a *App) drawVectorOverlay(ad *artDoc, vp gfx.Rect) {
 			next := paint.Vector{Kind: paint.VectorCurve, M: paint.Identity, Path: []paint.Subpath{{Nodes: []paint.PathNode{last, sharpNode(p)}}}}
 			a.drawOutline(ad, vp, next)
 		}
-		a.drawNodes(ad, vp, v, nil, true)
+		a.drawNodes(ad, vp, v, nil, true, false)
 	case a.artTool == toolNode:
 		n, ok := ad.editedVector()
 		if !ok {
@@ -473,7 +569,7 @@ func (a *App) drawVectorOverlay(ad *artDoc, vp gfx.Rect) {
 		}
 		v := n.EditedVector().ToCurve()
 		a.drawOutline(ad, vp, v)
-		a.drawNodes(ad, vp, v, ne.sel, false)
+		a.drawNodes(ad, vp, v, ne.sel, false, ne.direct)
 		if ne.grab == nodeGrabBox {
 			x0, y0 := ad.toScreen(vp, ne.box[0])
 			x1, y1 := ad.toScreen(vp, ne.box[1])
@@ -509,9 +605,9 @@ func (a *App) drawOutline(ad *artDoc, vp gfx.Rect, v paint.Vector) {
 
 func pt2(p paint.Pt) [2]float64 { return [2]float64{p.X, p.Y} }
 
-// drawNodes draws a curve's nodes: squares for sharp ones, circles for smooth, filled when chosen, with the chosen
-// ones' handles (every node's, for the pen's curve).
-func (a *App) drawNodes(ad *artDoc, vp gfx.Rect, v paint.Vector, sel []paint.NodeRef, handles bool) {
+// drawNodes draws a curve's nodes: squares for sharp ones, circles for smooth, filled when chosen, with every
+// node's handles (handles, for the pen's curve) or the chosen ones' (chosenHandles, editing nodes).
+func (a *App) drawNodes(ad *artDoc, vp gfx.Rect, v paint.Vector, sel []paint.NodeRef, handles, chosenHandles bool) {
 	u := &a.u
 	w := max(1, u.px(1))
 	s := u.px(3.5)
@@ -519,7 +615,7 @@ func (a *App) drawNodes(ad *artDoc, vp gfx.Rect, v paint.Vector, sel []paint.Nod
 	for si, sp := range v.Path {
 		for ni, nd := range sp.Nodes {
 			chosen := slices.Contains(sel, paint.NodeRef{Sub: si, Node: ni})
-			if chosen || handles {
+			if chosen && chosenHandles || handles {
 				x, y := screen(nd.P)
 				for _, h := range []paint.Pt{nd.In, nd.Out} {
 					if h == nd.P {
@@ -581,7 +677,7 @@ func (a *App) drawNodeOptions(ad *artDoc, r gfx.Rect) {
 	u := &a.u
 	n, ok := ad.editedVector()
 	if !ok {
-		u.label(u.face(12), r, u.t("Click a vector layer's outline to edit its nodes; the pen and the shape tool make them"), colDim, 0)
+		u.label(u.face(12), r, u.t("Click a shape to choose it, double-click it to edit its nodes, Esc to come out; the pen and the shape tool make them"), colDim, 0)
 		return
 	}
 	ne := ad.nodeState()

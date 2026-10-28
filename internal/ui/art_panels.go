@@ -608,8 +608,9 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 		if n.IsSmart() {
 			ir := gfx.Rect{X: fold.Right(), Y: rr.Y, W: u.px(20), H: rr.H}
 			u.icon(icSmart, ir, 15, colSuccess)
-			u.hint(id+"/smart", u.tf("Smart object, link id %s: its %d copies here, and those in other canvases and videos, change together",
-				n.Smart.ID, len(d.SmartCopies(n.Smart.ID))), ir)
+			copies := len(d.SmartCopies(n.Smart.ID))
+			u.hint(id+"/smart", u.tn(copies, "Smart object, link id %s: its %d copy here, and those in other canvases and videos, change together",
+				"Smart object, link id %s: its %d copies here, and those in other canvases and videos, change together", n.Smart.ID, copies), ir)
 		} else if n.IsBoard() {
 			u.icon(icBoard, gfx.Rect{X: fold.Right(), Y: rr.Y, W: u.px(20), H: rr.H}, 14, colAccent)
 			u.hint(id+"/board", u.t("Artboard: what is in it is cut to it and exports with it"), gfx.Rect{X: fold.Right(), Y: rr.Y, W: u.px(20), H: rr.H})

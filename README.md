@@ -2,7 +2,9 @@
 
 <h1 align="center">Btelo Forge</h1>
 
-<p align="center">Edit video, paint and draw, record the screen — in one small, native app for Windows and macOS.<br>
+<p align="center">I put the programs of my own daily work into one small native app — even the ones I used Photoshop,
+CapCut and OBS Studio for — and what one of them makes, the others can hold as a smart object that follows every
+change.<br>
 Free, open source, offline, and driven by AI over MCP.</p>
 
 <p align="center">
@@ -10,9 +12,20 @@ Free, open source, offline, and driven by AI over MCP.</p>
   <b>English</b> · <a href="README.zh-CN.md">中文</a>
 </p>
 
-<p align="center"><img src="docs/screenshots/en-editor.jpg" alt="The video editor: preview, overlays and a multi-track timeline"></p>
+> [!NOTE]
+> **Windows is where Btelo Forge is made and checked. The macOS version is experimental:** it is tested far less,
+> and screen recording, live streaming, the camera on the screen, screenshots and drawing on the screen are not there
+> yet; stream keys are not kept encrypted.
+
+<p align="center"><img src="docs/demos/linked.webp" alt="A poster canvas shown on a mind map: a badge drawn on the canvas appears on the map at once"></p>
+
+A canvas shown on a mind map, drawn over a video or pasted into another canvas stays linked to it: draw on the canvas
+and every place that shows it follows. Every animation on this page was recorded by Btelo Forge itself while an AI
+drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
 
 ## Video editing
+
+<p align="center"><img src="docs/demos/video.webp" alt="Two clips joined, one cut and sped up, music, a caption and a logo added on the timeline"></p>
 
 - Tabs for separate edits; drop more videos to extend the main track or stack them on upper tracks.
 - A multi-track timeline for video, overlays (text, images and drawings) and music; upper tracks cover lower ones.
@@ -37,7 +50,7 @@ Free, open source, offline, and driven by AI over MCP.</p>
 
 ## Painting and drawing
 
-<p align="center"><img src="docs/screenshots/en-canvas.jpg" alt="A poster on an artboard: pixel, vector, text and adjustment layers, with the node tool on a curve"></p>
+<p align="center"><img src="docs/demos/paint.webp" alt="A poster built up: a gradient, a glowing sun, vector hills, ink strokes, a star, styled text and a hue/saturation adjustment layer"></p>
 
 **Pixels, as in Photoshop**
 - Brushes and an eraser with hardness, flow, smoothing, tip shape and shape dynamics (size and angle jitter,
@@ -54,8 +67,11 @@ Free, open source, offline, and driven by AI over MCP.</p>
 **Vectors, as in Affinity Designer**
 - Shapes (rectangle, ellipse, polygon, star, line), the pen, and a pencil that turns a freehand line into a few
   smooth curves.
-- A node tool for nodes and handles, booleans (add, subtract, intersect, exclude) and snapping to nodes, edges and
-  centres.
+- A node tool that chooses whole shapes and, after a double-click, their nodes and handles; Ctrl+T transforms just
+  the chosen nodes or shapes; snapping to nodes, edges and centres.
+- Combine shapes as in Photoshop — unite, subtract front, intersect, exclude — from the tools' bars with several
+  vector layers chosen: the result stays true vector, every shape still editable, and combining is instant however
+  large the layers are; Merge shape components bakes them into one outline.
 - Fill and stroke settings — width, alignment, caps, joins, dashes. Vectors stay sharp at any zoom and in export.
 
 **The canvas**
@@ -67,9 +83,16 @@ Free, open source, offline, and driven by AI over MCP.</p>
 - Open a screenshot as a canvas, or draw over a video as an overlay that follows every save of its canvas.
 - A canvas file keeps everything — layers, vectors, text, masks, effects, adjustment layers and artboards.
 
-<p align="center"><img src="docs/screenshots/en-style.jpg" alt="The Layer Style dialog"></p>
+<table>
+  <tr>
+    <td><img src="docs/screenshots/en-canvas.jpg" alt="A poster on an artboard: pixel, vector, text and adjustment layers, with the node tool on a curve"></td>
+    <td><img src="docs/screenshots/en-style.jpg" alt="The Layer Style dialog"></td>
+  </tr>
+</table>
 
 ## Mind maps and flowcharts
+
+<p align="center"><img src="docs/demos/mind.webp" alt="A mind map grown branch by branch, with a budget table whose total follows its cells and a linked poster canvas"></p>
 
 - Mind maps and flowcharts on one infinite board, as XMind and Whimsical together: a tree's topic can have connectors,
   and a flowchart's box can grow a tree. Trees lay out as mind maps, logic charts, org charts or outlines.
@@ -81,9 +104,28 @@ Free, open source, offline, and driven by AI over MCP.</p>
   to draw a connector, or onto empty board for a new connected box.
 - Built for hundreds of thousands of nodes: the board is drawn from tiles on every core, only what is in view, with
   an overview of the whole board. Files are small: pictures and videos are referred to, never copied.
+- Connectors find their own way round the nodes between their ends; drag a connector's middle to shape its route.
+- Turn a branch into a task list: tick its topics off, and every level shows how much of what is under it is done.
+- Six themes, from MindNode's dark look to white, pastel bubbles, ocean blue, sepia and neon, a click apart.
 - Mind maps show in the asset manager with a picture of the whole map.
 
+## Files
+
+<p align="center"><img src="docs/demos/assets.webp" alt="Pictures, videos, canvases and mind maps as a grid: moved through with the arrows, previewed with their tags, searched by tag, shown as a list"></p>
+
+- Folder lists side by side, driven as gdu and vim are: hjkl or the arrows move, e opens another list beside. Each
+  list shows its folder as rows, or as a grid of pictures filtered by kind, category or tag.
+- i analyses what takes the space, as gdu does: the list is sorted by size with a bar for each item, and a pie of
+  the folder sits under it. Move down the list with the keys or the mouse and the pie turns the item under the
+  cursor to twelve o'clock, on a spring; click a wedge to go to its item.
+- Copies, moves and deletions run in the background with their progress shown; deleted items go to the Recycle Bin,
+  and u brings them back.
+
+<p align="center"><img src="docs/screenshots/en-files-analyse.gif" alt="A folder analysed: the pie under the list turns to the item under the cursor"></p>
+
 ## Screen recording (Windows)
+
+<p align="center"><img src="docs/demos/record.webp" alt="The recording dialog: 60 frames a second and a region picked, a canvas drawn on while it records, a pause, then the recording opened in a tab to cut"></p>
 
 - Records a screen with the computer's sound and a microphone, the way OBS Studio does: Desktop Duplication hands
   frames straight to the graphics card's encoder (NVIDIA NVENC, AMD AMF or Media Foundation), so recording a
@@ -94,9 +136,9 @@ Free, open source, offline, and driven by AI over MCP.</p>
 - Recordings open in a tab, ready to cut.
 - Screenshots of a screen or a dragged region, and drawing on the screen itself, with or without recording.
 
-<p align="center"><img src="docs/screenshots/en-record.jpg" alt="The recording dialog"></p>
-
 ## Live streaming (Windows)
+
+<p align="center"><img src="docs/demos/live.webp" alt="Destinations added — YouTube and Bilibili kept off, two servers on — then live on both, the stream showing the screen being recorded"></p>
 
 - Streams to several platforms at once — YouTube, Twitch, Bilibili, Douyin, Kuaishou, WeChat Channels, Huya, Douyu,
   or any RTMP, RTMPS or SRT server. The picture is encoded once on the graphics card, so each extra platform costs
@@ -139,7 +181,7 @@ Free, open source, offline, and driven by AI over MCP.</p>
 | --- | --- |
 | Windows 10 / 11, x64 | `btelo-forge-windows-amd64.zip` |
 | Windows on ARM | `btelo-forge-windows-arm64.zip` |
-| macOS 11+, Apple silicon and Intel | `btelo-forge-macos.zip` |
+| macOS 11+, Apple silicon and Intel (experimental) | `btelo-forge-macos.zip` |
 
 There is nothing else to install. The app uses its own ffmpeg, so that recording, streaming and exporting work the
 same on every computer: a static build is downloaded once into the app's own folder (Settings → Extensions → ffmpeg

@@ -51,8 +51,21 @@ type picItem struct {
 	aspect   float64
 	files    []string // a nested map's files: it is drawn again when one of them changes
 	loading  bool
-	redo     bool // its file changed while it was read: what is read is stale, and it is read again
+	queued   bool     // waiting to be read, or being read
+	redo     bool     // its file changed while it was read: what is read is stale, and it is read again
+	before   *picItem // what was read before its file changed, shown until it is read again
 	used     uint64
+}
+
+// held is the picture an item keeps in memory: what was read, or what was read before while it is read again.
+func (it *picItem) held() *image.RGBA {
+	if it.loading {
+		if it.before != nil {
+			return it.before.img
+		}
+		return nil
+	}
+	return it.img
 }
 
 type mindPics struct {
@@ -114,11 +127,17 @@ func (p *mindPics) get(n *mind.Node, px int, chain string) (*image.RGBA, mind.Pi
 	if it == nil {
 		it = &picItem{ref: n.Ref, loading: true}
 		p.items[k] = it
-		p.want = append(p.want, k)
 	}
 	it.used = p.clock
 	if !it.loading {
 		return it.img, it.state, it.animated
+	}
+	if !it.queued {
+		it.queued = true
+		p.want = append(p.want, k)
+	}
+	if b := it.before; b != nil {
+		return b.img, b.state, b.animated // its file changed: what it showed, until it is read again
 	}
 	// Another step meanwhile, the largest ready; a file found missing is missing at every size.
 	for l := len(picLevels) - 1; l >= 0; l-- {
@@ -182,6 +201,9 @@ func (a *App) pictureLoaded(k picKey, it *picItem) {
 	}
 	it.used = old.used
 	p.items[k] = it
+	if old.before != nil && old.before.img != nil {
+		p.bytes -= len(old.before.img.Pix)
+	}
 	if it.img != nil {
 		p.bytes += len(it.img.Pix)
 	}
@@ -210,6 +232,7 @@ func (a *App) redrawShowing(ref string, aspect float64) {
 			regions = append(regions, md.m.Box(n))
 		}
 		md.tiles.Invalidate(regions, false)
+		md.overviewLater(regions, false)
 	}
 	a.requestFrame()
 }
@@ -221,7 +244,7 @@ func (p *mindPics) evict() {
 	}
 	keys := make([]picKey, 0, len(p.items))
 	for k, it := range p.items {
-		if !it.loading && it.img != nil {
+		if it.held() != nil {
 			keys = append(keys, k)
 		}
 	}
@@ -235,8 +258,8 @@ func (p *mindPics) evict() {
 		if p.bytes <= picBudget*3/4 {
 			break
 		}
-		p.bytes -= len(p.items[k].img.Pix)
-		delete(p.items, k)
+		p.bytes -= len(p.items[k].held().Pix)
+		delete(p.items, k) // one being read again is dropped when it comes back, and read again when asked
 	}
 }
 
@@ -270,7 +293,9 @@ func (p *mindPics) dropPicture(path string) []string {
 	return p.dropWhere(func(k picKey, it *picItem) bool { return k.kind == mind.Picture && mind.NestKey(it.ref) == key })
 }
 
-// dropWhere forgets the pictures that match; one being read is read again once it is.
+// dropWhere forgets the pictures that match, as their files changed: each is read again the next time it is shown,
+// what was read before showing meanwhile, so that a change never flashes the loading picture; one being read is
+// read again once it is.
 func (p *mindPics) dropWhere(match func(picKey, *picItem) bool) []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -285,13 +310,10 @@ func (p *mindPics) dropWhere(match func(picKey, *picItem) bool) []string {
 			refs = append(refs, it.ref)
 		}
 		if it.loading {
-			it.redo = true
+			it.redo = it.queued
 			continue
 		}
-		if it.img != nil {
-			p.bytes -= len(it.img.Pix)
-		}
-		delete(p.items, k)
+		p.items[k] = &picItem{ref: it.ref, loading: true, before: it, used: it.used}
 	}
 	return refs
 }

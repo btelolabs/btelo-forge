@@ -74,8 +74,9 @@ type TransformSession struct {
 	sel    *Mask       // the selection being transformed, or nil
 	bounds image.Rectangle
 	m      Affine
-	mesh   *Mesh  // a mesh the content is mapped by instead of m, set by SetMesh
-	name   string // the step a mesh is recorded as
+	mesh   *Mesh          // a mesh the content is mapped by instead of m, set by SetMesh
+	name   string         // the step a mesh is recorded as
+	nodes  *nodeTransform // or only some nodes of a vector object, as BeginNodeTransform starts
 	shown  image.Rectangle
 }
 
@@ -144,6 +145,9 @@ func (t *TransformSession) Set(m Affine, fast bool) image.Rectangle {
 // set shows the content under m, resampled with k.
 func (t *TransformSession) set(m Affine, k xdraw.Interpolator) image.Rectangle {
 	t.m = m
+	if t.nodes != nil {
+		return t.setNodes(m.Map)
+	}
 	out := m.bounds(t.bounds)
 	if t.clip != nil && t.base == nil {
 		t.l.Clip = t.clip.Transformed(m) // exactly, as the object is
@@ -201,7 +205,11 @@ func (t *TransformSession) Apply() image.Rectangle {
 	if t.m == Identity {
 		return t.Cancel().Union(changed)
 	}
-	t.d.Commit("Free transform", t.mark)
+	name := "Free transform"
+	if t.nodes != nil {
+		name = "Transform nodes"
+	}
+	t.d.Commit(name, t.mark)
 	return changed
 }
 

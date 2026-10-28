@@ -129,14 +129,24 @@ func band(pts []pt, width func(t float32) float32) []pt {
 	return append(out, arc(pts[0], right[0], half(0))...)
 }
 
-// arc is the points of the half circle of radius r about c going round from the point from towards its opposite,
-// both left out.
-func arc(c, from pt, r float32) []pt {
-	a0 := math.Atan2(float64(from.y-c.y), float64(from.x-c.x))
+// turns are the cosines and sines of the steps round a circle, worked out once: a round end turns the point it
+// starts from by them, with no trigonometry of its own.
+var turns = func() (t [2 * capSteps][2]float32) {
+	for k := range t {
+		a := math.Pi * float64(k) / capSteps
+		t[k] = [2]float32{float32(math.Cos(a)), float32(math.Sin(a))}
+	}
+	return t
+}()
+
+// arc is the points of the half circle about c going round from the point from towards its opposite, both left
+// out; its radius is from's distance from c.
+func arc(c, from pt, _ float32) []pt {
+	fx, fy := from.x-c.x, from.y-c.y
 	out := make([]pt, 0, capSteps-1)
 	for k := 1; k < capSteps; k++ {
-		a := a0 + math.Pi*float64(k)/capSteps
-		out = append(out, pt{c.x + r*float32(math.Cos(a)), c.y + r*float32(math.Sin(a))})
+		cs, sn := turns[k][0], turns[k][1]
+		out = append(out, pt{c.x + fx*cs - fy*sn, c.y + fx*sn + fy*cs})
 	}
 	return out
 }
@@ -145,18 +155,91 @@ func arc(c, from pt, r float32) []pt {
 func circlePoly(c pt, r float32) []pt {
 	out := make([]pt, 2*capSteps)
 	for k := range out {
-		a := 2 * math.Pi * float64(k) / float64(len(out))
-		out[k] = pt{c.x + r*float32(math.Cos(a)), c.y + r*float32(math.Sin(a))}
+		out[k] = pt{c.x + r*turns[k][0], c.y + r*turns[k][1]}
 	}
 	return out
 }
 
-// strokeLine draws a polyline w wide with round ends and mitred corners.
+// outside reports whether the points, widened by m, lie wholly outside the clip: then nothing is built for them.
+func outside(c *gfx.Canvas, pts []pt, m float32) bool {
+	cl := c.Clip()
+	minX, minY, maxX, maxY := pts[0].x, pts[0].y, pts[0].x, pts[0].y
+	for _, q := range pts[1:] {
+		minX, minY, maxX, maxY = min(minX, q.x), min(minY, q.y), max(maxX, q.x), max(maxY, q.y)
+	}
+	return maxX+m < float32(cl.Min.X) || minX-m > float32(cl.Max.X) || maxY+m < float32(cl.Min.Y) || minY-m > float32(cl.Max.Y)
+}
+
+// strokeLine draws a polyline w wide with round ends and mitred corners. Only the stretches that come near the
+// clip are drawn, each cut where it leaves the clip widened by more than the line's width (where its cut ends do
+// not show): a long line crossing many tiles costs each only what crosses it.
 func strokeLine(c *gfx.Canvas, pts []pt, w float32, col color.RGBA) {
-	if len(pts) == 0 || col.A == 0 {
+	if len(pts) == 0 || col.A == 0 || outside(c, pts, w+1) {
 		return
 	}
-	fillPoly(c, band(pts, func(float32) float32 { return w }), col)
+	if len(pts) == 1 {
+		fillPoly(c, circlePoly(pts[0], w/2), col)
+		return
+	}
+	cl := c.Clip()
+	m := w + 4
+	box := [4]float32{float32(cl.Min.X) - m, float32(cl.Min.Y) - m, float32(cl.Max.X) + m, float32(cl.Max.Y) + m}
+	var run []pt
+	draw := func() {
+		if len(run) > 1 {
+			fillPoly(c, band(run, func(float32) float32 { return w }), col)
+		}
+		run = run[:0]
+	}
+	for i := 1; i < len(pts); i++ {
+		a, b, ok := clipSegment(pts[i-1], pts[i], box)
+		if !ok {
+			draw()
+			continue
+		}
+		if len(run) == 0 || run[len(run)-1] != a {
+			draw()
+			run = append(run, a)
+		}
+		run = append(run, b)
+		if b != pts[i] {
+			draw() // it left the box: what follows starts again where it comes back
+		}
+	}
+	draw()
+}
+
+// clipSegment is the part of the segment a–b inside the box (x0, y0, x1, y1), and whether there is one
+// (Liang–Barsky).
+func clipSegment(a, b pt, box [4]float32) (pt, pt, bool) {
+	t0, t1 := float32(0), float32(1)
+	dx, dy := b.x-a.x, b.y-a.y
+	for _, e := range [4][2]float32{{-dx, a.x - box[0]}, {dx, box[2] - a.x}, {-dy, a.y - box[1]}, {dy, box[3] - a.y}} {
+		p, q := e[0], e[1]
+		if p == 0 {
+			if q < 0 {
+				return a, b, false
+			}
+			continue
+		}
+		r := q / p
+		if p < 0 {
+			t0 = max(t0, r)
+		} else {
+			t1 = min(t1, r)
+		}
+		if t0 > t1 {
+			return a, b, false
+		}
+	}
+	na, nb := a, b
+	if t0 > 0 {
+		na = pt{a.x + dx*t0, a.y + dy*t0}
+	}
+	if t1 < 1 {
+		nb = pt{a.x + dx*t1, a.y + dy*t1}
+	}
+	return na, nb, true
 }
 
 // segment draws a straight line w wide with round ends.
@@ -210,25 +293,63 @@ func strokeClosed(c *gfx.Canvas, poly []pt, w float32, col color.RGBA) {
 	fillPath(c, [][]pt{outer, inner}, col)
 }
 
-// dashed draws a polyline as dashes on and off long, each with round ends.
+// dashed draws a polyline as dashes on and off long, each with round ends. The dashes keep their places along the
+// whole line, but only the part of each piece inside the clip (widened by more than a dash's width) is cut into
+// dashes, the pattern being moved on over the rest: a long dashed line costs each tile what crosses it.
 func dashed(c *gfx.Canvas, pts []pt, w float32, col color.RGBA, on, off float32) {
+	if len(pts) < 2 || outside(c, pts, w+1) {
+		return
+	}
+	cl := c.Clip()
+	m := w + 4
+	box := [4]float32{float32(cl.Min.X) - m, float32(cl.Min.Y) - m, float32(cl.Max.X) + m, float32(cl.Max.Y) + m}
 	drawing, left := true, on
 	var dash []pt
+	var bands [][]pt // every dash in the clip, filled together in one pass
 	flush := func() {
 		if len(dash) > 1 {
-			strokeLine(c, dash, w, col)
+			bands = append(bands, band(dash, func(float32) float32 { return w }))
 		}
 		dash = dash[:0]
+	}
+	// skip moves the pattern on by d without drawing.
+	skip := func(d float32) {
+		flush()
+		if d > on+off {
+			d = float32(math.Mod(float64(d), float64(on+off))) // whole periods change nothing
+		}
+		for d >= left {
+			d -= left
+			drawing = !drawing
+			left = on
+			if !drawing {
+				left = off
+			}
+		}
+		left -= d
 	}
 	for i := 1; i < len(pts); i++ {
 		a, b := pts[i-1], pts[i]
 		d := float32(math.Hypot(float64(b.x-a.x), float64(b.y-a.y)))
-		pos := float32(0)
-		for pos < d {
-			step := min(left, d-pos)
-			p0 := pt{a.x + (b.x-a.x)*pos/d, a.y + (b.y-a.y)*pos/d}
-			p1 := pt{a.x + (b.x-a.x)*(pos+step)/d, a.y + (b.y-a.y)*(pos+step)/d}
+		if d == 0 {
+			continue
+		}
+		ca, cb, ok := clipSegment(a, b, box)
+		if !ok {
+			skip(d)
+			continue
+		}
+		s0 := float32(math.Hypot(float64(ca.x-a.x), float64(ca.y-a.y)))
+		s1 := float32(math.Hypot(float64(cb.x-a.x), float64(cb.y-a.y)))
+		if s0 > 0 {
+			skip(s0)
+		}
+		pos := s0
+		for pos < s1 {
+			step := min(left, s1-pos)
 			if drawing {
+				p0 := pt{a.x + (b.x-a.x)*pos/d, a.y + (b.y-a.y)*pos/d}
+				p1 := pt{a.x + (b.x-a.x)*(pos+step)/d, a.y + (b.y-a.y)*(pos+step)/d}
 				if len(dash) == 0 {
 					dash = append(dash, p0)
 				}
@@ -247,8 +368,12 @@ func dashed(c *gfx.Canvas, pts []pt, w float32, col color.RGBA, on, off float32)
 				}
 			}
 		}
+		if s1 < d {
+			skip(d - s1)
+		}
 	}
 	flush()
+	fillPath(c, bands, col)
 }
 
 // ellipsePoly is an ellipse inside r as a polygon, with enough sides to look round at its size.

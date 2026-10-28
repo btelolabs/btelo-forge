@@ -14,7 +14,8 @@
   (`TestMCPToolsAreAllListed`), which decides which server (`/mcp/video`, `/mcp/drawing`, `/mcp/mind`, `/mcp/recording`) offers it.
 - Checks before handing work over: `gofmt -l .` empty, `go vet ./...`, `go test ./...` (needs ffmpeg on PATH). UI
   screens render with `FORGE_SHOTS=<folder> go test ./internal/ui -run TestScreens`; a real window with
-  `btelo-forge.exe -background -capture out.png`.
+  `btelo-forge.exe -background -capture out.png`. The README's file manager animation is recorded
+  by `FORGE_DEMO=<folder> go test ./internal/ui -run TestFilesPieDemo` (copy the GIFs into `docs/screenshots`).
 - Tests never reach the internet: point the sources at an `httptest` server (see `sourcesAt` in the tests).
 - Commands given to the user are PowerShell.
 - The app was called Btelo Video Cut: `cmd/btelo-forge/migrate.go` moves its old data folders on the first run.

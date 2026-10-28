@@ -331,4 +331,3 @@ func (e *editor) moveLines(caret, n int, f *gfx.Face) int {
 	}
 	return end
 }
-

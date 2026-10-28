@@ -68,6 +68,8 @@ type filesPane struct {
 	// grid shows the folder as pictures rather than rows; g is how, kept while the list shows rows again.
 	grid bool
 	g    paneGrid
+	// pie turns the pie under an analysed list to the item under the cursor.
+	pie pieMotion
 }
 
 // thisPC is the list of the drives, as the folder above each drive's own: there is no such folder, so its dir is
@@ -125,6 +127,8 @@ type fileManager struct {
 	git         map[string]*gitState // by repository root
 	repoOf      map[string]string    // a folder's repository root, or "" for none, as found
 	wasInactive bool
+	// clock is the time the pies move by, when a test steps it; nil is the time now.
+	clock func() time.Time
 }
 
 // fileClip is what was cut or copied, to be pasted.

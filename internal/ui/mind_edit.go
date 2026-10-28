@@ -4,7 +4,6 @@ import (
 	"math"
 	"slices"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/btelolabs/btelo-forge/internal/gfx"
@@ -45,6 +44,7 @@ const (
 	actConnect
 	actResize
 	actTextSelect
+	actBend // a connector's middle dragged, reshaping its route
 )
 
 // mindAction is a gesture under way.
@@ -63,6 +63,11 @@ type mindAction struct {
 	before map[mind.ID]bool     // the choice before the marquee
 	size   [2]float64           // the node's chosen size before resizing (0 for none)
 	attach mind.ID              // a free node let go over this node goes under it
+	edge   mind.EdgeID          // the connector being reshaped
+	bend   mind.Vec             // its bend before
+	sides  [2]mind.Side         // and the sides it left and entered by
+	shown  [2]mind.Side         // the sides it showed, which the reshaped route keeps
+	shownB mind.Vec             // and the bend it showed
 }
 
 // mindDrop is where a tree's node being dragged would go: under parent at index (-1 for the end, after the node
@@ -347,6 +352,7 @@ func (a *App) mindPress(md *mindDoc, r gfx.Rect, v mind.View) {
 	const id = "mind/board"
 	p := v.Board(float64(u.pressX), float64(u.pressY))
 	m := md.m
+	md.themes = false // a press on the board closes the theme panel
 	// Typing goes on only when the press is in the words being typed, which places the caret.
 	if md.text != nil {
 		if n := m.Node(md.text.id); n != nil {
@@ -382,6 +388,17 @@ func (a *App) mindPress(md *mindDoc, r gfx.Rect, v mind.View) {
 		u.active = ""
 		return
 	}
+	if e := m.Edge(md.edge); e != nil {
+		if hx, hy, ok := a.mindBendHandle(md, e, v); ok && float32(math.Hypot(float64(u.pressX-hx), float64(u.pressY-hy))) <= u.px(10) {
+			if u.double {
+				md.act = nil
+				a.mindResetBend(md, e)
+				return
+			}
+			a.mindStartBend(md, act, e)
+			return
+		}
+	}
 	if n := handles; n != nil {
 		for _, h := range a.mindHandles(md, n, v) {
 			if !h.r.Inset(-u.px(3)).Contains(u.pressX, u.pressY) {
@@ -402,6 +419,12 @@ func (a *App) mindPress(md *mindDoc, r gfx.Rect, v mind.View) {
 	}
 	n, fold := m.At(p.X, p.Y)
 	if n != nil {
+		if tb, ok := m.TaskBox(n); ok && tb.Grow(3).Contains(p.X, p.Y) && !u.shift && !u.ctrl {
+			md.act = nil
+			md.selectOnly(n.ID)
+			a.mindDo(md, m.ToggleDone(n.ID))
+			return
+		}
 		if fold {
 			m.Update(n.ID, func(x *mind.Node) { x.Folded = !x.Folded })
 			md.act = nil
@@ -430,12 +453,15 @@ func (a *App) mindPress(md *mindDoc, r gfx.Rect, v mind.View) {
 		return
 	}
 	if e := m.EdgeAt(p.X, p.Y, 6/v.Zoom); e != nil {
-		md.act = nil
 		clear(md.sel)
 		md.primary, md.edge = 0, e.ID
 		if u.double {
+			md.act = nil
 			a.editEdgeLabel(md, e)
+			return
 		}
+		// Dragging the line itself reshapes it, as dragging its middle does.
+		a.mindStartBend(md, act, e)
 		return
 	}
 	if u.double {
@@ -472,6 +498,15 @@ func (a *App) mindDrag(md *mindDoc, r gfx.Rect, v mind.View) {
 	switch act.kind {
 	case actTextSelect:
 		a.mindCaretTo(md, v, u.mx, u.my, false)
+	case actBend:
+		if !a.mindDragStarts(act) {
+			return
+		}
+		bend := act.shownB.Add(p.Sub(act.from))
+		m.LiveEdge(act.edge, func(e *mind.Edge) {
+			e.FromSide, e.ToSide = act.shown[0], act.shown[1]
+			e.Bend = mind.Vec{X: math.Round(bend.X), Y: math.Round(bend.Y)}
+		})
 	case actPan:
 		if a.mindDragStarts(act) {
 			md.view.OX = math.Round(act.view.OX + float64(u.mx-act.grab.X))
@@ -740,6 +775,14 @@ func (a *App) mindRelease(md *mindDoc, r gfx.Rect, v mind.View) {
 			return
 		}
 		a.mindGrowFrom(md, from, act.side, p, act.moved)
+	case actBend:
+		e := m.Edge(act.edge)
+		if e == nil || !act.moved {
+			return
+		}
+		from, to, bend := e.FromSide, e.ToSide, e.Bend
+		m.LiveEdge(e.ID, func(e *mind.Edge) { e.FromSide, e.ToSide, e.Bend = act.sides[0], act.sides[1], act.bend })
+		a.mindDo(md, m.UpdateEdge(e.ID, func(e *mind.Edge) { e.FromSide, e.ToSide, e.Bend = from, to, bend }))
 	case actResize:
 		n := m.Node(act.id)
 		if n == nil || !act.moved {
@@ -924,16 +967,16 @@ func (a *App) editMindText(md *mindDoc, id mind.ID, typed string, all bool) {
 	}
 	a.commitMindCell(md)
 	md.text = &mindText{id: id, orig: n.Text}
-	u.setFocus("mind/text")
-	text := []rune(n.Text)
+	text := n.Text
 	if typed != "" {
-		text = []rune(typed)
+		text = typed
 	}
-	u.edit = editor{text: text, multiline: true, caret: len(text), anchor: len(text)}
+	end := len([]rune(text))
+	anchor := end
 	if all {
-		u.edit.anchor = 0
+		anchor = 0
 	}
-	u.caretBlink = time.Now()
+	u.beginEdit("mind/text", text, true, anchor, end)
 	if typed != "" {
 		md.m.Live(id, func(x *mind.Node) { x.Text = typed })
 	}
@@ -966,8 +1009,13 @@ func (a *App) mindTextKeys(md *mindDoc) {
 	u := &a.u
 	t := md.text
 	u.focusDrawn = true
-	if u.focus != "mind/text" {
-		u.setFocus("mind/text")
+	if !u.editing("mind/text") {
+		// The keyboard or the editor went elsewhere and came back: typing goes on from the node's words.
+		words := ""
+		if n := md.m.Node(t.id); n != nil {
+			words = n.Text
+		}
+		u.beginEdit("mind/text", words, true, len([]rune(words)), len([]rune(words)))
 	}
 	changed := false
 	keys := u.keys
@@ -989,35 +1037,20 @@ func (a *App) mindTextKeys(md *mindDoc) {
 				a.mindAddChild(md)
 			}
 			return
-		case k.Ctrl && (k.Code == 'C' || k.Code == 'X'):
-			s, e := u.edit.selection()
-			if s < e {
-				a.host.SetClipboard(string(u.edit.text[s:e]))
-				if k.Code == 'X' {
-					u.edit.insert("")
-					changed = true
-				}
-			}
-		case k.Ctrl && k.Code == 'Z':
-			if string(u.edit.text) != t.orig {
-				u.edit = editor{text: []rune(t.orig), multiline: true, caret: len([]rune(t.orig)), anchor: len([]rune(t.orig))}
-				changed = true
-			}
 		case k.Code == keyUp || k.Code == keyDown:
 			a.mindCaretLine(md, k)
 		default:
-			if u.edit.key(k, u.paste) {
-				changed = true
-			}
+			rev := u.edit.rev
+			u.edit.key(k, u)
+			changed = changed || u.edit.rev != rev
 		}
 	}
 	if len(u.typed) > 0 {
-		u.edit.insert(string(u.typed))
+		u.edit.typeText(string(u.typed))
 		u.typed = nil
 		changed = true
 	}
 	if changed {
-		u.caretBlink = time.Now()
 		text := string(u.edit.text)
 		md.m.Live(t.id, func(x *mind.Node) { x.Text = text })
 	}
@@ -1105,7 +1138,6 @@ func (a *App) mindCaretTo(md *mindDoc, v mind.View, x, y float32, reset bool) {
 	if reset {
 		u.edit.anchor = u.edit.caret
 	}
-	u.caretBlink = time.Now()
 }
 
 // mindCaretLine moves the caret a line up or down in the words being typed.
@@ -1174,11 +1206,7 @@ func (a *App) drawMindText(md *mindDoc, v mind.View) {
 	rs := []rune(tl.lines[line])
 	cx := a.mindLineX(tl, tl.lines[line]) + ms.Width(string(rs[:col]), tl.size, tl.bold)
 	x, y := v.Screen(mind.Vec{X: cx, Y: tl.rect.Y0 + float64(line)*tl.lineH})
-	if time.Since(u.caretBlink)%(1060*time.Millisecond) < 530*time.Millisecond {
-		u.c.Fill(gfx.Rect{X: x, Y: y, W: max(1, u.px(1.5)), H: lh}, colText)
-	}
-	u.imeAt = [3]float32{x, y, lh}
-	u.blinking = true
+	u.drawCaret(x, y, lh, true) // readable on light boards and dark
 }
 
 // editMindCell starts typing into a table's cell.
@@ -1193,9 +1221,7 @@ func (a *App) editMindCell(md *mindDoc, id mind.ID, row, col int) {
 	value := n.Cells.Cell(row, col)
 	md.cell = &mindCell{id: id, row: row, col: col, value: value}
 	md.tableAt = mindCellAt{id, row, col}
-	u.setFocus("mind/cell")
-	u.edit = editor{text: []rune(value), caret: len([]rune(value)), anchor: 0}
-	u.caretBlink = time.Now()
+	u.focusEdit("mind/cell", value, false)
 }
 
 // editEdgeLabel starts typing a connector's label.
@@ -1204,9 +1230,7 @@ func (a *App) editEdgeLabel(md *mindDoc, e *mind.Edge) {
 	a.commitMindText(md)
 	a.commitMindCell(md)
 	md.cell = &mindCell{edge: e.ID, value: e.Label}
-	u.setFocus("mind/cell")
-	u.edit = editor{text: []rune(e.Label), caret: len([]rune(e.Label)), anchor: 0}
-	u.caretBlink = time.Now()
+	u.focusEdit("mind/cell", e.Label, false)
 }
 
 // commitMindCell keeps what was typed into a cell or label, as one step.
@@ -1289,5 +1313,29 @@ func (a *App) drawMindCell(md *mindDoc, v mind.View) {
 			}
 			a.editMindCell(md, c.id, row, col)
 		}
+	}
+}
+
+// mindBendHandle is where the chosen connector's middle handle is in the window.
+func (a *App) mindBendHandle(md *mindDoc, e *mind.Edge, v mind.View) (float32, float32, bool) {
+	_, mid, ok := md.m.EdgePath(e)
+	if !ok {
+		return 0, 0, false
+	}
+	x, y := v.Screen(mid)
+	return x, y, true
+}
+
+// mindStartBend starts reshaping connector e from the route it shows, found round the nodes or given before.
+func (a *App) mindStartBend(md *mindDoc, act *mindAction, e *mind.Edge) {
+	act.kind, act.edge, act.bend, act.sides = actBend, e.ID, e.Bend, [2]mind.Side{e.FromSide, e.ToSide}
+	from, to, bend := md.m.EdgeShape(e)
+	act.shown, act.shownB = [2]mind.Side{from, to}, bend
+}
+
+// mindResetBend gives a connector back the route it finds itself: no bend, and the sides it chooses.
+func (a *App) mindResetBend(md *mindDoc, e *mind.Edge) {
+	if e.Bend != (mind.Vec{}) || e.FromSide != mind.SideAuto || e.ToSide != mind.SideAuto {
+		a.mindDo(md, md.m.UpdateEdge(e.ID, func(e *mind.Edge) { e.Bend, e.FromSide, e.ToSide = mind.Vec{}, mind.SideAuto, mind.SideAuto }))
 	}
 }

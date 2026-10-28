@@ -20,6 +20,8 @@ type step struct {
 	edgesAfter  map[EdgeID]*Edge
 	title       [2]string
 	titled      bool
+	theme       [2]string // the map's theme before and after
+	themed      bool
 }
 
 type history struct {
@@ -52,7 +54,7 @@ func (m *Map) Commit() {
 	}
 	s := h.open
 	h.open = nil
-	if len(s.before) == 0 && len(s.edgesBefore) == 0 && !s.titled {
+	if len(s.before) == 0 && len(s.edgesBefore) == 0 && !s.titled && !s.themed {
 		return
 	}
 	s.after = make(map[ID]*Node, len(s.before))
@@ -149,6 +151,9 @@ func (m *Map) Undo() bool {
 	if s.titled {
 		m.Title = s.title[0]
 	}
+	if s.themed {
+		m.applyTheme(s.theme[0])
+	}
 	return true
 }
 
@@ -163,6 +168,9 @@ func (m *Map) Redo() bool {
 	m.restore(s.after, s.edgesAfter)
 	if s.titled {
 		m.Title = s.title[1]
+	}
+	if s.themed {
+		m.applyTheme(s.theme[1])
 	}
 	return true
 }
@@ -218,6 +226,9 @@ func (m *Map) restore(nodes map[ID]*Node, edges map[EdgeID]*Edge) {
 			m.links++
 		}
 		m.edges[id] = img.saved()
+	}
+	for id := range edges {
+		m.lay.edgeDirty[id] = true
 	}
 	m.lay.edgesStale = true
 	m.version++
@@ -452,6 +463,7 @@ func (m *Map) AddEdge(e Edge) (EdgeID, error) {
 		c.ID = id
 		m.edges = append(m.edges, c)
 		m.links++
+		m.lay.edgeDirty[id] = true
 		m.lay.edgesStale = true
 		m.version++
 		return nil
@@ -477,6 +489,7 @@ func (m *Map) UpdateEdge(id EdgeID, fn func(e *Edge)) error {
 		}
 		m.keepEdge(id)
 		*e = c
+		m.lay.edgeDirty[id] = true
 		m.lay.edgesStale = true
 		m.version++
 		return nil
@@ -506,6 +519,22 @@ func (m *Map) removeEdge(e *Edge) {
 	m.edges[e.ID] = nil
 	m.links--
 	m.lay.edgesStale = true
+	m.lay.edgeDirty[e.ID] = true
+}
+
+// LiveEdge changes connector id with fn outside the history, while its middle is dragged; the change is then made
+// again as a step with UpdateEdge, after LiveEdge puts it back.
+func (m *Map) LiveEdge(id EdgeID, fn func(e *Edge)) {
+	e := m.Edge(id)
+	if e == nil {
+		return
+	}
+	from, to := e.From, e.To
+	fn(e)
+	e.ID, e.From, e.To = id, from, to
+	m.lay.edgeDirty[id] = true
+	m.lay.edgesStale = true
+	m.version++
 }
 
 // SetAspect sets the proportions of what node id shows, found once it is read; it is not a step of its own, as the
@@ -571,4 +600,42 @@ func (m *Map) Discard() {
 	}
 	m.Undo()
 	h.steps = h.steps[:h.at]
+}
+
+// SetTasks makes id and every node under it tasks (or not), as one step, as MindNode turns a branch into a task list.
+func (m *Map) SetTasks(id ID, on bool) error {
+	n := m.Node(id)
+	if n == nil {
+		return ErrNoNode
+	}
+	return m.step("Tasks", func() error {
+		var err error
+		m.eachUnder(n, func(d *Node) {
+			if err == nil && d.Kind == Topic && d.Task != on {
+				err = m.Update(d.ID, func(x *Node) { x.Task, x.Done = on, on && x.Done })
+			}
+		})
+		return err
+	})
+}
+
+// ToggleDone ticks task id, or takes the tick off, as one step: a task with tasks under it ticks or unticks them all,
+// as it shows them all done or not.
+func (m *Map) ToggleDone(id ID) error {
+	n := m.Node(id)
+	if n == nil {
+		return ErrNoNode
+	}
+	m.Layout()
+	done, tasks := n.lay.done, n.lay.tasks
+	on := done < tasks
+	return m.step("Done", func() error {
+		var err error
+		m.eachUnder(n, func(d *Node) {
+			if err == nil && d.Task && d.Done != on {
+				err = m.Update(d.ID, func(x *Node) { x.Done = on })
+			}
+		})
+		return err
+	})
 }

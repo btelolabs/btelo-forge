@@ -96,6 +96,8 @@ type Window struct {
 	bgra    []byte
 	hotkeys []Hotkey      // registered with SetHotkeys, by id less one
 	overlay *overlayState // set for a window made by OpenOverlay
+	// leaving is set once Windows is asked to tell when the pointer leaves the window, until it does.
+	leaving bool
 	// Refresh runs on WM_SIZE and WM_PAINT, so the window keeps drawing while Windows runs its modal resize loop.
 	Refresh func()
 }

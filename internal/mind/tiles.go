@@ -2,6 +2,7 @@ package mind
 
 import (
 	"image"
+	"image/color"
 	"math"
 	"runtime"
 	"slices"
@@ -174,16 +175,16 @@ func (t *Tiles) Draw(c *gfx.Canvas, area image.Rectangle, m *Map, v View, o *Opt
 			continue
 		}
 		whole = false
-		t.stand(c, k, v, x, y)
+		t.stand(c, k, v, x, y, m.Theme().Paper)
 	}
 	t.evict()
 	return whole
 }
 
 // stand fills the place of a missing tile with tiles of other zooms stretched to this one, or the board's colour.
-func (t *Tiles) stand(c *gfx.Canvas, k tileKey, v View, x, y int) {
+func (t *Tiles) stand(c *gfx.Canvas, k tileKey, v View, x, y int, paper color.RGBA) {
 	place := gfx.Rect{X: float32(x), Y: float32(y), W: TileSize, H: TileSize}
-	c.Fill(place, Paper)
+	c.Fill(place, paper)
 	b := tileBoard(k)
 	c.Push(place)
 	defer c.Pop()

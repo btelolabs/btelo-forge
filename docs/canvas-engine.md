@@ -54,22 +54,35 @@ into pixels.
 
 Tools, in Affinity Designer's manner: the shape tools make vector layers (fill the foreground colour, stroke the
 background colour), drawn live as they are dragged; the pen (P) draws curves (click for a sharp node, drag for a
-smooth one, click the first node to close, Enter or Escape to finish); the node tool (A) edits any vector layer's
-nodes and handles (Shift adds to the chosen nodes, a box chooses those in it, Alt breaks a smooth node, a
-double-click toggles it, a click on the outline adds a node, Delete removes, the arrows nudge) and turns a smart
-shape into a curve on its first edit; its context bar edits the fill and stroke (paint, width, alignment, caps,
-joins, dashes). An edit under way is a `VectorSession`: shown as it goes, recorded as one step when it ends, and a
+smooth one, click the first node to close, Enter or Escape to finish); the node tool (A) is Photoshop's path and
+direct selection tools in one: a click chooses a whole shape (`ShapeAt`; Shift+click more shapes, or other layers to
+combine), a drag moves the chosen shapes and a box chooses the shapes it reaches; a double-click goes into a shape to
+edit its nodes and handles (Shift adds to the chosen nodes, a box chooses those in it, Alt breaks a smooth node, a
+double-click toggles it, a click on the outline adds a node, Delete removes, the arrows nudge) until Esc or a click
+on nothing comes out. It turns a smart shape into a curve on its first edit; its context bar edits the fill and
+stroke (paint, width, alignment, caps, joins, dashes). Ctrl+T with nodes or shapes chosen transforms them alone
+(`BeginNodeTransform`, every Free Transform mode, the warps mapping each point through the mesh). An edit under way is a `VectorSession`: shown as it goes, recorded as one step when it ends, and a
 curve left with no outline takes its layer with it. The vector brush (P) draws freehand and fits the line with a few
 smooth curves (`FitPath` in `fit.go`, Schneider's method: least-squares cubics with Newton reparameterisation,
 split at the worst point, sharp at corners).
 
-Booleans (`boolean.go`; Layer › Boolean and the node tool's bar, on the chosen vector layers: Ctrl+click in the
-layers panel or Shift+click with the node tool chooses more) add, subtract (the bottom less those above),
+Combining shapes, as Photoshop's Layer › Combine Shapes (`CombineShapes`; the buttons in the move, shape, pen and
+node tools' bars while two or more vector layers are chosen: Shift+click in the layers panel or on the canvas chooses
+more): the chosen layers become one, in the bottom one's place and style, each a shape of its object combining with
+those under it by unite, subtract front, intersect or exclude. Nothing is worked out when they combine, so it costs
+the same however large they are (a few hundredths of a millisecond for two shapes of 4000 nodes each); the fill is
+reckoned pixel by pixel from each shape's coverage as the picture is drawn, and the shapes stay editable. A shape
+whose own shapes combine otherwise than by adding, or whose fill rule differs, is baked into one outline first so it
+covers what it covered.
+
+Booleans (`boolean.go`) bake shapes into one outline: Merge shape components on a combined layer, the outline a
+compound object's stroke follows, and the MCP tool canvas_boolean. They add, subtract (the bottom less those above),
 intersect or exclude. The outlines are flattened in canvas space and snapped to a 1/256-pixel grid; every edge is
 cut where another crosses it or ends on it, one shared point per crossing; a piece is kept, turned with the
 result's inside on its left, when the result covers one side of it and not the other, judged against the cut
-pieces themselves so the test agrees with the geometry; the pieces are joined into rings and fitted with curves
-again. The result takes the bottom object's place and style.
+pieces themselves so the test agrees with the geometry, each object's pieces filed in bands across y so a point's
+test reads only the pieces level with it (two outlines of 4000 nodes bake in about 6 ms rather than 100); the pieces
+are joined into rings and fitted with curves again. The result takes the bottom object's place and style.
 
 Snapping (`art_snap.go`, View › Snapping) draws a point being placed or dragged by the pen, the node tool, the
 shape tool or the artboard tool to other objects' nodes and to the corners, side middles and centres of objects,

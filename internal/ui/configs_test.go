@@ -132,7 +132,7 @@ func TestExtensionsPageEditsChecksAndSaves(t *testing.T) {
 	if start != string(configKinds[0].defaults) {
 		t.Fatal("the editor does not show the configuration in effect")
 	}
-	x.a.u.focus, x.a.u.edit = id, editor{text: []rune(start), multiline: true}
+	x.a.u.beginEdit(id, start, true, 0, 0)
 	x.frame(Input{Keys: []Key{{Code: keyHome, Ctrl: true}}})
 	x.frame(Input{Typed: []rune("x")})
 	if e.text["music_sources"] != "x"+start {
@@ -145,7 +145,7 @@ func TestExtensionsPageEditsChecksAndSaves(t *testing.T) {
 	if x.a.lib.Config().Sources[0].ID != "kevin" {
 		t.Fatal("broken JSON replaced the configuration")
 	}
-	x.a.u.focus, x.a.u.edit = id, editor{text: []rune(e.text["music_sources"]), multiline: true}
+	x.a.u.beginEdit(id, e.text["music_sources"], true, 0, 0)
 	x.frame(Input{Keys: []Key{{Code: 'Z', Ctrl: true}}})
 	if e.text["music_sources"] != start {
 		t.Fatal("undo did not restore the text")
@@ -159,7 +159,7 @@ func TestExtensionsPageEditsChecksAndSaves(t *testing.T) {
 	if disabled == start {
 		t.Fatal("the test edit did not apply; the built-in file changed shape")
 	}
-	x.a.u.edit = editor{text: []rune(disabled), multiline: true, caret: len([]rune(disabled)), anchor: len([]rune(disabled))}
+	x.a.u.beginEdit(id, disabled, true, len([]rune(disabled)), len([]rune(disabled)))
 	x.frame(Input{Typed: []rune(" ")})
 	x.frame(Input{Keys: []Key{{Code: 'S', Ctrl: true}}})
 	if e.err["music_sources"] != "" {

@@ -3,8 +3,6 @@ package ui
 import (
 	"bytes"
 	"context"
-	"errors"
-	"fmt"
 	"image"
 	"image/color"
 	"math"
@@ -154,7 +152,8 @@ func (a *App) newCanvas() error {
 	return nil
 }
 
-// openImageAsArt opens a picture file, such as a screenshot, as a new canvas saved next to it.
+// openImageAsArt opens a picture file, such as a screenshot, as a new canvas to be saved next to it; as a new
+// canvas's, its file is written only with the first change, so a picture only looked at leaves nothing behind.
 func (a *App) openImageAsArt(path string) {
 	a.background(func(ctx context.Context) {
 		img, err := loadImage(path)
@@ -167,18 +166,7 @@ func (a *App) openImageAsArt(path string) {
 				a.toast(a.u.tf("Cannot open %s: %s", filepath.Base(path), a.describe(err)), true)
 				return
 			}
-			out := strings.TrimSuffix(path, filepath.Ext(path)) + paint.Ext
-			for i := 2; ; i++ {
-				if _, err := os.Stat(out); errors.Is(err, os.ErrNotExist) {
-					break
-				}
-				out = fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(path, filepath.Ext(path)), i, paint.Ext)
-			}
-			a.openArt(d, out)
-			a.art.dirty = true
-			if err := a.saveArt(a.art, true); err != nil {
-				a.toast(a.u.tf("The canvas could not be saved: %s", a.describe(err)), true)
-			}
+			a.openArt(d, a.freePath(strings.TrimSuffix(path, filepath.Ext(path))+paint.Ext))
 		})
 	})
 }

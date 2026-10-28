@@ -1,9 +1,11 @@
 package mind
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 )
@@ -373,5 +375,124 @@ func TestLoneChildContinuesTheLine(t *testing.T) {
 	b := m.Pos(m.Node(kids[1])).Y + underY(m.Node(kids[1]))
 	if math.Abs((a+b)/2-ry) > 0.5 {
 		t.Fatalf("the children's lines %v and %v are not about the root's middle %v", a, b, ry)
+	}
+}
+
+func TestConnectorBendMovesItsMiddle(t *testing.T) {
+	for _, r := range []Route{RouteCurve, RouteElbow, RouteStraight} {
+		m := newMap()
+		a, _ := m.Add(Node{Text: "a", Shape: ShapeRounded, X: 0, Y: 0}, 0, -1)
+		b, _ := m.Add(Node{Text: "b", Shape: ShapeRounded, X: 600, Y: 300}, 0, -1)
+		id, _ := m.AddEdge(Edge{From: a, To: b, Route: r})
+		e := m.Edge(id)
+		base, _ := m.EdgeBase(e)
+		m.UpdateEdge(id, func(e *Edge) { e.Bend = Vec{-80, 140} })
+		_, mid, _ := m.EdgePath(e)
+		if r != RouteElbow && (math.Abs(mid.X-(base.X-80)) > 0.5 || math.Abs(mid.Y-(base.Y+140)) > 0.5) {
+			t.Fatalf("%s: the middle is at %v, want %v", RouteNames[r], mid, base.Add(Vec{-80, 140}))
+		}
+		path, _, _ := m.EdgePath(e)
+		near := math.Inf(1)
+		for i := 1; i < len(path); i++ {
+			near = math.Min(near, segDist(base.Add(Vec{-80, 140}), path[i-1], path[i]))
+		}
+		if r != RouteElbow && near > 1 {
+			t.Fatalf("%s: the path passes %v from where its middle was dragged", RouteNames[r], near)
+		}
+		data, _ := Encode(m, "")
+		got, err := Load(bytes.NewReader(data), "", SimpleMeasurer{})
+		if err != nil || got.Edge(id).Bend != (Vec{-80, 140}) {
+			t.Fatalf("%s: the bend read back as %v (%v)", RouteNames[r], got.Edge(id).Bend, err)
+		}
+	}
+}
+
+// TestConnectorsGoRoundNodes: a connector whose plain path would cross a node between its ends finds a way that
+// crosses none; one the user shaped keeps its shape.
+func TestConnectorsGoRoundNodes(t *testing.T) {
+	for _, r := range []Route{RouteCurve, RouteElbow, RouteStraight} {
+		m := newMap()
+		a, _ := m.Add(Node{Text: "AAA", Shape: ShapeRounded, X: 0, Y: 0}, 0, -1)
+		mid, _ := m.Add(Node{Text: "Summer campaign in the way", Shape: ShapeRounded, X: 220, Y: -20}, 0, -1)
+		b, _ := m.Add(Node{Text: "Trailer", Shape: ShapeRounded, X: 700, Y: 10}, 0, -1)
+		id, _ := m.AddEdge(Edge{From: a, To: b, Route: r})
+		m.Layout()
+		e := m.Edge(id)
+		if hits := m.pathHits(r, e.geo.pts, a, b); hits != 0 {
+			t.Fatalf("%s: the path still crosses %d nodes: %v", RouteNames[r], hits, e.geo.pts)
+		}
+		// Moving the node in the way out of it brings the plain path back.
+		m.Place(mid, 220, 600)
+		m.Layout()
+		if e.geo.from != SideRight || e.geo.to != SideLeft {
+			t.Fatalf("%s: with nothing in the way it leaves %v and enters %v", RouteNames[r], SideNames[e.geo.from], SideNames[e.geo.to])
+		}
+		// Moved back into the way, it goes round again.
+		m.Place(mid, 220, -20)
+		m.Layout()
+		if hits := m.pathHits(r, e.geo.pts, a, b); hits != 0 {
+			t.Fatalf("%s: a node moved into its way is crossed", RouteNames[r])
+		}
+		// Shaped by the user, it is left as they made it.
+		m.UpdateEdge(id, func(e *Edge) { e.Bend = Vec{0, 1} })
+		m.Layout()
+		if e.geo.from != SideRight || e.geo.to != SideLeft {
+			t.Fatalf("%s: a shaped connector was rerouted", RouteNames[r])
+		}
+	}
+}
+
+func TestTasksCountTheirProgress(t *testing.T) {
+	m := newMap()
+	root, kids := tree(t, m, LayoutRight, 2)
+	a1, _ := m.Add(Node{Text: "a1"}, kids[0], -1)
+	m.Add(Node{Text: "a2"}, kids[0], -1)
+	m.Add(Node{Text: "a3"}, kids[0], -1)
+	b1, _ := m.Add(Node{Text: "b1"}, kids[1], -1)
+	if err := m.SetTasks(root, true); err != nil {
+		t.Fatal(err)
+	}
+	m.Update(a1, func(n *Node) { n.Done = true })
+	m.Update(b1, func(n *Node) { n.Done = true })
+	if d, n := m.Progress(m.Node(kids[0])); d != 1 || n != 3 {
+		t.Fatalf("the first branch: %d of %d, want 1 of 3", d, n)
+	}
+	if d, n := m.Progress(m.Node(root)); d != 2 || n != 4 {
+		t.Fatalf("the root: %d of %d, want 2 of 4", d, n)
+	}
+	// Ticking a branch ticks everything under it, as one step.
+	m.ToggleDone(kids[0])
+	if d, n := m.Progress(m.Node(root)); d != 4 || n != 4 {
+		t.Fatalf("after ticking the first branch the root is %d of %d", d, n)
+	}
+	m.Undo()
+	if d, _ := m.Progress(m.Node(root)); d != 2 {
+		t.Fatal("undo did not take the ticks back")
+	}
+	// Folded, the counts still hold.
+	m.Update(kids[0], func(n *Node) { n.Folded = true })
+	if d, n := m.Progress(m.Node(root)); d != 2 || n != 4 {
+		t.Fatalf("folded: %d of %d", d, n)
+	}
+	// A task's box stands before its words.
+	box, ok := m.TaskBox(m.Node(a1))
+	tr, _, _ := m.TextRect(m.Node(a1))
+	if !ok || box.X1 > tr.X0 {
+		t.Fatalf("the box %v is not before the words %v", box, tr)
+	}
+	// Outlines carry tasks both ways.
+	out := m.Outline(root)
+	if !strings.Contains(out, "- [x] a1") || !strings.Contains(out, "- [ ] a2") {
+		t.Fatalf("outline:\n%s", out)
+	}
+	m2 := newMap()
+	tops, _ := m2.AddOutline(out, 0, -1, 0, 0)
+	if d, n := m2.Progress(m2.Node(tops[0])); d != 2 || n != 4 {
+		t.Fatalf("read back from the outline: %d of %d", d, n)
+	}
+	data, _ := Encode(m, "")
+	got, _ := Load(bytes.NewReader(data), "", SimpleMeasurer{})
+	if !got.Node(a1).Task || !got.Node(a1).Done {
+		t.Fatal("the file lost the tasks")
 	}
 }

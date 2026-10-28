@@ -38,10 +38,11 @@ func (a *App) fileCommands() []fileCommand {
 	return []fileCommand{
 		c("down", u.t("Move down"), u.t("down"), false, func() { a.moveRows(fd, 1) }, key('J', ""), key(keyDown, "")),
 		c("up", u.t("Move up"), u.t("up"), false, func() { a.moveRows(fd, -1) }, key('K', ""), key(keyUp, "")),
-		c("parent", u.t("Go to the folder above"), u.t("up a folder"), false, func() { a.goUp(fd.pane()) }, key('H', ""), key(keyBack, "")),
-		c("enter", u.t("Open the folder, or the file in its own tab"), u.t("open"), false, func() { a.enter(fd) }, key('L', ""), key(keyEnter, "")),
-		c("left", u.t("Left: the picture before, or the folder above in a list"), u.t("left"), false, func() { a.sideways(fd, -1) }, key(keyLeft, "")),
-		c("right", u.t("Right: the picture after, or into the folder in a list"), u.t("right"), false, func() { a.sideways(fd, 1) }, key(keyRight, "")),
+		c("parent", u.t("Go to the folder above"), u.t("up a folder"), false, func() { a.goUp(fd.pane()) }, key(keyBack, "")),
+		c("enter", u.t("Open the folder, or the file in its own tab"), u.t("open"), false, func() { a.enter(fd) }, key(keyEnter, "")),
+		// h and l go as the arrows do: up a folder and in, in a list; the picture before and after, in pictures.
+		c("left", u.t("Left: the picture before, or the folder above in a list"), u.t("left"), false, func() { a.sideways(fd, -1) }, key('H', ""), key(keyLeft, "")),
+		c("right", u.t("Right: the picture after, or into the folder in a list"), u.t("right"), false, func() { a.sideways(fd, 1) }, key('L', ""), key(keyRight, "")),
 		c("top", u.t("Go to the first item"), u.t("first"), false, func() { a.moveCursor(fd, -1<<30) }, key(keyHome, "")),
 		c("bottom", u.t("Go to the last item"), u.t("last"), false, func() { a.moveCursor(fd, 1<<30) }, key(keyEnd, ""), key('G', "s")),
 		c("page-down", u.t("Down a page"), u.t("page down"), false, func() { a.pageBy(fd, 1) }, key(keyPageDn, ""), key('D', "c")),

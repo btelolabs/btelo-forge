@@ -528,3 +528,183 @@ func TestMindPlaysVideoAndAnimations(t *testing.T) {
 		t.Fatal("Escape did not stop the video")
 	}
 }
+
+// overviewShown is the overview as the window shows it now.
+func (x *harness) overviewShown(md *mindDoc) *image.RGBA {
+	r := x.a.mindChromeRects(md, x.a.layout().body).overview
+	if r.W == 0 {
+		return nil
+	}
+	return x.c.Img.SubImage(r.Pixels()).(*image.RGBA)
+}
+
+// TestMindConnectorsRouteAndBend: a connector from a topic on the root's left to one on its right goes round the
+// root, and dragging its middle reshapes it, as one step; a double-click on the handle undoes the shape.
+func TestMindConnectorsRouteAndBend(t *testing.T) {
+	x, md := newMindHarness(t)
+	m := md.m
+	root := m.Roots()[0].ID
+	m.Update(root, func(n *mind.Node) { n.Text = "Summer campaign" })
+	right, _ := m.Add(mind.Node{Text: "Trailer", Side: mind.SideRight}, root, -1)
+	left, _ := m.Add(mind.Node{Text: "AAA", Side: mind.SideLeft}, root, -1)
+	id, _ := m.AddEdge(mind.Edge{From: left, To: right})
+	x.settleMind()
+	path, mid, _ := m.EdgePath(m.Edge(id))
+	rb := m.Box(m.Node(root))
+	for i := 1; i < len(path); i++ {
+		if crosses(path[i-1], path[i], rb) {
+			t.Fatalf("the connector crosses the root %v at %v–%v", rb, path[i-1], path[i])
+		}
+	}
+	x.shot("mind-route")
+	// Dragging the handle moves the middle with the pointer.
+	clear(md.sel)
+	md.edge = id
+	x.frame(Input{})
+	hx, hy := x.boardPoint(md, mid)
+	x.drag(hx, hy, hx+40, hy-60)
+	e := m.Edge(id)
+	if e.Bend == (mind.Vec{}) {
+		t.Fatal("dragging the handle did not bend the connector")
+	}
+	_, moved, _ := m.EdgePath(e)
+	if mx, my := x.boardPoint(md, moved); math.Abs(float64(mx-(hx+40))) > 3 || math.Abs(float64(my-(hy-60))) > 3 {
+		t.Fatalf("the middle is at %v,%v, the pointer let go at %v,%v", mx, my, hx+40, hy-60)
+	}
+	x.shot("mind-bend")
+	x.press('Z', "c")
+	if m.Edge(id).Bend != (mind.Vec{}) {
+		t.Fatal("undo did not take the bend back")
+	}
+	x.press('Y', "c")
+	// A double-click on the handle lets it find its own way again.
+	_, mid, _ = m.EdgePath(m.Edge(id))
+	hx, hy = x.boardPoint(md, mid)
+	x.mx, x.my = hx, hy
+	x.frame(Input{})
+	x.frame(Input{Down: true, Pointer: []Pointer{{X: hx, Y: hy, Down: true, Double: true}}})
+	x.frame(Input{Pointer: []Pointer{{X: hx, Y: hy}}})
+	if m.Edge(id).Bend != (mind.Vec{}) {
+		t.Fatal("a double-click on the handle did not reset the route")
+	}
+}
+
+// crosses reports whether the segment p–q passes through the box b.
+func crosses(p, q mind.Vec, b mind.Rect) bool {
+	for i := 0; i <= 64; i++ {
+		t := float64(i) / 64
+		if b.Contains(p.X+(q.X-p.X)*t, p.Y+(q.Y-p.Y)*t) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestMindTasks: a branch made a task list shows boxes and rings; a click on a box ticks it and the rings up the
+// tree follow.
+func TestMindTasks(t *testing.T) {
+	x, md := newMindHarness(t)
+	m := md.m
+	root := m.Roots()[0].ID
+	m.Update(root, func(n *mind.Node) { n.Text = "发布清单 Launch checklist" })
+	var leaves []mind.ID
+	for i, s := range []string{"设计 Design", "开发 Build", "上线 Ship"} {
+		c, _ := m.Add(mind.Node{Text: s}, root, -1)
+		for k := range 2 + i%2 {
+			id, _ := m.Add(mind.Node{Text: []string{"First step", "Second step", "第三步"}[k]}, c, -1)
+			leaves = append(leaves, id)
+		}
+	}
+	md.selectOnly(root)
+	x.press('K', "cs")
+	if !m.Node(leaves[0]).Task {
+		t.Fatal("Ctrl+Shift+K did not make the branch a task list")
+	}
+	m.Update(leaves[0], func(n *mind.Node) { n.Done = true })
+	m.Update(leaves[1], func(n *mind.Node) { n.Done = true })
+	m.Update(leaves[2], func(n *mind.Node) { n.Done = true })
+	md.selectOnly(0)
+	md.fit = true
+	x.settleMind()
+	// A click on an unticked box ticks it.
+	box, _ := m.TaskBox(m.Node(leaves[3]))
+	bx, by := x.boardPoint(md, mind.Vec{X: box.CX(), Y: box.CY()})
+	x.click(gfx.Rect{X: bx - 1, Y: by - 1, W: 2, H: 2})
+	if !m.Node(leaves[3]).Done {
+		t.Fatal("a click on the box did not tick it")
+	}
+	if d, n := m.Progress(m.Node(root)); d != 4 || n != 7 {
+		t.Fatalf("the root shows %d of %d, want 4 of 7", d, n)
+	}
+	md.selectOnly(0)
+	x.settleMind()
+	x.shot("mind-tasks")
+}
+
+// themeBoard fills a map with a tree with tasks, a flowchart, a table and connectors, to see a theme on.
+func themeBoard(m *mind.Map) {
+	root := m.Roots()[0].ID
+	m.Update(root, func(n *mind.Node) { n.Text = "产品发布 Launch" })
+	for i, s := range []string{"目标 Goals", "受众 Audience", "渠道 Channels", "风险 Risks"} {
+		c, _ := m.Add(mind.Node{Text: s}, root, -1)
+		for k := range 1 + i%3 {
+			id, _ := m.Add(mind.Node{Text: []string{"First idea", "A second, longer thought", "第三点"}[k]}, c, -1)
+			if i == 0 {
+				m.Update(id, func(n *mind.Node) { n.Task, n.Done = true, k == 0 })
+			}
+		}
+		if i == 0 {
+			m.Update(c, func(n *mind.Node) { n.Task = true })
+		}
+	}
+	start, _ := m.Add(mind.Node{Text: "开始 Start", Shape: mind.ShapeCapsule, X: 620, Y: -260}, 0, -1)
+	ask, _ := m.Add(mind.Node{Text: "够好了吗?", Shape: mind.ShapeDiamond, X: 600, Y: -140}, 0, -1)
+	ship, _ := m.Add(mind.Node{Text: "发布 Ship", Shape: mind.ShapeParallelogram, X: 840, Y: -120}, 0, -1)
+	m.AddEdge(mind.Edge{From: start, To: ask})
+	m.AddEdge(mind.Edge{From: ask, To: ship, Label: "是", Route: mind.RouteElbow})
+	m.Add(mind.Node{Kind: mind.Table, X: 620, Y: 160, Cells: &mind.Grid{Rows: 3, Cols: 3, Cells: []string{
+		"项目", "Q1", "Q2", "广告", "1200", "1500", "合计", "=SUM(B2:B2)", "=SUM(C2:C2)"}}}, 0, -1)
+}
+
+func TestMindThemes(t *testing.T) {
+	x, md := newMindHarness(t)
+	m := md.m
+	themeBoard(m)
+	if len(mindThemeNames) != len(mind.Themes) {
+		t.Fatalf("%d theme names for %d themes", len(mindThemeNames), len(mind.Themes))
+	}
+	// The tool bar's button opens the panel; a click on a card puts the map in that theme.
+	md.themes = true
+	md.fit = true
+	x.settleMind()
+	x.shot("mind-theme-panel")
+	panel := x.a.mindThemePanel(md, x.a.mindChromeRects(md, x.a.layout().body).tools)
+	for i, th := range mind.Themes {
+		u := &x.a.u
+		col, row := i%themeCols, i/themeCols
+		card := gfx.Rect{X: panel.X + u.px(8) + float32(col)*u.px(themeCardW+12), Y: panel.Y + u.px(8) + float32(row)*u.px(themeCardH+34),
+			W: u.px(themeCardW), H: u.px(themeCardH)}
+		md.themes = true
+		x.click(card)
+		if m.Theme().ID != th.ID {
+			t.Fatalf("a click on %s left the map in %s", th.ID, m.Theme().ID)
+		}
+		md.themes = false
+		x.settleMind()
+		x.shot("mind-theme-" + th.ID)
+	}
+	// One step each, undone in turn; kept in the file.
+	x.press('Z', "c")
+	if m.Theme().ID != mind.Themes[len(mind.Themes)-2].ID {
+		t.Fatalf("undo gave %s", m.Theme().ID)
+	}
+	m.SetTheme("ocean")
+	data, err := mind.Encode(m, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := mind.Load(bytes.NewReader(data), "", x.a.mindMeasure())
+	if err != nil || got.Theme().ID != "ocean" {
+		t.Fatalf("read back in %v (%v)", got.Theme().ID, err)
+	}
+}

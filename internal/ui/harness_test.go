@@ -71,9 +71,6 @@ func (h *fakeHost) SetHotkeys(keys []Hotkey) []error {
 	return make([]error, len(keys))
 }
 
-// realHome is the user's home folder, as it was before a harness gave its test a home of its own.
-var realHome, _ = os.UserHomeDir()
-
 // harness drives the editor headlessly with synthetic input at a fixed size.
 type harness struct {
 	t      testing.TB

@@ -84,6 +84,24 @@ func (d *doc) title(a *App) string {
 	return a.u.t("New tab")
 }
 
+// glyph is the symbol on the tab: its kind of work's symbol from the new tab's cards, or a plus while it is still
+// a new tab.
+func (d *doc) glyph() string {
+	switch {
+	case d.art != nil:
+		return icBrush
+	case d.files != nil:
+		return icFmFiles
+	case d.board != nil:
+		return icMind
+	case d.liveTab:
+		return icLive
+	case d.p != nil || d.opening != "" || d.editing:
+		return icVideo
+	}
+	return icAdd
+}
+
 // save writes the edit when it has unsaved changes.
 func (d *doc) save(dir string) error {
 	if d.p == nil || !d.dirty {

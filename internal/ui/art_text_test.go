@@ -20,6 +20,10 @@ func TestCanvasTextTool(t *testing.T) {
 	if ad.text == nil || a.u.focus != textFocus {
 		t.Fatalf("a click did not start typing: %v %q", ad.text, a.u.focus)
 	}
+	x.frame(Input{})
+	if !a.u.blinking || !a.u.editing(textFocus) {
+		t.Error("the text tool's caret should blink, as every box's does")
+	}
 	x.frame(Input{Typed: []rune("Hello")})
 	x.frame(Input{Keys: []Key{{Code: keyEnter}}})
 	x.frame(Input{Typed: []rune("世界")})

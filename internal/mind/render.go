@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"slices"
 	"strconv"
 
 	"github.com/btelolabs/btelo-forge/internal/gfx"
@@ -73,7 +74,7 @@ type Options struct {
 	SkipEdges map[EdgeID]bool
 	// LiveAnimated leaves the frames of animated pictures to the window, which draws them as they play.
 	LiveAnimated bool
-	Paper        bool // fill the board's colour and its dots first
+	Paper        bool // fill the board's colour first
 }
 
 // Glyphs of the icon font drawn on the board.
@@ -89,6 +90,7 @@ const (
 
 type renderer struct {
 	c    *gfx.Canvas
+	th   *Theme
 	m    *Map
 	v    View
 	o    *Options
@@ -102,7 +104,7 @@ func Render(c *gfx.Canvas, m *Map, v View, o *Options) {
 	if cl.Empty() {
 		return
 	}
-	r := &renderer{c: c, m: m, v: v, o: o, z: float32(v.Zoom),
+	r := &renderer{c: c, th: m.Theme(), m: m, v: v, o: o, z: float32(v.Zoom),
 		clip: gfx.Rect{X: float32(cl.Min.X), Y: float32(cl.Min.Y), W: float32(cl.Dx()), H: float32(cl.Dy())}}
 	if o.Paper {
 		r.paper()
@@ -131,7 +133,7 @@ func RenderNode(c *gfx.Canvas, m *Map, v View, o *Options, n *Node) {
 	if cl.Empty() || n == nil {
 		return
 	}
-	r := &renderer{c: c, m: m, v: v, o: o, z: float32(v.Zoom),
+	r := &renderer{c: c, th: m.Theme(), m: m, v: v, o: o, z: float32(v.Zoom),
 		clip: gfx.Rect{X: float32(cl.Min.X), Y: float32(cl.Min.Y), W: float32(cl.Dx()), H: float32(cl.Dy())}}
 	r.tree(n, m.Pos(n), v.BoardRect(cl).Grow(4/v.Zoom))
 }
@@ -142,7 +144,7 @@ func RenderEdge(c *gfx.Canvas, m *Map, v View, o *Options, e *Edge) {
 	if cl.Empty() || e == nil || !e.geo.ok {
 		return
 	}
-	r := &renderer{c: c, m: m, v: v, o: o, z: float32(v.Zoom),
+	r := &renderer{c: c, th: m.Theme(), m: m, v: v, o: o, z: float32(v.Zoom),
 		clip: gfx.Rect{X: float32(cl.Min.X), Y: float32(cl.Min.Y), W: float32(cl.Dx()), H: float32(cl.Dy())}}
 	r.edge(e)
 }
@@ -155,16 +157,12 @@ func (m *Map) rootsIn(r Rect) []*Node {
 			out = append(out, n)
 		}
 	})
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j].ID < out[j-1].ID; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
+	slices.SortFunc(out, func(a, b *Node) int { return int(a.ID) - int(b.ID) })
 	return out
 }
 
 // paper fills the clip with the board's colour, plain as MindNode's.
-func (r *renderer) paper() { r.c.Fill(r.clip, Paper) }
+func (r *renderer) paper() { r.c.Fill(r.clip, r.th.Paper) }
 
 // tree draws n's subtree, n's box being at at on the board.
 func (r *renderer) tree(n *Node, at Vec, area Rect) {
@@ -174,7 +172,7 @@ func (r *renderer) tree(n *Node, at Vec, area Rect) {
 		return
 	}
 	if sub.W < 3 && sub.H < 3 {
-		col := BranchColor(p.branch)
+		col := r.th.Branch(p.branch)
 		if p.depth == 0 && n.Kind == Topic {
 			col = p.lk.fill
 		}
@@ -213,9 +211,9 @@ func (r *renderer) branches(n *Node, at Vec, list []*Node, dir Layout, i, j int)
 	if len(list) == 0 {
 		return
 	}
-	w0 := float32(branchWidth(p.depth)) * r.z
+	w0 := float32(branchWidth(p.depth, r.th)) * r.z
 	if p.depth == 0 {
-		w0 = float32(branchWidth(0)) * r.z
+		w0 = float32(branchWidth(0, r.th)) * r.z
 	} else if p.lk.shape == ShapeUnderline {
 		w0 = float32(p.lk.lineW) * r.z
 	}
@@ -223,13 +221,13 @@ func (r *renderer) branches(n *Node, at Vec, list []*Node, dir Layout, i, j int)
 		if c.Line.A != 0 {
 			return c.Line
 		}
-		return BranchColor(c.lay.branch)
+		return r.th.Branch(c.lay.branch)
 	}
 	childW := func(c *Node) float32 {
 		if c.lay.lk.shape == ShapeUnderline {
 			return float32(c.lay.lk.lineW) * r.z
 		}
-		return float32(branchWidth(c.lay.depth)) * r.z
+		return float32(branchWidth(c.lay.depth, r.th)) * r.z
 	}
 	in := func(c *Node) Vec { return at.Add(c.lay.rel).Add(inAnchor(c, dir)) }
 	sx, sy := r.v.Screen(out)
@@ -264,9 +262,9 @@ func (r *renderer) branches(n *Node, at Vec, list []*Node, dir Layout, i, j int)
 		}
 		return
 	}
-	trunkCol := BranchColor(p.branch)
+	trunkCol := r.th.Branch(p.branch)
 	if p.depth == 0 {
-		trunkCol = edgeColor
+		trunkCol = r.th.Edge
 	}
 	w := max(1, min(w0, 3*r.z))
 	first, last := in(list[0]), in(list[len(list)-1])
@@ -379,13 +377,20 @@ func (r *renderer) node(n *Node, at Vec) {
 	switch n.Kind {
 	case Topic:
 		r.shape(lk, box)
-		r.words(p.lines, p.text.Add(at), lk, lk.ink, lk.shape != ShapeUnderline && lk.shape != ShapeNone || n.W > 0)
+		ink := lk.ink
+		if n.Task {
+			r.task(n, at)
+			if p.tasks > 0 && p.done == p.tasks {
+				ink = gfx.Alpha(ink, 0.5) // done: its words step back
+			}
+		}
+		r.words(p.lines, p.text.Add(at), lk, ink, lk.shape != ShapeUnderline && lk.shape != ShapeNone || n.W > 0)
 	case Table:
 		r.table(n, at)
-		r.words(p.lines, p.caption.Add(at), lk, inkDim, true)
+		r.words(p.lines, p.caption.Add(at), lk, r.th.InkDim, true)
 	default:
 		r.media(n, at)
-		r.words(p.lines, p.caption.Add(at), lk, inkDim, true)
+		r.words(p.lines, p.caption.Add(at), lk, r.th.InkDim, true)
 	}
 	if n.Folded && len(n.Children) > 0 {
 		r.fold(n, at)
@@ -530,7 +535,6 @@ func (r *renderer) media(n *Node, at Vec) {
 	box := r.v.ScreenRect(R(0, 0, p.w, p.h).Add(at))
 	mr := r.v.ScreenRect(p.media.Add(at))
 	radius := float32(p.lk.radius) * r.z
-	r.shadow(box, radius)
 	r.c.RoundRect(box, radius, p.lk.fill)
 	r.c.Push(box) // the picture keeps to the card's corners
 	defer r.c.Pop()
@@ -563,22 +567,22 @@ func (r *renderer) media(n *Node, at Vec) {
 			r.icon(glyphPlay, c, d*0.7, color.RGBA{255, 255, 255, 235})
 		}
 	case state == PicCycle || state == PicTooDeep:
-		r.c.RoundRect(mr, radius, warnFill)
-		r.c.RoundOutline(mr, radius, max(1, 1.5*r.z), warnLine)
+		r.c.RoundRect(mr, radius, r.th.WarnFill)
+		r.c.RoundOutline(mr, radius, max(1, 1.5*r.z), r.th.WarnLine)
 		text := r.o.Labels.Cycle
 		if state == PicTooDeep {
 			text = r.o.Labels.TooDeep
 		}
 		ic := min(small*0.38, 64)
-		r.icon(glyphWarning, gfx.Rect{X: mr.X, Y: mr.Y + mr.H*0.18, W: mr.W, H: ic}, ic, warnLine)
-		r.label(text, gfx.Rect{X: mr.X, Y: mr.Y + mr.H*0.18 + ic, W: mr.W, H: mr.H * 0.3}, min(14*r.z, mr.H*0.12), warnLine)
+		r.icon(glyphWarning, gfx.Rect{X: mr.X, Y: mr.Y + mr.H*0.18, W: mr.W, H: ic}, ic, r.th.WarnLine)
+		r.label(text, gfx.Rect{X: mr.X, Y: mr.Y + mr.H*0.18 + ic, W: mr.W, H: mr.H * 0.3}, min(14*r.z, mr.H*0.12), r.th.WarnLine)
 		return
 	case state == PicMissing:
 		ic := min(small*0.34, 56)
-		r.icon(glyphBroken, gfx.Rect{X: mr.X, Y: mr.Y + mr.H*0.22, W: mr.W, H: ic}, ic, inkDim)
-		r.label(r.o.Labels.Missing, gfx.Rect{X: mr.X, Y: mr.Y + mr.H*0.22 + ic, W: mr.W, H: mr.H * 0.25}, min(13*r.z, mr.H*0.11), inkDim)
+		r.icon(glyphBroken, gfx.Rect{X: mr.X, Y: mr.Y + mr.H*0.22, W: mr.W, H: ic}, ic, r.th.InkDim)
+		r.label(r.o.Labels.Missing, gfx.Rect{X: mr.X, Y: mr.Y + mr.H*0.22 + ic, W: mr.W, H: mr.H * 0.25}, min(13*r.z, mr.H*0.11), r.th.InkDim)
 	default:
-		r.icon(glyph, mr, min(small*0.34, 56), gfx.Alpha(inkDim, 0.6))
+		r.icon(glyph, mr, min(small*0.34, 56), gfx.Alpha(r.th.InkDim, 0.6))
 	}
 	if (n.Kind == Smart || n.Kind == Nested) && small >= 40 {
 		d := min(22*r.z, small*0.2)
@@ -621,15 +625,14 @@ func fitIn(w, h int, box gfx.Rect) gfx.Rect {
 func (r *renderer) table(n *Node, at Vec) {
 	p := &n.lay
 	mr := r.v.ScreenRect(p.media.Add(at))
-	r.shadow(mr, 6*r.z)
-	r.c.RoundRect(mr, 6*r.z, boxFill)
+	r.c.RoundRect(mr, 6*r.z, r.th.BoxFill)
 	g := n.Cells
 	if g == nil || len(p.cols) == 0 || len(p.rows) == 0 {
 		return
 	}
-	line := gfx.Alpha(boxLine, 0.9)
+	line := gfx.Alpha(r.th.BoxLine, 0.9)
 	head := r.v.ScreenRect(R(0, 0, p.media.W(), p.rows[0]).Add(at))
-	r.c.Fill(head, gfx.Mix(boxFill, boxLine, 0.35))
+	r.c.Fill(head, gfx.Mix(r.th.BoxFill, r.th.BoxLine, 0.35))
 	px := p.lk.size * r.z
 	lineH := float32(p.lineH) * r.z
 	var f *gfx.Face
@@ -657,7 +660,7 @@ func (r *renderer) table(n *Node, at Vec) {
 							if right {
 								bx = inner.X + inner.W - lw
 							}
-							r.c.Fill(gfx.Rect{X: bx, Y: ly + lineH*0.3, W: max(lw, 1), H: max(1, px*0.5)}, gfx.Alpha(inkLight, 0.35))
+							r.c.Fill(gfx.Rect{X: bx, Y: ly + lineH*0.3, W: max(lw, 1), H: max(1, px*0.5)}, gfx.Alpha(r.th.Ink, 0.35))
 						}
 						continue
 					}
@@ -666,7 +669,7 @@ func (r *renderer) table(n *Node, at Vec) {
 						lx = inner.X + inner.W - f.Measure(l)
 					}
 					r.c.Push(cell)
-					r.c.Text(f, lx, ly+(lineH-f.Height())/2, l, inkLight)
+					r.c.Text(f, lx, ly+(lineH-f.Height())/2, l, r.th.Ink)
 					r.c.Pop()
 				}
 			}
@@ -687,18 +690,70 @@ func (r *renderer) table(n *Node, at Vec) {
 		_, sy := r.v.Screen(at.Add(Vec{0, y}))
 		r.c.Fill(gfx.Rect{X: mr.X, Y: sy, W: mr.W, H: lw}, line)
 	}
-	r.c.RoundOutline(mr, 6*r.z, lw, boxLine)
+	r.c.RoundOutline(mr, 6*r.z, lw, r.th.BoxLine)
+}
+
+// task draws a task's box, ticked when it is done; or, for a task with tasks under it, a ring that fills as they are
+// done, ticked when all are.
+func (r *renderer) task(n *Node, at Vec) {
+	p := &n.lay
+	b := r.v.ScreenRect(p.task.Add(at))
+	if b.W < 3 {
+		return
+	}
+	col := r.th.Branch(p.branch)
+	if n.Line.A != 0 {
+		col = n.Line
+	}
+	if p.lk.fill.A != 0 && p.lk.shape != ShapeUnderline && p.depth == 0 {
+		col = gfx.Hex(0x3a7be0) // on a light root bubble a deeper blue reads better
+	}
+	lw := max(1.2, b.W*0.11)
+	cx, cy := b.X+b.W/2, b.Y+b.H/2
+	tick := func(scale float32) {
+		k := b.W * scale
+		strokeLine(r.c, []pt{{cx - k*0.42, cy + k*0.02}, {cx - k*0.12, cy + k*0.3}, {cx + k*0.42, cy - k*0.3}}, max(1.4, b.W*0.13), gfx.Hex(0xffffff))
+	}
+	whole := p.tasks > 0 && p.done == p.tasks
+	if !p.under {
+		radius := b.W * 0.26
+		if n.Done {
+			r.c.RoundRect(b, radius, col)
+			tick(0.95)
+			return
+		}
+		r.c.RoundOutline(b, radius, lw, gfx.Alpha(r.th.Ink, 0.7))
+		return
+	}
+	if whole {
+		r.c.Circle(cx, cy, b.W/2, col)
+		tick(0.95)
+		return
+	}
+	// The ring, and in it a wedge for what is done, from the top round clockwise.
+	r.c.RoundOutline(b, b.W/2, lw, gfx.Alpha(col, 0.45))
+	if p.done > 0 {
+		frac := float64(p.done) / float64(p.tasks)
+		rad := b.W/2 - lw - max(1, b.W*0.06)
+		steps := max(4, int(frac*40))
+		wedge := []pt{{cx, cy}}
+		for i := 0; i <= steps; i++ {
+			a := -math.Pi/2 + 2*math.Pi*frac*float64(i)/float64(steps)
+			wedge = append(wedge, pt{cx + rad*float32(math.Cos(a)), cy + rad*float32(math.Sin(a))})
+		}
+		fillPoly(r.c, wedge, col)
+	}
 }
 
 // fold draws the count of a folded node's children where its branches would leave: a dot of its branch's colour.
 func (r *renderer) fold(n *Node, at Vec) {
 	b := r.v.ScreenRect(foldMark(n).Add(at))
-	col := BranchColor(n.lay.branch)
+	col := r.th.Branch(n.lay.branch)
 	if n.lay.depth == 0 {
-		col = edgeColor
+		col = r.th.Edge
 	}
 	r.c.Circle(b.X+b.W/2, b.Y+b.H/2, b.H/2, col)
-	r.label(strconv.Itoa(len(n.Children)), b, b.H*0.6, Paper)
+	r.label(strconv.Itoa(len(n.Children)), b, b.H*0.6, r.th.Paper)
 }
 
 // edge draws a connector with its arrowheads and label.
@@ -710,7 +765,7 @@ func (r *renderer) edge(e *Edge) {
 	}
 	col := e.Color
 	if col.A == 0 {
-		col = edgeColor
+		col = r.th.Edge
 	}
 	w := max(1, 1.75*r.z)
 	size := max(5, arrowLen*r.z)
@@ -772,9 +827,9 @@ func (r *renderer) edge(e *Edge) {
 		tw := f.Measure(e.Label)
 		x, y := r.v.Screen(g.label)
 		lb := gfx.Rect{X: x - tw/2 - 6*r.z, Y: y - f.Height()/2 - 3*r.z, W: tw + 12*r.z, H: f.Height() + 6*r.z}
-		r.c.RoundRect(lb, 4*r.z, Paper)
+		r.c.RoundRect(lb, 4*r.z, r.th.Paper)
 		r.c.RoundOutline(lb, 4*r.z, max(1, r.z), gfx.Alpha(col, 0.6))
-		r.c.Text(f, x-tw/2, y-f.Height()/2, e.Label, inkLight)
+		r.c.Text(f, x-tw/2, y-f.Height()/2, e.Label, r.th.Ink)
 	}
 }
 
@@ -783,7 +838,7 @@ func (r *renderer) edge(e *Edge) {
 func RenderFit(m *Map, w, h int, o *Options) *image.RGBA {
 	m.Layout()
 	c := gfx.NewCanvas(w, h)
-	c.Clear(Paper)
+	c.Clear(m.Theme().Paper)
 	b := m.Bounds()
 	if b.Empty() {
 		return c.Img

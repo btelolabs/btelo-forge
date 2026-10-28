@@ -244,7 +244,7 @@ func (a *App) generateSubtitles() error {
 			s.lastDone = len(items)
 			if d == a.doc {
 				a.committed(before)
-				a.toast(a.u.tf("Added %d subtitles on a new overlay track", len(items)), false)
+				a.toast(a.u.tn(len(items), "Added %d subtitle on a new overlay track", "Added %d subtitles on a new overlay track", len(items)), false)
 			} else {
 				d.hist.Commit(before)
 				d.dirty = true

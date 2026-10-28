@@ -1,10 +1,17 @@
 package mind
 
-import "math"
+import (
+	"math"
+	"slices"
+	"time"
+)
 
 // Connectors: each runs from a side of one node to a side of another, chosen to face each other unless the user
-// chose them, along a curve, right angles or a straight line. Their paths are worked out whenever a node may have
-// moved, and kept in a grid of their own for drawing and pointing.
+// chose them, along a curve, right angles or a straight line. Its middle can be dragged (Bend), and the path then
+// passes there. A connector the user has not shaped finds its own way round the nodes between its ends: when the
+// straight-forward path would cross one, other sides and detours are tried and the shortest that crosses none is
+// taken. Paths are worked out again when their ends move or something changes where they run, and kept in a grid
+// of their own for drawing and pointing.
 
 // edgeGeo is a connector's path on the board.
 type edgeGeo struct {
@@ -12,7 +19,20 @@ type edgeGeo struct {
 	pts      []Vec // a curve's four control points, or the corners of the other routes
 	from, to Side
 	box      Rect
-	label    Vec // where its label is centred
+	label    Vec // where its label is centred: the path's middle, which a drag moves
+	base     Vec // where the middle would be with no bend
+	bend     Vec // the bend the path takes: the user's, or the detour found round the nodes in its way
+	key      edgeKey
+	pending  bool // its way round the nodes is still to be found: it shows its plain path meanwhile
+}
+
+// edgeKey is what a connector's path depends on besides the nodes in its way.
+type edgeKey struct {
+	a, b     Rect
+	from, to Side
+	route    Route
+	bend     Vec
+	label    bool
 }
 
 // stub is how far a connector leaves a side straight before it turns.
@@ -52,9 +72,10 @@ func facing(a, b Rect) Side {
 	return SideTop
 }
 
-// route works out a connector's path between boxes a and b.
-func route(e *Edge, a, b Rect) edgeGeo {
-	g := edgeGeo{ok: true, from: e.FromSide, to: e.ToSide}
+// route works out a connector's path between boxes a and b, leaving and entering by the sides from and to (auto
+// for facing), its middle moved by bend.
+func route(r Route, from, to Side, bend Vec, label bool, a, b Rect) edgeGeo {
+	g := edgeGeo{ok: true, from: from, to: to, bend: bend}
 	if g.from == SideAuto {
 		g.from = facing(a, b)
 	}
@@ -63,25 +84,42 @@ func route(e *Edge, a, b Rect) edgeGeo {
 	}
 	p0, n0 := sidePoint(a, g.from)
 	p3, n3 := sidePoint(b, g.to)
-	switch e.Route {
+	switch r {
 	case RouteStraight:
 		g.pts = []Vec{p0, p3}
+		g.base = Vec{(p0.X + p3.X) / 2, (p0.Y + p3.Y) / 2}
+		if bend != (Vec{}) {
+			g.pts = []Vec{p0, g.base.Add(bend), p3}
+		}
 	case RouteElbow:
-		g.pts = elbow(p0, n0, p3, n3)
+		g.pts = elbow(p0, n0, p3, n3, Vec{})
+		g.base = pathMiddle(r, g.pts)
+		if bend != (Vec{}) {
+			g.pts = elbow(p0, n0, p3, n3, bend)
+		}
 	default:
 		d := math.Max(stub*2, math.Hypot(p3.X-p0.X, p3.Y-p0.Y)*0.4)
 		g.pts = []Vec{p0, {p0.X + n0.X*d, p0.Y + n0.Y*d}, {p3.X + n3.X*d, p3.Y + n3.Y*d}, p3}
+		g.base = bezier(g.pts, 0.5)
+		// The curve's middle is (p0 + 3·p1 + 3·p2 + p3) / 8: moving both inner points by 4/3 of the bend moves it
+		// by the bend.
+		g.pts[1] = g.pts[1].Add(Vec{bend.X * 4 / 3, bend.Y * 4 / 3})
+		g.pts[2] = g.pts[2].Add(Vec{bend.X * 4 / 3, bend.Y * 4 / 3})
 	}
-	g.box = span(g.pts...).Grow(arrowLen + 2)
-	g.label = pathMiddle(e.Route, g.pts)
-	if e.Label != "" {
+	g.label = g.base.Add(bend)
+	if r == RouteElbow && bend != (Vec{}) {
+		g.label = pathMiddle(r, g.pts)
+	}
+	g.box = span(polyline(r, g.pts, 24)...).Grow(arrowLen + 2)
+	if label {
 		g.box = g.box.Union(R(g.label.X-120, g.label.Y-30, 240, 60))
 	}
 	return g
 }
 
-// elbow is a path of horizontal and vertical runs from p0, leaving along n0, to p3, entering against n3.
-func elbow(p0, n0, p3, n3 Vec) []Vec {
+// elbow is a path of horizontal and vertical runs from p0, leaving along n0, to p3, entering against n3; bend
+// moves its middle run (or, with one corner, opens it into a step) by that much.
+func elbow(p0, n0, p3, n3, bend Vec) []Vec {
 	s := Vec{p0.X + n0.X*stub, p0.Y + n0.Y*stub}
 	t := Vec{p3.X + n3.X*stub, p3.Y + n3.Y*stub}
 	h0, h3 := n0.Y == 0, n3.Y == 0
@@ -95,6 +133,7 @@ func elbow(p0, n0, p3, n3 Vec) []Vec {
 				x = math.Min(s.X, t.X)
 			}
 		}
+		x += bend.X
 		mid = []Vec{{x, s.Y}, {x, t.Y}}
 	case !h0 && !h3:
 		y := (s.Y + t.Y) / 2
@@ -104,11 +143,22 @@ func elbow(p0, n0, p3, n3 Vec) []Vec {
 				y = math.Min(s.Y, t.Y)
 			}
 		}
+		y += bend.Y
 		mid = []Vec{{s.X, y}, {t.X, y}}
 	case h0:
-		mid = []Vec{{t.X, s.Y}}
+		if bend == (Vec{}) {
+			mid = []Vec{{t.X, s.Y}}
+		} else {
+			x, y := t.X+bend.X, s.Y+bend.Y
+			mid = []Vec{{x, s.Y}, {x, y}, {t.X, y}}
+		}
 	default:
-		mid = []Vec{{s.X, t.Y}}
+		if bend == (Vec{}) {
+			mid = []Vec{{s.X, t.Y}}
+		} else {
+			x, y := s.X+bend.X, t.Y+bend.Y
+			mid = []Vec{{s.X, y}, {x, y}, {x, t.Y}}
+		}
 	}
 	pts := append([]Vec{p0, s}, mid...)
 	pts = append(pts, t, p3)
@@ -162,15 +212,38 @@ func pathMiddle(r Route, pts []Vec) Vec {
 	return line[0]
 }
 
-// layEdges works out the connectors' paths again when nodes may have moved, noting those that changed.
-func (m *Map) layEdges() {
+// layEdges works out the connectors' paths again where they may have changed: those changed themselves, those
+// running through the areas changed (regions, or everywhere when all is true) — where an end moved, or a node may
+// now be in their way — and those not shown or still being routed. It looks only at those, found through the
+// connectors' grid, however many the map holds, and notes the paths that changed.
+func (m *Map) layEdges(regions []Rect, all bool) {
 	if !m.lay.edgesStale {
 		return
 	}
-	m.lay.edgesStale = false
+	l := &m.lay
+	l.edgesStale = false
 	if m.edgeGrid.cells == nil {
 		m.edgeGrid.init()
 	}
+	look := map[EdgeID]bool{}
+	if all {
+		m.EachEdge(func(e *Edge) bool { look[e.ID] = true; return true })
+	} else {
+		for _, set := range []map[EdgeID]bool{l.edgeDirty, l.edgeOff, l.edgePending} {
+			for id := range set {
+				look[id] = true
+			}
+		}
+		for _, r := range regions {
+			m.edgeGrid.query(r, func(id uint32, _ Rect) { look[EdgeID(id)] = true })
+		}
+	}
+	clear(l.edgeDirty)
+	ids := make([]EdgeID, 0, len(look))
+	for id := range look {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
 	boxes := map[ID]Rect{}
 	box := func(id ID) (Rect, bool) {
 		if b, ok := boxes[id]; ok {
@@ -184,38 +257,240 @@ func (m *Map) layEdges() {
 		boxes[id] = b
 		return b, true
 	}
-	m.EachEdge(func(e *Edge) bool {
+	deadline := time.Time{}
+	if l.budget > 0 {
+		began := time.Now()
+		deadline = began.Add(l.budget - l.spent)
+		defer func() { l.spent += time.Since(began) }()
+	}
+	l.routing = false
+	for _, id := range ids {
+		e := m.Edge(id)
+		if e == nil {
+			// Deleted: gone from the grid and the sets.
+			m.edgeGrid.remove(uint32(id))
+			delete(l.edgeOff, id)
+			delete(l.edgePending, id)
+			continue
+		}
 		a, okA := box(e.From)
 		b, okB := box(e.To)
 		old := e.geo
-		if okA && okB {
-			e.geo = route(e, a, b)
-		} else {
+		if !okA || !okB {
 			e.geo = edgeGeo{}
+		} else {
+			key := edgeKey{a, b, e.FromSide, e.ToSide, e.Route, e.Bend, e.Label != ""}
+			if !old.ok || old.key != key || old.pending || all || pathTouches(e.Route, old.pts, regions) {
+				if !deadline.IsZero() && time.Now().After(deadline) {
+					// Out of time this frame: the plain path for now, its way round found in the next.
+					e.geo = route(e.Route, e.FromSide, e.ToSide, e.Bend, e.Label != "", a, b)
+					e.geo.pending = true
+				} else {
+					e.geo = m.routeAround(e, a, b)
+				}
+				e.geo.key = key
+			}
+		}
+		if e.geo.ok {
+			delete(l.edgeOff, id)
+		} else {
+			l.edgeOff[id] = true
+		}
+		if e.geo.pending {
+			l.edgePending[id], l.routing = true, true
+		} else {
+			delete(l.edgePending, id)
 		}
 		if !sameGeo(old, e.geo) {
 			if old.ok {
-				m.lay.region(old.box)
+				l.region(old.box)
 			}
 			if e.geo.ok {
-				m.lay.region(e.geo.box)
+				l.region(e.geo.box)
 				m.edgeGrid.put(uint32(e.ID), e.geo.box)
 			} else {
 				m.edgeGrid.remove(uint32(e.ID))
 			}
 		}
-		return true
-	})
-	// Connectors deleted since are gone from the grid.
-	var drop []uint32
-	m.edgeGrid.each(func(id uint32, _ Rect) {
-		if e := m.Edge(EdgeID(id)); e == nil || !e.geo.ok {
-			drop = append(drop, id)
-		}
-	})
-	for _, id := range drop {
-		m.edgeGrid.remove(id)
 	}
+	if l.routing {
+		l.edgesStale = true // the next frame goes on with them
+	}
+}
+
+// pathTouches reports whether a path passes through, or near, one of the regions: only then may something there
+// have come into its way, or moved out of it.
+func pathTouches(r Route, pts []Vec, regions []Rect) bool {
+	line := polyline(r, pts, 16)
+	box := span(line...).Grow(arrowLen + 2)
+	for _, c := range regions {
+		if !c.Overlaps(box) {
+			continue
+		}
+		c = c.Grow(arrowLen + 2)
+		for i := 1; i < len(line); i++ {
+			if segmentCrosses(line[i-1], line[i], c) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Routing reports whether some connectors still look for their way round the nodes: the window draws again soon,
+// for the next frame's layout (Changed) to go on with them.
+func (m *Map) Routing() bool { return m.lay.routing }
+
+// SetRouteBudget bounds how long a frame (from one Changed to the next) spends finding connectors' ways round the
+// nodes; the rest is left to the frames after. Zero, the default, finds them all at once.
+func (m *Map) SetRouteBudget(d time.Duration) { m.lay.budget = d }
+
+// routeAround is the path of e between boxes a and b: the one the user shaped, or else the plainest that crosses
+// no other node, when there is one within reach.
+func (m *Map) routeAround(e *Edge, a, b Rect) edgeGeo {
+	label := e.Label != ""
+	g := route(e.Route, e.FromSide, e.ToSide, e.Bend, label, a, b)
+	if e.Bend != (Vec{}) || e.FromSide != SideAuto && e.ToSide != SideAuto {
+		return g // shaped by the user
+	}
+	hits := m.pathHits(e.Route, g.pts, e.From, e.To)
+	if hits == 0 {
+		return g
+	}
+	best, bestScore := g, score(e.Route, g, hits, true)
+	stop := time.Now().Add(routeSearch)
+	try := func(from, to Side, bend Vec) {
+		if time.Now().After(stop) {
+			return // the search has had its time: the best so far is kept
+		}
+		c := route(e.Route, from, to, bend, label, a, b)
+		h := m.pathHits(e.Route, c.pts, e.From, e.To)
+		if s := score(e.Route, c, h, from == g.from && to == g.to); s < bestScore {
+			best, bestScore = c, s
+		}
+	}
+	sides := []Side{SideTop, SideRight, SideBottom, SideLeft}
+	for _, from := range sides {
+		if e.FromSide != SideAuto && from != e.FromSide {
+			continue
+		}
+		for _, to := range sides {
+			if e.ToSide != SideAuto && to != e.ToSide {
+				continue
+			}
+			try(from, to, Vec{})
+		}
+	}
+	if bestScore < detourCost || hits >= hopeless {
+		return best // clear; or so tangled among nodes that no detour would clear it
+	}
+	// Still in the way of something: detours to either side of the line between the ends, further and further.
+	dx, dy := b.CX()-a.CX(), b.CY()-a.CY()
+	l := math.Hypot(dx, dy)
+	if l == 0 {
+		return best
+	}
+	nx, ny := -dy/l, dx/l
+	for _, d := range []float64{60, 120, 200, 320, 480, 720, 1080} {
+		for _, sgn := range []float64{1, -1} {
+			for _, from := range []Side{best.from, e.FromSide} {
+				try(from, best.to, Vec{nx * d * sgn, ny * d * sgn})
+			}
+		}
+		if bestScore < detourCost {
+			break
+		}
+	}
+	return best
+}
+
+// routeSearch is the longest one connector looks for its way round the nodes.
+const routeSearch = time.Millisecond
+
+// hopeless is how many nodes a plain path crosses for detours not to be tried: it runs through the thick of a
+// map, where none would find a clear way.
+const hopeless = 8
+
+// detourCost is what one node in the way costs a path, against its length.
+const detourCost = 1e6
+
+// score ranks a path: each node it crosses outweighs any length, then shorter is better, and the sides that face
+// each other are a little better than others of the same length.
+func score(r Route, g edgeGeo, hits int, facingSides bool) float64 {
+	line := polyline(r, g.pts, 24)
+	l := 0.0
+	for i := 1; i < len(line); i++ {
+		l += math.Hypot(line[i].X-line[i-1].X, line[i].Y-line[i-1].Y)
+	}
+	if !facingSides {
+		l += 60
+	}
+	return float64(hits)*detourCost + l
+}
+
+// pathHits counts the nodes, other than its ends, that the path crosses or comes within a few units of; it stops
+// counting at eight. Each piece of the path descends only the subtrees it passes through, however long it is.
+func (m *Map) pathHits(r Route, pts []Vec, from, to ID) int {
+	const margin, most = 6, 8
+	line := polyline(r, pts, 16)
+	seen := map[ID]bool{}
+	var walk func(n *Node, at Vec, p, q Vec)
+	walk = func(n *Node, at Vec, p, q Vec) {
+		if len(seen) >= most || !segmentCrosses(p, q, n.lay.sub.Add(at).Grow(margin)) {
+			return
+		}
+		if n.ID != from && n.ID != to && !seen[n.ID] && segmentCrosses(p, q, R(0, 0, n.lay.w, n.lay.h).Add(at).Grow(margin)) {
+			seen[n.ID] = true
+		}
+		seg := span(p, q).Grow(margin)
+		for side, list := range n.lay.stacks {
+			if len(list) == 0 {
+				continue
+			}
+			dir := stackDir(n, side)
+			lo, hi := seg.Y0-at.Y, seg.Y1-at.Y
+			if !alongY(dir) {
+				lo, hi = seg.X0-at.X, seg.X1-at.X
+			}
+			i, j := childRange(list, dir, lo, hi)
+			for _, c := range list[i:j] {
+				walk(c, at.Add(c.lay.rel), p, q)
+			}
+		}
+	}
+	for i := 1; i < len(line) && len(seen) < most; i++ {
+		p, q := line[i-1], line[i]
+		m.grid.query(span(p, q).Grow(margin), func(id uint32, _ Rect) {
+			if root := m.Node(ID(id)); root != nil {
+				walk(root, Vec{root.X, root.Y}, p, q)
+			}
+		})
+	}
+	return len(seen)
+}
+
+// segmentCrosses reports whether the segment p–q passes through the box b.
+func segmentCrosses(p, q Vec, b Rect) bool {
+	t0, t1 := 0.0, 1.0
+	dx, dy := q.X-p.X, q.Y-p.Y
+	for _, e := range [4][2]float64{{-dx, p.X - b.X0}, {dx, b.X1 - p.X}, {-dy, p.Y - b.Y0}, {dy, b.Y1 - p.Y}} {
+		if e[0] == 0 {
+			if e[1] < 0 {
+				return false
+			}
+			continue
+		}
+		r := e[1] / e[0]
+		if e[0] < 0 {
+			t0 = math.Max(t0, r)
+		} else {
+			t1 = math.Min(t1, r)
+		}
+		if t0 > t1 {
+			return false
+		}
+	}
+	return true
 }
 
 func sameGeo(a, b edgeGeo) bool {
@@ -277,6 +552,20 @@ func segDist(p, a, b Vec) float64 {
 		t = math.Max(0, math.Min(1, ((p.X-a.X)*dx+(p.Y-a.Y)*dy)/l))
 	}
 	return math.Hypot(p.X-a.X-t*dx, p.Y-a.Y-t*dy)
+}
+
+// EdgeBase is where a connector's middle would be with no bend: a drag of its middle to p sets the bend to p
+// less this.
+func (m *Map) EdgeBase(e *Edge) (Vec, bool) {
+	m.Layout()
+	return e.geo.base, e.geo.ok
+}
+
+// EdgeShape is the shape a connector shows now: the sides it leaves and enters by and its bend, whether the user
+// gave them or it found them round the nodes in its way. Given to the connector, they keep it as it is shown.
+func (m *Map) EdgeShape(e *Edge) (from, to Side, bend Vec) {
+	m.Layout()
+	return e.geo.from, e.geo.to, e.geo.bend
 }
 
 // EdgePath is a connector's path on the board as straight pieces, and where its label is centred.

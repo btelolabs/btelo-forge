@@ -184,6 +184,9 @@ func (t *TransformSession) SetMesh(m Mesh, name string) (image.Rectangle, error)
 		return image.Rectangle{}, errMesh
 	}
 	t.mesh, t.name = &m, name
+	if t.nodes != nil {
+		return t.setNodes(func(p Pt) Pt { return m.Map(t.bounds, p) }), nil
+	}
 	out := meshClip(m, t.bounds)
 	if t.clip != nil && t.base == nil {
 		clip := meshVector(*t.clip, t.bounds, m) // it bends with the whole layer

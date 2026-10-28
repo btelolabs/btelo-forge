@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // Smart objects across canvases. Each link's shared layers are kept in the smart objects folder next to the
@@ -311,24 +312,45 @@ func (a *App) addSmartOverlay(id string) {
 	if a.p == nil {
 		return
 	}
+	if _, err := a.placeSmartOverlay(id, a.playhead, nil); errors.Is(err, errSmartEmpty) {
+		a.toast(a.u.tf("Smart object %s shows nothing yet", id), false)
+		return
+	} else if err != nil {
+		a.toast(a.describe(err), true)
+		return
+	}
+	a.showPanel(tabOverlays)
+}
+
+// errSmartEmpty is a smart object with nothing drawn in it yet.
+var errSmartEmpty = errors.New("the smart object shows nothing yet")
+
+// placeSmartOverlay puts the picture of link id's shared layers over the edit from at, chosen, as one step with
+// what place then does to it, and returns the overlay's id; the picture follows every change to the layers.
+func (a *App) placeSmartOverlay(id string, at float64, place func(p *project.Project, overlay int) error) (int, error) {
 	u := &a.u
 	c, ok := a.currentSmart(id, nil)
 	if !ok {
-		a.toast(u.tf("Smart object %s is not kept any more; open a canvas that holds it, then paste it again", id), true)
-		return
+		return 0, errors.New(u.tf("Smart object %s is not kept any more; open a canvas that holds it, then paste it again", id))
 	}
 	pic := paint.SmartPicture(c)
 	if pic == nil {
-		a.toast(u.tf("Smart object %s shows nothing yet", id), false)
-		return
+		return 0, errSmartEmpty
 	}
 	path := a.smartImage(id)
 	if err := writePNG(path, pic); err != nil {
-		a.toast(u.tf("The pasted image could not be saved: %v", err), true)
-		return
+		return 0, errors.New(u.tf("The pasted image could not be saved: %v", err))
 	}
 	a.drawingsChanged([]string{path})
 	aspect := float64(pic.Rect.Dx()) / float64(pic.Rect.Dy())
-	a.change(func() { a.sel = selection{kind: selOverlay, id: a.p.AddSmart(path, id, aspect, a.playhead)} })
-	a.showPanel(tabOverlays)
+	var overlay int
+	err := a.edit(func(p *project.Project) error {
+		overlay = p.AddSmart(path, id, aspect, at)
+		a.sel = selection{kind: selOverlay, id: overlay}
+		if place != nil {
+			return place(p, overlay)
+		}
+		return nil
+	})
+	return overlay, err
 }

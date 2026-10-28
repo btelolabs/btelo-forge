@@ -25,7 +25,7 @@ func (a *App) deleteItems(ids []int) {
 	}
 	a.selectOnly(selection{})
 	a.committed(before)
-	a.toast(a.u.tf("Deleted %d items", n), false)
+	a.toast(a.u.tn(n, "Deleted %d item", "Deleted %d items", n), false)
 }
 
 // drawSelectionCard edits every selected item together and returns the height it used.
@@ -69,7 +69,8 @@ func (a *App) drawSelectionCard(r gfx.Rect) float32 {
 		return h + u.px(12)
 	}
 	u.label(u.face(11.5), gfx.Rect{X: in.X, Y: in.Y + u.px(22), W: in.W, H: u.px(18)},
-		u.tf("%d video clips · %d music clips · %d overlays", clips, music, overlays), colDim, 0)
+		u.tn(clips, "%d video clip", "%d video clips", clips)+" · "+u.tn(music, "%d music clip", "%d music clips", music)+" · "+
+			u.tn(overlays, "%d overlay", "%d overlays", overlays), colDim, 0)
 	y := in.Y + u.px(48)
 	level := func(id, label string, value float64, hi float64, apply func(v float64)) {
 		u.label(u.face(12.5), gfx.Rect{X: in.X, Y: y, W: u.px(64), H: u.px(28)}, label, colDim, 0)

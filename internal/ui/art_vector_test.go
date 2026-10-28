@@ -71,10 +71,21 @@ func TestCanvasPenAndNodeTool(t *testing.T) {
 	}
 	curve := d.Active
 
-	// A, the node tool: drag the corner at (200, 60) down by 30.
+	// A, the node tool: a click chooses the whole curve; a double-click goes into it, choosing the corner at
+	// (200, 60), which a drag moves down by 30.
 	x.key('A', false)
 	if a.artTool != toolNode {
 		t.Fatalf("A chose tool %d", a.artTool)
+	}
+	x.clickCanvas(ad, 200, 60, false)
+	if len(ad.nodes.sel) != 3 || ad.nodes.direct {
+		t.Fatalf("a click chose %v (editing nodes %v), want the whole curve", ad.nodes.sel, ad.nodes.direct)
+	}
+	x.frame(Input{})
+	x.shot("canvas-node-shape-chosen")
+	x.clickCanvas(ad, 200, 60, true)
+	if !ad.nodes.direct || len(ad.nodes.sel) != 1 {
+		t.Fatalf("a double-click: editing nodes %v, chosen %v", ad.nodes.direct, ad.nodes.sel)
 	}
 	x.dragWith(ad, [2]float64{200, 60}, [2]float64{200, 90}, false, false)
 	v = d.Node(curve).Vector
@@ -124,6 +135,7 @@ func TestCanvasPenAndNodeTool(t *testing.T) {
 	x.dragWith(ad, [2]float64{300, 50}, [2]float64{380, 130}, false, false)
 	rect := d.Active
 	x.key('A', false)
+	x.clickCanvas(ad, 380, 130, true) // into the rectangle, at its corner
 	x.dragWith(ad, [2]float64{380, 130}, [2]float64{390, 160}, false, false)
 	if v := d.Node(rect).Vector; v.Kind != paint.VectorCurve || len(v.Path[0].Nodes) != 4 {
 		t.Fatalf("the edited rectangle %+v", v)
@@ -131,10 +143,20 @@ func TestCanvasPenAndNodeTool(t *testing.T) {
 	if c := ad.look(384, 145); c.R < 250 {
 		t.Errorf("the pulled corner is not filled: %v", c)
 	}
-	// A click on another object chooses it.
+	// A click on another object chooses it, and its shape whole; Esc then a click on nothing come out of a shape.
 	x.clickCanvas(ad, 130, 75, false)
-	if d.Active != curve {
-		t.Errorf("clicking the curve chose %d, want %d", d.Active, curve)
+	if d.Active != curve || ad.nodes.direct || len(ad.nodes.sel) != 3 {
+		t.Errorf("clicking the curve chose %d (editing nodes %v, %d chosen), want %d whole", d.Active, ad.nodes.direct, len(ad.nodes.sel), curve)
+	}
+	x.clickCanvas(ad, 130, 75, true)
+	x.key(keyEscape, false)
+	if ad.nodes.direct {
+		t.Error("Esc should come out of the shape")
+	}
+	x.clickCanvas(ad, 130, 75, true)
+	x.clickCanvas(ad, 30, 280, false)
+	if ad.nodes.direct || len(ad.nodes.sel) != 0 {
+		t.Errorf("a click on nothing left editing nodes %v with %v chosen", ad.nodes.direct, ad.nodes.sel)
 	}
 	// The options bar's stroke: dashed, recorded as a stroke step.
 	dash := d.Node(curve).Vector.Stroke
@@ -300,15 +322,21 @@ func TestCanvasSnapping(t *testing.T) {
 	moving := d.AddVector(paint.Vector{Kind: paint.VectorRect, Size: paint.Pt{X: 40, Y: 40}, M: paint.Translate(40, 40), Fill: red}, "Moving")
 	ad.changedAll()
 	x.frame(Input{})
-	// The node tool drags the moving square's corner to within a few pixels of the target's corner: it lands on it.
+	// The node tool drags the moving square, whole, by its corner to within a few pixels of the target's corner: the
+	// corner lands on it.
 	x.key('A', false)
 	x.dragWith(ad, [2]float64{80, 80}, [2]float64{198.4, 101.6}, false, false)
 	at := func(id, node int) paint.Pt { v := d.Node(id).Vector; return v.M.Map(v.Path[0].Nodes[node].P) }
 	if p := at(moving.ID, 2); p != (paint.Pt{X: 200, Y: 100}) {
 		t.Errorf("the corner snapped to %v, want (200, 100)", p)
 	}
-	// Near only an edge, it snaps that way alone: x to the target's right edge, y left as dragged.
-	x.dragWith(ad, [2]float64{40, 40}, [2]float64{302, 30}, false, false)
+	// Into the square, its top left corner, now at (160, 60), dragged near only an edge snaps that way alone: x to
+	// the target's right edge, y left as dragged.
+	if p := at(moving.ID, 0); p != (paint.Pt{X: 160, Y: 60}) {
+		t.Fatalf("the square moved whole to %v", p)
+	}
+	x.clickCanvas(ad, 160, 60, true)
+	x.dragWith(ad, [2]float64{160, 60}, [2]float64{302, 30}, false, false)
 	if p := at(moving.ID, 0); p.X != 300 || math.Abs(p.Y-30) > 0.01 {
 		t.Errorf("the corner snapped to %v, want x 300 and y 30", p)
 	}
@@ -370,5 +398,51 @@ func TestCanvasVectorBrushFollowsTheLine(t *testing.T) {
 		if c := ad.look(int(p[0]), int(p[1])); c.B < 200 || c.R > 60 {
 			t.Errorf("the line's point %v is not under the stroke: %v", p, c)
 		}
+	}
+}
+
+// With nodes chosen by the node tool, Ctrl+T transforms them alone, as Photoshop transforms the anchor points the
+// direct selection tool chose; with a shape chosen whole, that shape alone of its layer's shapes.
+func TestNodeToolTransformsTheChosenNodes(t *testing.T) {
+	x, ad := canvasHarness(t)
+	d := ad.d
+	red := paint.VectorPaint{Kind: paint.PaintSolid, Color: color.NRGBA{R: 255, A: 255}}
+	square := paint.Vector{Kind: paint.VectorRect, Size: paint.Pt{X: 100, Y: 100}, M: paint.Translate(100, 100), Fill: red}
+	small := paint.Vector{Kind: paint.VectorRect, Size: paint.Pt{X: 40, Y: 40}, M: paint.Translate(250, 20), Fill: red}
+	n := d.AddVector(square.WithShape(small, paint.OpAdd), "Two shapes")
+	at := func(sub, node int) paint.Pt { v := d.Node(n.ID).Vector; return v.M.Map(v.Path[sub].Nodes[node].P) }
+	ad.changedAll()
+	x.key('A', false)
+	// Into the square: its right side's two corners, then Ctrl+T and Shift+Right three times, Enter.
+	x.clickCanvas(ad, 200, 100, true)
+	px, py := x.viewPoint(ad, 200, 200)
+	x.clickWith(gfx.Rect{X: px - 1, Y: py - 1, W: 2, H: 2}, false, true)
+	if len(ad.nodes.sel) != 2 {
+		t.Fatalf("chosen %v", ad.nodes.sel)
+	}
+	x.key('T', true)
+	if ad.xf == nil || ad.xf.src.Min.X != 200 || ad.xf.src.Dy() != 100 {
+		t.Fatalf("Ctrl+T: %+v", ad.xf)
+	}
+	x.frame(Input{})
+	x.shot("canvas-node-transform")
+	for range 3 {
+		x.frame(Input{Keys: []Key{{Code: keyRight, Shift: true}}})
+	}
+	x.key(keyEnter, false)
+	if at(0, 0) != (paint.Pt{X: 100, Y: 100}) || at(0, 3) != (paint.Pt{X: 100, Y: 200}) {
+		t.Errorf("the left side moved: %v %v", at(0, 0), at(0, 3))
+	}
+	if at(0, 1) != (paint.Pt{X: 230, Y: 100}) || at(0, 2) != (paint.Pt{X: 230, Y: 200}) || d.UndoName() != "Transform nodes" {
+		t.Errorf("the right side went to %v %v (%q)", at(0, 1), at(0, 2), d.UndoName())
+	}
+	// Out of the square, the small shape chosen whole: Ctrl+T moves it, not the square.
+	x.key(keyEscape, false)
+	x.clickCanvas(ad, 270, 40, false)
+	x.key('T', true)
+	x.frame(Input{Keys: []Key{{Code: keyDown, Shift: true}}})
+	x.key(keyEnter, false)
+	if at(1, 0) != (paint.Pt{X: 250, Y: 30}) || at(0, 1) != (paint.Pt{X: 230, Y: 100}) {
+		t.Errorf("the small shape went to %v, the square's corner to %v", at(1, 0), at(0, 1))
 	}
 }

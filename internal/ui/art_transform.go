@@ -212,12 +212,19 @@ type transformEdit struct {
 	startWarp [16][2]float64
 }
 
-// beginTransform starts Free Transform on the chosen layer, as Ctrl+T does.
+// beginTransform starts Free Transform on the chosen layer, as Ctrl+T does; with nodes or shapes chosen by the node
+// tool, on those alone, as Photoshop transforms the anchor points the direct selection tool chose.
 func (a *App) beginTransform(ad *artDoc) {
 	if ad.xf != nil || ad.stroke != nil || ad.move != nil {
 		return
 	}
-	s, err := ad.d.BeginTransform()
+	var s *paint.TransformSession
+	var err error
+	if ne := ad.nodes; a.artTool == toolNode && ne != nil && ne.layer == ad.d.Active && len(ne.sel) > 0 && ne.s == nil {
+		s, err = ad.d.BeginNodeTransform(ad.d.Active, ne.sel)
+	} else {
+		s, err = ad.d.BeginTransform()
+	}
 	if err != nil {
 		a.artFailed(ad, err)
 		return

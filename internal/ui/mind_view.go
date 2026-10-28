@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"image"
 	"image/color"
 	"math"
 	"time"
@@ -27,11 +26,11 @@ const mindTileBudget = 40 * time.Millisecond
 
 // mindChrome is where the tab's floating bars are, which the board leaves alone.
 type mindChrome struct {
-	tools, style, zoom, overview, status gfx.Rect
+	tools, style, zoom, overview, status, themes gfx.Rect
 }
 
 func (c mindChrome) holds(x, y float32) bool {
-	for _, r := range []gfx.Rect{c.tools, c.style, c.zoom, c.overview} {
+	for _, r := range []gfx.Rect{c.tools, c.style, c.zoom, c.overview, c.themes} {
 		if r.W > 0 && r.Contains(x, y) {
 			return true
 		}
@@ -44,15 +43,41 @@ func (md *mindDoc) screenView(r gfx.Rect) mind.View {
 	return mind.View{Zoom: md.view.Zoom, OX: math.Round(float64(r.X)) + md.view.OX, OY: math.Round(float64(r.Y)) + md.view.OY}
 }
 
-// fitTo shows the board rectangle b whole in a board area w × h, at most at 100%.
-func (md *mindDoc) fitTo(b mind.Rect, w, h float32) {
+// fitTo shows the board rectangle b whole in area, a part of the board's view relative to its top-left, at most at
+// 100%.
+func (md *mindDoc) fitTo(b mind.Rect, area gfx.Rect) {
+	cx, cy := float64(area.X+area.W/2), float64(area.Y+area.H/2)
 	if b.Empty() {
-		md.view = mind.View{Zoom: 1, OX: math.Round(float64(w) / 2), OY: math.Round(float64(h) / 2)}
+		md.view = mind.View{Zoom: 1, OX: math.Round(cx), OY: math.Round(cy)}
 		return
 	}
-	z := math.Min(float64(w)*0.88/b.W(), float64(h)*0.82/b.H())
-	z = math.Min(math.Max(z, mindMinZoom), 1)
-	md.view = mind.View{Zoom: z, OX: math.Round(float64(w)/2 - b.CX()*z), OY: math.Round(float64(h)/2 - b.CY()*z)}
+	z := fitZoom(b, area)
+	md.view = mind.View{Zoom: z, OX: math.Round(cx - b.CX()*z), OY: math.Round(cy - b.CY()*z)}
+}
+
+// fitZoom is the zoom that shows b whole in area, with a margin, at most at 100%.
+func fitZoom(b mind.Rect, area gfx.Rect) float64 {
+	z := math.Min(float64(area.W)*0.94/b.W(), float64(area.H)*0.94/b.H())
+	return math.Min(math.Max(z, mindMinZoom), 1)
+}
+
+// mindFitArea is the part of the board r, relative to its top-left, that showing b whole fits it in: below the tool
+// bar, and clear of the zoom bar, the overview and the status line, beside them or above them, whichever shows b
+// the larger.
+func (a *App) mindFitArea(md *mindDoc, r gfx.Rect, b mind.Rect) gfx.Rect {
+	u := &a.u
+	c := a.mindChromeRects(md, r)
+	top := c.tools.Bottom() + u.px(8) - r.Y
+	corner := c.zoom // its top-left, with the overview's
+	if c.overview.W > 0 {
+		corner.X, corner.Y = min(corner.X, c.overview.X), min(corner.Y, c.overview.Y)
+	}
+	above := gfx.Rect{Y: top, W: r.W, H: corner.Y - u.px(8) - r.Y - top}
+	beside := gfx.Rect{Y: top, W: corner.X - u.px(8) - r.X, H: c.status.Y - u.px(4) - r.Y - top}
+	if beside.W <= 0 || beside.H <= 0 || b.Empty() || fitZoom(b, above) >= fitZoom(b, beside) {
+		return above
+	}
+	return beside
 }
 
 // zoomAt zooms to z keeping the board point under the window pixel x, y (relative to the board) in place.
@@ -78,7 +103,8 @@ func (a *App) drawMind(r gfx.Rect) {
 	}
 	md.m.Layout()
 	if md.fit {
-		md.fitTo(md.m.Bounds(), r.W, r.H)
+		b := md.m.Bounds()
+		md.fitTo(b, a.mindFitArea(md, r, b))
 		md.fit = false
 	}
 	ch := a.mindChromeRects(md, r)
@@ -86,6 +112,7 @@ func (a *App) drawMind(r gfx.Rect) {
 	md.m.Layout()
 	regions, all := md.m.Changed()
 	md.tiles.Invalidate(regions, all)
+	md.overviewLater(regions, all)
 
 	v := md.screenView(r)
 	area := r.Pixels()
@@ -103,6 +130,7 @@ func (a *App) drawMind(r gfx.Rect) {
 
 	ch = a.mindChromeRects(md, r) // the style bar follows the selection as it moves
 	a.drawMindTools(md, ch.tools)
+	a.drawMindThemes(md, a.mindThemePanel(md, ch.tools))
 	a.drawMindStyle(md, ch.style)
 	a.drawMindZoom(md, r, ch.zoom)
 	a.drawMindOverview(md, r, ch.overview)
@@ -117,8 +145,11 @@ func (a *App) mindWait() time.Duration {
 	if md == nil {
 		return 0
 	}
-	if !md.whole {
+	if !md.whole || md.m.Routing() {
 		return redrawNow
+	}
+	if due := md.overviewDue(); !due.IsZero() && !md.minimap { // a hidden overview catches up once shown
+		return max(time.Until(due), redrawNow)
 	}
 	p := a.mindPics
 	if p.pictureBusy() {
@@ -161,7 +192,7 @@ func (a *App) drawMindLive(md *mindDoc, r gfx.Rect, v mind.View) {
 				continue
 			}
 			u.c.Push(box)
-			u.c.Fill(box, gfx.Hex(0x2a2c33))
+			u.c.Fill(box, md.m.Theme().Media)
 			u.c.Image(frame, fitRect(box, float32(frame.Rect.Dx()), float32(frame.Rect.Dy())))
 			u.c.Pop()
 		}
@@ -209,8 +240,19 @@ func (a *App) drawMindOverlay(md *mindDoc, r gfx.Rect, v mind.View) {
 				x1, y1 := v.Screen(path[i])
 				u.c.Line(x0, y0, x1, y1, lw+u.px(2), gfx.Alpha(colAccent, 0.55))
 			}
+			// The handle that reshapes it: a ring, filled while it is under the pointer or dragged.
 			lx, ly := v.Screen(label)
-			u.c.Circle(lx, ly, u.px(4), colAccent)
+			hot := float32(math.Hypot(float64(u.mx-lx), float64(u.my-ly))) <= u.px(10) || md.act != nil && md.act.kind == actBend
+			if hot {
+				u.cursor = CursorMove
+			}
+			u.c.Circle(lx, ly, u.px(7), colPanel)
+			u.c.RoundOutline(gfx.Rect{X: lx - u.px(7), Y: ly - u.px(7), W: u.px(14), H: u.px(14)}, u.px(7), max(1, u.px(2)), colAccent)
+			if hot {
+				u.c.Circle(lx, ly, u.px(3.5), colAccent)
+			}
+			u.hint("mind/bend", u.t("Drag to reshape the connector; double-click for the route it finds itself"),
+				gfx.Rect{X: lx - u.px(10), Y: ly - u.px(10), W: u.px(20), H: u.px(20)})
 		}
 	}
 	if act := md.act; act != nil && act.kind == actMove && act.moved {
@@ -315,8 +357,9 @@ func (a *App) drawMindDrag(md *mindDoc, v mind.View) {
 func (a *App) mindChromeRects(md *mindDoc, r gfx.Rect) mindChrome {
 	u := &a.u
 	var c mindChrome
-	tw := u.px(36)*float32(len(mindToolList)) + u.px(36)*3 + u.px(12)
+	tw := u.px(36)*float32(len(mindToolList)) + u.px(36)*4 + u.px(12)
 	c.tools = gfx.Rect{X: r.X + (r.W-tw)/2, Y: r.Y + u.px(12), W: tw, H: u.px(44)}
+	c.themes = a.mindThemePanel(md, c.tools)
 	zw := u.px(36*5 + 56 + 12)
 	c.zoom = gfx.Rect{X: r.Right() - zw - u.px(14), Y: r.Bottom() - u.px(54), W: zw, H: u.px(40)}
 	if !md.minimap {
@@ -331,13 +374,41 @@ func (a *App) mindChromeRects(md *mindDoc, r gfx.Rect) mindChrome {
 		}
 		anchor := a.mindStyleAnchor(md, r)
 		x := min(max(anchor.X-w/2, r.X+u.px(8)), r.Right()-w-u.px(8))
-		y := anchor.Y - u.px(52)
-		if y < c.tools.Bottom()+u.px(6) {
-			y = anchor.Bottom() + u.px(12)
+		// Just above what is chosen, else just below, else a step or two further off, wherever the bar hides the
+		// fewest of the other nodes: the nearest of those.
+		best, hidden := gfx.Rect{}, -1
+		for step := range 3 {
+			off := u.px(44) * float32(step)
+			for _, y := range []float32{anchor.Y - u.px(52) - off, anchor.Bottom() + u.px(12) + off} {
+				sr := gfx.Rect{X: x, Y: y, W: w, H: u.px(40)}
+				if sr.Y < c.tools.Bottom()+u.px(6) || sr.Bottom() > c.status.Y-u.px(4) {
+					continue
+				}
+				if n := a.mindCovered(md, r, sr); hidden < 0 || n < hidden {
+					best, hidden = sr, n
+				}
+			}
 		}
-		c.style = gfx.Rect{X: x, Y: y, W: w, H: u.px(40)}
+		if hidden < 0 { // no room anywhere: over the top of the board
+			best = gfx.Rect{X: x, Y: c.tools.Bottom() + u.px(6), W: w, H: u.px(40)}
+		}
+		c.style = best
 	}
 	return c
+}
+
+// mindCovered counts the nodes, other than those chosen, that the window rectangle sr would hide on the board r.
+func (a *App) mindCovered(md *mindDoc, r, sr gfx.Rect) int {
+	if md.view.Zoom == 0 {
+		return 0
+	}
+	n := 0
+	for _, node := range md.m.In(md.screenView(r).BoardRect(sr.Pixels()), true) {
+		if !md.sel[node.ID] {
+			n++
+		}
+	}
+	return n
 }
 
 // drawMindTools draws the tool bar: what a click on the board adds, and undo and redo.
@@ -364,7 +435,11 @@ func (a *App) drawMindTools(md *mindDoc, r gfx.Rect) {
 	if u.iconButton("mind/redo", redo, icRestore, withKey(u.t("Redo"), a.mindKeyHint("mind.redo")), false, md.m.CanRedo()) {
 		a.mindRedo(md)
 	}
-	more := gfx.Rect{X: redo.Right(), Y: undo.Y, W: undo.W, H: undo.H}
+	theme := gfx.Rect{X: redo.Right(), Y: undo.Y, W: undo.W, H: undo.H}
+	if u.iconButton("mind/themes", theme, icTheme, u.t("Theme"), md.themes, true) {
+		md.themes = !md.themes
+	}
+	more := gfx.Rect{X: theme.Right(), Y: undo.Y, W: undo.W, H: undo.H}
 	if u.iconButton("mind/more", more, icMore, u.t("More"), a.menuOpen("mind/more"), true) {
 		a.openMenu("mind/more", more, a.mindMoreMenu(md))
 	}
@@ -417,16 +492,9 @@ func (a *App) drawMindZoom(md *mindDoc, board, r gfx.Rect) {
 	}
 }
 
-// mindOverview is the picture of the whole board the overview shows, kept until the board changes.
-type mindOverview struct {
-	img     *image.RGBA
-	bounds  mind.Rect
-	version uint64
-	made    time.Time
-	w, h    int
-}
-
 // drawMindOverview draws the whole board small with the part in view marked; a click or drag there moves the view.
+// It is drawn from tiles of its own, as the board is, so a change draws again only the small part of it that
+// changed, however large the map.
 func (a *App) drawMindOverview(md *mindDoc, board, r gfx.Rect) {
 	if r.W == 0 {
 		return
@@ -434,33 +502,21 @@ func (a *App) drawMindOverview(md *mindDoc, board, r gfx.Rect) {
 	u := &a.u
 	floatPanel(u, r)
 	in := r.Inset(u.px(6))
-	ov := &md.overview
-	w, h := int(in.W), int(in.H)
-	// Drawn again when the board changed: at once when nothing is being dragged or typed, else at most three times
-	// a second.
-	busy := md.act != nil || md.text != nil
-	stale := ov.img == nil || ov.w != w || ov.h != h || ov.version != md.m.Version() && (!busy || time.Since(ov.made) > 300*time.Millisecond)
-	if stale {
-		b := md.m.Bounds()
-		vb := md.screenView(board).BoardRect(board.Pixels())
-		if !b.Empty() {
-			b = b.Union(vb)
-		} else {
-			b = vb
-		}
-		ov.img = mind.RenderFit(md.m, w, h, &mind.Options{Fonts: u.fonts, Pictures: boardPictures{a.mindPictures(), md.path}, Labels: a.mindLabels()})
-		ov.bounds, ov.version, ov.made, ov.w, ov.h = b, md.m.Version(), time.Now(), w, h
-	} else if ov.version != md.m.Version() {
-		a.requestFrame()
-	}
-	u.c.Blit(ov.img, int(in.X), int(in.Y), true)
-	// The overview fits the board's bounds as RenderFit does: the same sums place the view on it.
+	w, h := float64(in.W), float64(in.H)
 	b := md.m.Bounds()
 	if b.Empty() {
 		return
 	}
-	z := math.Min(math.Min(float64(w)*0.92/b.W(), float64(h)*0.92/b.H()), 2)
-	ovv := mind.View{Zoom: z, OX: float64(in.X) + float64(w)/2 - b.CX()*z, OY: float64(in.Y) + float64(h)/2 - b.CY()*z}
+	// The fit's zoom is rounded to a few steps an octave, so a board that grows a little keeps its tiles.
+	z := math.Min(math.Min(w*0.92/b.W(), h*0.92/b.H()), 2)
+	z = math.Pow(2, math.Floor(math.Log2(z)*8)/8)
+	ovv := mind.View{Zoom: z, OX: math.Round(float64(in.X) + w/2 - b.CX()*z), OY: math.Round(float64(in.Y) + h/2 - b.CY()*z)}
+	md.overviewNow()
+	opts := a.mindOptions(md)
+	opts.LiveAnimated = false
+	if !md.overview.Draw(u.c, in.Pixels(), md.m, ovv, opts, 8*time.Millisecond) {
+		a.requestFrame()
+	}
 	vb := md.screenView(board).BoardRect(board.Pixels())
 	vr := ovv.ScreenRect(vb)
 	u.c.Push(in)
@@ -483,7 +539,7 @@ func (a *App) drawMindOverview(md *mindDoc, board, r gfx.Rect) {
 // drawMindStatus draws, at the bottom left, how much the board holds and whether it is saved.
 func (a *App) drawMindStatus(md *mindDoc, r gfx.Rect) {
 	u := &a.u
-	text := u.tf("%d nodes · %d connectors", md.m.Len(), md.m.EdgeCount())
+	text := u.tn(md.m.Len(), "%d node", "%d nodes", md.m.Len()) + " · " + u.tn(md.m.EdgeCount(), "%d connector", "%d connectors", md.m.EdgeCount())
 	if len(md.sel) > 1 {
 		text += " · " + u.tf("%d chosen", len(md.sel))
 	}

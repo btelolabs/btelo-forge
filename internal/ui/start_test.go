@@ -150,3 +150,30 @@ func TestResourceCardOpensTheDesktop(t *testing.T) {
 	x.frame(Input{})
 	x.shot("resources-first")
 }
+
+// TestTabsShowTheirCardsSymbol checks that a tab opened from a start card carries that card's symbol, and a tab not
+// yet put to any work a plus.
+func TestTabsShowTheirCardsSymbol(t *testing.T) {
+	x := newHarness(t)
+	a := x.a
+	x.frame(Input{})
+	if got := a.doc.glyph(); got != icAdd {
+		t.Errorf("a new tab shows %q", got)
+	}
+	glyphs := map[string]string{}
+	for _, c := range a.startCards() {
+		glyphs[c.id] = c.glyph
+	}
+	for i, id := range []string{"empty/resources", "empty/video", "empty/canvas", "empty/mind"} {
+		if i > 0 {
+			a.newTab()
+			x.frame(Input{})
+		}
+		x.click(x.startCard(id))
+		x.frame(Input{})
+		if got := a.doc.glyph(); got != glyphs[id] {
+			t.Errorf("%s opened a tab showing %q, the card shows %q", id, got, glyphs[id])
+		}
+	}
+	x.shot(string(a.u.lang) + "-tab-symbols")
+}

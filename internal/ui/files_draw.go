@@ -188,6 +188,7 @@ func (a *App) drawPane(fd *filesDoc, i int, p *filesPane, r gfx.Rect, moved bool
 		u.c.Fill(gfx.Rect{X: head.X, Y: head.Y, W: head.W, H: u.px(2)}, colAccent)
 	}
 	body := gfx.Rect{X: r.X, Y: head.Bottom(), W: r.W, H: r.Bottom() - head.Bottom()}
+	p.pie.shown = false // drawRows draws it, when the list shows an analysis as rows
 
 	// The mouse moving over a list makes it the one the keys act on, as pointing at a row puts the cursor there.
 	if moved && body.Contains(u.mx, u.my) && !u.blocked && u.active == "" && fd.at != i && fd.prompt == nil && fd.sweep == nil {
@@ -392,7 +393,7 @@ func pathParts(dir string) []pathPart {
 func (a *App) paneInfo(p *filesPane) string {
 	u := &a.u
 	if p.atDrives() {
-		return u.tf("%d drives", len(p.rows))
+		return u.tn(len(p.rows), "%d drive", "%d drives", len(p.rows))
 	}
 	if s := a.scanFor(p); s != nil {
 		return u.tf("Analysing… %s files · %s", countText(s.progress.Files.Load()), sizeText(s.progress.Bytes.Load()))
@@ -455,6 +456,18 @@ func (u *ctx) fileRowH() float32 { return u.px(32) }
 func (a *App) drawRows(fd *filesDoc, i int, p *filesPane, id string, body gfx.Rect, moved bool) {
 	u := &a.u
 	rowH := u.fileRowH()
+	// An analysis has its pie under the rows, where there is room for it.
+	node := a.paneAnalysis(p)
+	var wedges []pieWedge
+	var chart gfx.Rect
+	if node != nil && len(p.rows) > 0 && !p.atDrives() {
+		if h := a.pieHeight(body); h > 0 {
+			if wedges = a.pieWedges(p, node); len(wedges) > 0 {
+				chart = gfx.Rect{X: body.X, Y: body.Bottom() - h, W: body.W, H: h}
+				body.H -= h
+			}
+		}
+	}
 	visible := int(body.H / rowH)
 	if fd.at == i {
 		fd.pageRows = visible
@@ -494,7 +507,6 @@ func (a *App) drawRows(fd *filesDoc, i int, p *filesPane, id string, body gfx.Re
 		return
 	}
 
-	node := a.paneAnalysis(p)
 	var largest int64
 	if node != nil {
 		for _, r := range p.rows {
@@ -517,7 +529,7 @@ func (a *App) drawRows(fd *filesDoc, i int, p *filesPane, id string, body gfx.Re
 		if fd.prompt == nil && u.rightAt != nil && rr.Contains(u.rightAt.X, u.rightAt.Y) && !u.blocked {
 			a.startSweep(fd, i, p, row)
 		}
-		a.drawFileRow(fd, p, row, e, rr, node, largest, a.fileColumns(rr, node != nil), fd.at == i)
+		a.drawFileRow(fd, p, row, e, rr, node, wedges, largest, a.fileColumns(rr, node != nil), fd.at == i)
 		if fd.prompt != nil {
 			continue
 		}
@@ -539,6 +551,9 @@ func (a *App) drawRows(fd *filesDoc, i int, p *filesPane, id string, body gfx.Re
 		y := body.Y + (body.H-h)*p.top/maxTop
 		u.c.Fill(gfx.Rect{X: body.Right() - u.px(5), Y: y, W: u.px(3), H: h}, colBorderHi)
 	}
+	if len(wedges) > 0 {
+		a.drawPie(fd, i, p, id, chart, node, wedges)
+	}
 }
 
 // entrySize is an entry's size: a file's length, or what an analysed folder holds.
@@ -552,8 +567,9 @@ func (a *App) entrySize(node *files.Node, e *files.Entry) int64 {
 	return e.Size
 }
 
-// drawFileRow draws one entry: its picture or symbol, its name, and its size and time.
-func (a *App) drawFileRow(fd *filesDoc, p *filesPane, row int, e *files.Entry, r gfx.Rect, node *files.Node, largest int64, c fileColumns, active bool) {
+// drawFileRow draws one entry: its picture or symbol, its name, and its size and time; the size bar takes the colour
+// of the entry's wedge when the list has a pie.
+func (a *App) drawFileRow(fd *filesDoc, p *filesPane, row int, e *files.Entry, r gfx.Rect, node *files.Node, wedges []pieWedge, largest int64, c fileColumns, active bool) {
 	u := &a.u
 	path := p.path(e)
 	busy := a.busyJob(path)
@@ -637,7 +653,11 @@ func (a *App) drawFileRow(fd *filesDoc, p *filesPane, row int, e *files.Entry, r
 			u.c.Fill(bar, colSurface)
 			fill := bar
 			fill.W = float32(math.Max(float64(bar.W)*float64(size)/float64(largest), 0))
-			u.c.Fill(fill, gfx.Mix(colAccent, colWarning, float32(size)/float32(largest)*0.6))
+			col := gfx.Mix(colAccent, colWarning, float32(size)/float32(largest)*0.6)
+			if wc, ok := a.pieColorOf(wedges, node, e); ok {
+				col = wc
+			}
+			u.c.Fill(fill, col)
 		}
 	}
 	if node != nil && e.Dir && c.items.W > 0 {
@@ -716,7 +736,7 @@ func (a *App) drawGitStatus(g *gitState, r gfx.Rect, right float32) float32 {
 	col := colSuccess
 	if s.Counted {
 		if n := s.Changed(); n > 0 {
-			text += "  " + u.tf("%d files changed", n)
+			text += "  " + u.tn(n, "%d file changed", "%d files changed", n)
 			col = colWarning
 		} else {
 			text += "  " + u.t("nothing to commit")

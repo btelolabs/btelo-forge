@@ -54,6 +54,20 @@ func (u *ctx) t(s string) string {
 // tf translates a format string and fills it in.
 func (u *ctx) tf(format string, args ...any) string { return fmt.Sprintf(u.t(format), args...) }
 
+// tn translates a message about n things, written in English in its singular and its plural, and fills it in:
+// English says one thing in the singular; Chinese, with one form for both, is keyed by the plural.
+func (u *ctx) tn(n int, one, many string, args ...any) string {
+	if u.lang == Chinese {
+		if z, ok := zh[many]; ok {
+			return fmt.Sprintf(z, args...)
+		}
+	}
+	if n == 1 {
+		return fmt.Sprintf(one, args...)
+	}
+	return fmt.Sprintf(many, args...)
+}
+
 // ts translates a list of option labels.
 func (u *ctx) ts(list []string) []string {
 	out := make([]string, len(list))

@@ -17,11 +17,11 @@ var historyNames = msgsIn("history",
 	"Edit text", "Eraser", "Exclude shape", "Expand shapes", "Feather", "Fill", "Flatten", "Flip", "Flip canvas",
 	"Free transform", "Gaussian blur", "Gradient", "Group", "Hue/Saturation", "Image size", "Intersect shape",
 	"Inverse", "Invert", "Layer opacity", "Layer style", "Levels", "Lock transparent pixels", "Mark as slice", "Mask gradient",
-	"Merge down", "Merge group", "Mosaic", "Move", "Move artboard", "Move handle", "Move layer", "Move node",
+	"Merge down", "Merge group", "Mosaic", "Move", "Move artboard", "Move handle", "Move layer", "Move node", "Move shape",
 	"New adjustment layer", "New group", "New layer", "New vector layer", "Paint bucket", "Paste", "Pen", "Pencil", "Perspective",
 	"Posterize", "Rasterize", "Rasterize type", "Rasterize vector mask", "Rename layer", "Reselect", "Reveal all",
 	"Rotate", "Rotate canvas", "Select", "Shape operation", "Sharp node", "Sharpen", "Show or hide layer", "Skew",
-	"Smooth node", "Smudge", "Sponge", "Stroke", "Subtract shape", "Swap fill and stroke", "Text", "Threshold",
+	"Smooth node", "Smudge", "Sponge", "Stroke", "Subtract shape", "Swap fill and stroke", "Text", "Threshold", "Transform nodes",
 	"Ungroup", "Unmark as slice", "Unsharp mask", "Update smart object", "Warp")
 
 // The side panel's lower pages, as Photoshop's Layers and History panels sharing a place.

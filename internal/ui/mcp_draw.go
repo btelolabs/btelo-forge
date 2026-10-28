@@ -507,12 +507,12 @@ func (a *App) addDrawTools(s *mcp.Server) {
 		})
 
 	type layerIn struct {
-		Action string `json:"action" jsonschema:"add (a pixel layer), add_group, choose, delete, duplicate, move_up, move_down, merge_down, merge_group, flatten, rasterize, convert_to_curves, group, ungroup, add_mask, apply_mask, delete_mask"`
+		Action string `json:"action" jsonschema:"add (a pixel layer), add_group, choose, delete, duplicate, move_up, move_down, merge_down, merge_group, flatten, rasterize, convert_to_curves, group, ungroup, add_mask, apply_mask, delete_mask, convert_to_smart (the layer or group becomes a smart object: its link id puts it on a mind map or a video, where it follows every change), break_link (the smart object gets a link id of its own), smart_to_group (a plain group again)"`
 		ID     int    `json:"id,omitempty" jsonschema:"the layer to act on; the chosen layer when left out"`
 		Name   string `json:"name,omitempty" jsonschema:"a new layer's or group's name"`
 		Also   []int  `json:"also,omitempty" jsonschema:"for choose: more layers chosen besides id, as for boolean and group"`
 	}
-	tool(s, a, "canvas_layer", "Add, choose, delete, duplicate, reorder, merge, group, mask or rasterize layers. New layers go above the chosen one.", func(in layerIn) (any, error) {
+	tool(s, a, "canvas_layer", "Add, choose, delete, duplicate, reorder, merge, group, mask or rasterize layers, or make smart objects of them. New layers go above the chosen one; a smart object's link id comes back as link_id.", func(in layerIn) (any, error) {
 		return a.drawEdit(func(ad *artDoc) (any, error) {
 			d := ad.d
 			if in.ID != 0 {
@@ -522,6 +522,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 				d.Choose(in.ID)
 			}
 			name := in.Name
+			var link string
 			var err error
 			switch in.Action {
 			case "add":
@@ -575,13 +576,23 @@ func (a *App) addDrawTools(s *mcp.Server) {
 				err = d.ApplyMask()
 			case "delete_mask":
 				err = d.DeleteMask()
+			case "convert_to_smart":
+				link, err = d.ConvertToSmart(a.smartGroupName())
+			case "break_link":
+				link, err = d.UnlinkSmart()
+			case "smart_to_group":
+				err = d.ReleaseSmart()
 			default:
 				return nil, fmt.Errorf("unknown action %q", in.Action)
 			}
 			if err != nil {
 				return nil, err
 			}
-			return map[string]any{"active_layer": d.Active, "layers": len(d.Layers())}, nil
+			out := map[string]any{"active_layer": d.Active, "layers": len(d.Layers())}
+			if link != "" {
+				out["link_id"] = link
+			}
+			return out, nil
 		})
 	})
 

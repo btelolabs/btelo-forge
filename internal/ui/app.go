@@ -3,6 +3,7 @@ package ui
 
 import (
 	"context"
+	"image"
 	"path/filepath"
 	"sync"
 	"time"
@@ -111,6 +112,7 @@ type App struct {
 	assetLibVersion int                     // counts changes to them, for what is laid out from them
 	mindPics        *mindPics               // the pictures the mind maps show, read in the background
 	mindClip        *mindClipboard          // nodes copied from a mind map
+	mindThemeShots  map[string]*image.RGBA  // the theme panel's previews, by theme and size
 }
 
 // New builds the editor; cacheDir holds downloads and models, stateDir remembers settings and unfinished edits.
@@ -322,6 +324,9 @@ func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 	if a.art != nil && a.art.layerDrag != nil {
 		sooner(time.Second / 60) // a drag in the layers panel scrolls past the list's ends
 	}
+	if a.pieMoving() {
+		sooner(time.Second / 60) // a pie turning to the item under the cursor
+	}
 	if a.files != nil && a.files.sweep != nil && a.u.rightDown {
 		sooner(time.Second / 60) // a sweep scrolls past the list's edge, and opens the menu once the button rests
 	}
@@ -452,5 +457,5 @@ func (a *App) Idle() bool {
 	if a.thumbsBusy() || a.preview.loading {
 		return false
 	}
-	return !a.music.downloading()
+	return !a.music.downloading() && !a.pieMoving()
 }

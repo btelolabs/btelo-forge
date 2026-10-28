@@ -394,6 +394,27 @@ func (a *App) addOverlayTools(s *mcp.Server) {
 		})
 		return map[string]int{"id": id}, err
 	})
+	type smartIn struct {
+		LinkID  string   `json:"link_id" jsonschema:"the smart object's link id, as canvas_state and canvas_layer give it"`
+		Start   *float64 `json:"start,omitempty" jsonschema:"seconds; the playhead when left out"`
+		End     *float64 `json:"end,omitempty" jsonschema:"seconds; five seconds after start when left out"`
+		X       *float64 `json:"x,omitempty" jsonschema:"centre, 0 (left) to 1 (right)"`
+		Y       *float64 `json:"y,omitempty" jsonschema:"centre, 0 (top) to 1 (bottom)"`
+		Size    *float64 `json:"size,omitempty" jsonschema:"height as a fraction of the frame height"`
+		Opacity *float64 `json:"opacity,omitempty" jsonschema:"0 (invisible) to 1 (solid)"`
+	}
+	tool(s, a, "add_smart_object", "Put a canvas's smart object over the picture, from start for five seconds unless end is given: its picture, which follows every change drawn in it on any canvas. Make one with canvas_layer convert_to_smart. Returns its id.", func(in smartIn) (any, error) {
+		if a.p == nil {
+			return nil, errNoProject
+		}
+		at := a.playhead
+		if in.Start != nil {
+			at = *in.Start
+		}
+		place := overlayIn{End: in.End, X: in.X, Y: in.Y, Size: in.Size, Opacity: in.Opacity}
+		id, err := a.placeSmartOverlay(strings.TrimSpace(in.LinkID), at, place.apply)
+		return map[string]int{"id": id}, err
+	})
 	tool(s, a, "update_overlay", "Change a caption's text, colour, outline, background, or any overlay's position, size or time.", func(in overlayIn) (any, error) {
 		err := a.edit(func(p *project.Project) error {
 			if _, ok := p.Overlay(in.ID); !ok {

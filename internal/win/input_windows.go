@@ -31,6 +31,9 @@ type KeyEvent struct {
 	Ctrl, Shift, Alt bool
 }
 
+// Outside is where the pointer is said to be once it has left the window: far from anything drawn there.
+const Outside = -1 << 20
+
 // Input holds the state at the last Poll and the events since the Poll before it.
 type Input struct {
 	X, Y     float32
@@ -63,6 +66,7 @@ var (
 	dragFinish              = shell32.NewProc("DragFinish")
 	changeMessageFilter     = user32.NewProc("ChangeWindowMessageFilterEx")
 	setCursorProc           = user32.NewProc("SetCursor")
+	trackMouseEvent         = user32.NewProc("TrackMouseEvent")
 	loadCursor              = user32.NewProc("LoadCursorW")
 )
 
@@ -81,6 +85,24 @@ func (w *Window) mouse(msg uint32, wp, lp uintptr) bool {
 	switch msg {
 	case 0x0200: // WM_MOUSEMOVE
 		w.input.X, w.input.Y = at()
+		if !w.leaving {
+			// Told when the pointer leaves, so that nothing stays hovered, or its tip shown, once it has gone.
+			const leave = 0x2 // TME_LEAVE
+			t := struct {
+				size, flags uint32
+				window      uintptr
+				hover       uint32
+			}{flags: leave, window: w.Handle}
+			t.size = uint32(unsafe.Sizeof(t))
+			if r, _, _ := trackMouseEvent.Call(uintptr(unsafe.Pointer(&t))); r != 0 {
+				w.leaving = true
+			}
+		}
+	case 0x02a3: // WM_MOUSELEAVE
+		w.leaving = false
+		if !w.input.Down[Left] && !w.input.Down[Right] && !w.input.Down[Middle] {
+			w.input.X, w.input.Y = Outside, Outside
+		}
 	case 0x0201, 0x0202, 0x0203: // WM_LBUTTONDOWN / UP / DBLCLK
 		press(Left, msg != 0x0202, msg == 0x0203)
 	case 0x0204, 0x0205, 0x0206:

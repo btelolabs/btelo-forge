@@ -24,12 +24,12 @@ its own id). A `Node`'s exported fields are what is saved; `lay` is what the lay
 decides how its descendants are placed. `Edge` is a connector between any two nodes, with sides chosen to face each
 other unless fixed, a route (curve, elbow, straight), arrowheads, dashes and a label.
 
-The look follows MindNode on macOS, in its dark appearance (`lookOf`). The board is plain. A tree's root is a light,
+The look follows the map's theme (`lookOf`); the default, Midnight, is MindNode on macOS in its dark appearance. The board is plain. A tree's root is a light,
 rounded bubble with a soft shadow; every other topic is its words resting on a line of its branch's colour, and the
 branch flows into that line, tapering from the parent's thickness to the child's (`branchWidth`). In trees that grow
 up or down (org charts) topics are soft bubbles of their branch's colour instead, which branches can reach from
 above and below. Free topics with a shape of their own are flowchart boxes; pictures, videos, nested maps and tables
-are cards with rounded corners and shadows. Branch colours are a soft, bright palette, one per main branch.
+are flat cards with rounded corners; only the root casts a shadow. Branch colours are a soft, bright palette, one per main branch.
 
 ## Layout: the trees are the index
 
@@ -70,6 +70,34 @@ several goroutines can draw parts of one laid-out map at once.
 - **Pictures.** `Pictures` is asked from the tile workers and never waits: a picture not ready is drawn as loading and
   read in the background at the step of size it is shown at (192, 640, 2048, 4096 pixels), the nearest step ready
   standing in meanwhile; the nodes showing it are drawn again when it arrives. They are kept within a memory budget.
+
+## Connectors
+
+A connector leaves and enters by the sides of its ends that face each other, along a curve, right angles or a
+straight line. Dragging its middle (the handle shown on the chosen connector, or the line itself) sets its `Bend`:
+the path passes through the point it was dragged to, and keeps that shape as its ends move. A connector the user has
+not shaped finds its own way round the nodes between its ends (`routeAround`): when its plain path would cross one,
+the sixteen pairs of sides and then detours further and further to either side are tried, and the shortest path
+that crosses nothing is kept. Testing a path descends only the subtrees each of its pieces passes through.
+
+Paths are worked out again when an end moves or the connector changes, and when something changes where it runs.
+Routing has a budget for each frame: what does not fit is drawn plain for a frame or two and routed in the frames
+after (`Routing`), so an edit in a large map never waits for every connector. A map read from a file is routed
+whole before it is shown.
+
+## Tasks
+
+A topic can be a task (`Task`, `Done`), as in MindNode: a branch is made a task list whole. A task with no tasks
+under it shows a box to tick; one with tasks under it a ring that fills as they are done, ticked when all are. The
+counts are kept by the layout from the children's (`countTasks`), so they cost nothing to show. Ticking a task with
+tasks under it ticks them all. Outlines carry tasks as `- [ ]` and `- [x]`.
+
+## Themes
+
+A map is drawn in one of six themes (`Themes`), kept in its file: Midnight (dark, words over coloured lines, after
+MindNode), Paper (white), Pastel (light, every topic a soft bubble), Ocean (deep blue), Sepia (warm parchment) and
+Neon (dark, glowing bubbles). A theme gives the board's colours, the branch colours, whether topics are bubbles and
+how thick branches are; changing it is a step, and every node is measured again.
 
 ## Nested maps
 

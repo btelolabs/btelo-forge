@@ -281,13 +281,20 @@ func (a *App) startLive(done func(error)) {
 				})
 			}
 			if len(o.Targets) == 1 {
-				a.toast(a.u.tf("Live on %s", o.Targets[0].Name), false)
+				a.liveToast(a.u.tf("Live on %s", o.Targets[0].Name))
 			} else {
-				a.toast(a.u.tf("Live on %d destinations", len(o.Targets)), false)
+				a.liveToast(a.u.tf("Live on %d destinations", len(o.Targets)))
 			}
 			report(nil)
 		})
 	})
+}
+
+// liveToast tells that the stream went live or ended, unless its tab is in front, whose badge says so already.
+func (a *App) liveToast(text string) {
+	if !a.liveTab {
+		a.toast(text, false)
+	}
 }
 
 // stopLive ends the stream; the recording, if any, goes on.
@@ -305,7 +312,7 @@ func (a *App) stopLive(done func(error)) {
 		err := st.Stop()
 		a.post(func() {
 			l.stream, l.stopping, l.states = nil, false, nil
-			a.toast(a.u.t("The stream has ended"), false)
+			a.liveToast(a.u.t("The stream has ended"))
 			if done != nil {
 				done(err)
 			}
@@ -543,7 +550,7 @@ func (a *App) drawLiveControl(end, y, h float32) float32 {
 		col = colDangerText
 	}
 	u.label(u.face(11.5), rectAt(badge.Right()+u.px(60), pill.Y, u.px(40), h), fmt.Sprintf("%d/%d", live, len(st.Targets)), col, 0)
-	hint := u.tf("Live on %d of %d destinations — open to see each", live, len(st.Targets))
+	hint := u.tn(len(st.Targets), "Live on %d of %d destination — open to see it", "Live on %d of %d destinations — open to see each", live, len(st.Targets))
 	if !st.Screen {
 		hint += "\n" + u.t("The stream shows black: nothing is being recorded")
 	}
@@ -561,15 +568,15 @@ func (a *App) liveBody(in gfx.Rect) float32 {
 	u := &a.u
 	s := &a.settings.Live
 	y := in.Y
-	u.heading(rectAt(in.X, y, in.W-u.px(200), u.px(20)), u.t("Destinations"))
-	if u.button("live/add", rectAt(in.Right()-u.px(190), y-u.px(6), u.px(182), u.px(30)), icAdd, u.t("Add destination"), plain, true) {
+	u.heading(rectAt(in.X, y+u.px(5), in.W-u.px(200), u.px(20)), u.t("Destinations"))
+	if u.button("live/add", rectAt(in.Right()-u.px(190), y, u.px(182), u.px(30)), icAdd, u.t("Add destination"), plain, true) {
 		first := a.onAir.platforms.Platforms[0]
 		l.edit = &liveEdit{index: -1, d: liveDestination{Platform: first.ID, On: true}}
 		if len(first.Servers) > 0 {
 			l.edit.d.Server = first.Servers[0].URL
 		}
 	}
-	y += u.px(30)
+	y += u.px(38)
 	if len(s.Destinations) == 0 {
 		y = a.paragraph(in.X, y, in.W-u.px(8), u.t("Add the platforms to stream to. Every destination gets the same stream, encoded once, so streaming to several costs no more of the computer than streaming to one — only more upload."), 12.5, colDim)
 	}
@@ -586,7 +593,7 @@ func (a *App) liveBody(in gfx.Rect) float32 {
 				}
 			}
 		}
-		text := rectAt(row.X+u.px(42), row.Y+u.px(8), row.W-u.px(42)-u.px(250), u.px(20))
+		text := rectAt(row.X+u.px(42), row.Y+u.px(8), u.liveNameWidth(row.W), u.px(20))
 		u.label(u.bold(13), text, a.destinationName(d), colText, 0)
 		detail, col := a.platform(d.Platform).Name.In(string(u.lang))+" · "+serverHost(d.Server), colFaint
 		switch {
@@ -708,10 +715,11 @@ func (a *App) liveBody(in gfx.Rect) float32 {
 	}
 	if a.recorder() != nil && l.stream == nil {
 		y += u.px(6)
-		if on := u.checkbox("live/record", rectAt(in.X, y, in.W, u.px(26)), u.t("Start recording the screen too, so that it is on the stream"), s.Record); on != s.Record {
+		on, h := u.checkboxWrapped("live/record", in.X, y, in.W-u.px(8), u.t("Start recording the screen too, so that it is on the stream"), s.Record)
+		if on != s.Record {
 			s.Record, changed = on, true
 		}
-		y += u.px(30)
+		y += h + u.px(4)
 	}
 	if changed {
 		a.saveSettings()

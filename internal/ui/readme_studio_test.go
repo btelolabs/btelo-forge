@@ -13,9 +13,9 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
-// TestReadmeStudioScreens renders the README's pictures of drawing and recording into FORGE_README_OUT, in English
-// and Chinese: a poster drawn on an artboard of the infinite canvas (pixels, vectors, text, effects and an adjustment
-// layer) with the node tool on a curve, the Layer Style dialog, and the recording dialog.
+// TestReadmeStudioScreens renders the README's pictures of drawing into FORGE_README_OUT, in English and Chinese: a
+// poster drawn on an artboard of the infinite canvas (pixels, vectors, text, effects and an adjustment layer) with the
+// node tool on a curve, and the Layer Style dialog.
 func TestReadmeStudioScreens(t *testing.T) {
 	out := os.Getenv("FORGE_README_OUT")
 	if out == "" {
@@ -54,29 +54,6 @@ func TestReadmeStudioScreens(t *testing.T) {
 		x.a.style.page = effectStroke
 		save("style")
 		x.a.closeStyle(false)
-	}
-	// The recording dialog needs a screen to record; where there is none (a machine without one, or another
-	// system), the README keeps the picture it has.
-	for _, lang := range []Language{English, Chinese} {
-		x := recordingHarness(t)
-		x.c.Resize(1920, 1280)
-		x.scale = 1.25
-		x.a.u.lang = lang
-		x.a.settings.ExportDir = filepath.Join(realHome, "Videos")
-		x.click(x.recordCard())
-		x.pump(time.Minute, func() bool { return x.a.rec.listed })
-		x.a.settings.Record.Microphone = true
-		x.frame(Input{})
-		x.frame(Input{})
-		f, err := os.Create(filepath.Join(out, string(lang)+"-record.jpg"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = jpeg.Encode(f, x.c.Img, &jpeg.Options{Quality: 86})
-		f.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 

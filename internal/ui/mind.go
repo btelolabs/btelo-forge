@@ -37,6 +37,7 @@ const (
 	icTextSmaller = "\ueadd" // text_decrease
 	icTextBigger  = "\ueae2" // text_increase
 	icMore        = "\ue5d3" // more_horiz
+	icTask        = "\ue834" // check_box
 	icFocus       = "\ue3dc" // filter_center_focus
 )
 
@@ -56,11 +57,15 @@ type mindDoc struct {
 	text     *mindText   // words being typed into a node or a connector's label
 	cell     *mindCell   // a table cell being typed into
 	tool     mindTool
-	shape    mind.Shape // what the shape tool adds
-	video    mind.ID    // the video playing in place
-	panning  bool       // Space held, or the hand dragging the view
-	minimap  bool       // the overview is hidden (false shows it)
-	overview mindOverview
+	shape    mind.Shape  // what the shape tool adds
+	video    mind.ID     // the video playing in place
+	panning  bool        // Space held, or the hand dragging the view
+	themes   bool        // the theme panel is open
+	minimap  bool        // the overview is hidden (false shows it)
+	overview *mind.Tiles // the overview's own tiles, drawn again only where the board changed
+	ovStale  []mind.Rect // what changed since the overview was last drawn again
+	ovAll    bool
+	ovAt     time.Time
 	tableAt  mindCellAt // the table cell last typed into or pointed at, for the table's menu
 
 	dirty   bool
@@ -83,7 +88,9 @@ func (a *App) openMindDoc(m *mind.Map, path string) *mindDoc {
 	if a.occupied() {
 		a.newTab()
 	}
-	md := &mindDoc{m: m, path: path, fit: true, tiles: mind.NewTiles(256), sel: map[mind.ID]bool{}, saved: m.Version()}
+	m.SetRouteBudget(mindRouteBudget)
+	md := &mindDoc{m: m, path: path, fit: true, tiles: mind.NewTiles(256), overview: mind.NewTiles(32), sel: map[mind.ID]bool{},
+		saved: m.Version()}
 	a.board = md
 	a.requestFrame()
 	return md
@@ -148,8 +155,22 @@ func readMindFile(path string, measure mind.Measurer) (*mind.Map, error) {
 	if err != nil {
 		return nil, err
 	}
-	return mind.Load(bytes.NewReader(data), filepath.Dir(path), measure)
+	m, err := mind.Load(bytes.NewReader(data), filepath.Dir(path), measure)
+	if err == nil {
+		// All of it away from the window, connectors' ways round the nodes too, for up to a second: a map with very
+		// many tangled connectors routes the rest in its first frames.
+		m.SetRouteBudget(mindLoadRouting)
+		m.Layout()
+	}
+	return m, err
 }
+
+// mindRouteBudget is how long a frame may spend routing connectors round the nodes; the rest goes on in the
+// frames after.
+const mindRouteBudget = 6 * time.Millisecond
+
+// mindLoadRouting is how long reading a map may spend routing its connectors before it is shown.
+const mindLoadRouting = 10 * time.Second
 
 // mindSaveDelay is how long after the last change a map is saved.
 const mindSaveDelay = 3 * time.Second
@@ -286,4 +307,37 @@ func (a *App) renameMindFile(md *mindDoc, name string) error {
 	md.m.SetTitle(name)
 	a.mindFileChanged(from)
 	return nil
+}
+
+// overviewLater notes areas of the board that changed, for the overview to draw again.
+func (md *mindDoc) overviewLater(regions []mind.Rect, all bool) {
+	md.ovAll = md.ovAll || all || len(md.ovStale)+len(regions) > 256
+	if !md.ovAll {
+		md.ovStale = append(md.ovStale, regions...)
+	}
+}
+
+// overviewDelay is how often the overview follows the board while it is dragged on or typed into: at one tile a
+// map, drawing it again at every key would cost a large map's frames.
+const overviewDelay = 500 * time.Millisecond
+
+// overviewNow draws again the overview's tiles over what changed: at once when nothing is dragged or typed, else
+// at most every overviewDelay, the window waking for it.
+func (md *mindDoc) overviewNow() {
+	if len(md.ovStale) == 0 && !md.ovAll {
+		return
+	}
+	if (md.act != nil || md.text != nil) && time.Since(md.ovAt) < overviewDelay {
+		return
+	}
+	md.overview.Invalidate(md.ovStale, md.ovAll)
+	md.ovStale, md.ovAll, md.ovAt = md.ovStale[:0], false, time.Now()
+}
+
+// overviewDue is when the overview follows changes it is holding back, zero when none.
+func (md *mindDoc) overviewDue() time.Time {
+	if len(md.ovStale) == 0 && !md.ovAll {
+		return time.Time{}
+	}
+	return md.ovAt.Add(overviewDelay)
 }

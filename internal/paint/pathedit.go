@@ -2,6 +2,7 @@ package paint
 
 import (
 	"image"
+	"image/color"
 	"math"
 )
 
@@ -300,6 +301,39 @@ func (d *Doc) VectorAt(p Pt, slack float64) int {
 	}
 	walk(d.Root)
 	return found
+}
+
+// ShapeAt is the shape of the object at canvas point p, by its own area or its outline within slack, as the node
+// tool chooses a whole shape: the front one where several are, a shape that takes itself away counting by its own
+// area; -1 for none.
+func (v *Vector) ShapeAt(p Pt, slack float64) int {
+	for i := len(v.Shapes()) - 1; i >= 0; i-- {
+		part, ok := v.Shape(i)
+		if !ok {
+			continue
+		}
+		part.Fill = VectorPaint{Kind: PaintSolid, Color: color.NRGBA{A: 255}} // its area counts, filled or not
+		part.Stroke = VectorStroke{}
+		if vectorHit(&part, p, slack) {
+			return i
+		}
+	}
+	return -1
+}
+
+// ShapeNodes are the nodes of shape i of the object.
+func (v *Vector) ShapeNodes(i int) []NodeRef {
+	shapes := v.Shapes()
+	if v.Kind != VectorCurve || i < 0 || i >= len(shapes) {
+		return nil
+	}
+	var refs []NodeRef
+	for si := shapes[i][0]; si < shapes[i][1]; si++ {
+		for ni := range v.Path[si].Nodes {
+			refs = append(refs, NodeRef{Sub: si, Node: ni})
+		}
+	}
+	return refs
 }
 
 // vectorHit reports whether an object paints at p or its outline passes within slack of it.

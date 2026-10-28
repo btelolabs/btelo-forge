@@ -55,6 +55,13 @@ func (a *App) liveView() map[string]any {
 }
 
 func (a *App) addLiveTools(s *mcp.Server) {
+	tool(s, a, "show_stream", "Bring the live stream's tab forward: its picture as the platforms get it, the destinations and the choices. It opens in the tab in front when that is empty, else in a new one.", func(none) (any, error) {
+		if !capture.Supported() {
+			return nil, capture.ErrUnsupported
+		}
+		a.openLive()
+		return a.liveView(), nil
+	})
 	tool(s, a, "stream_status", "The live stream: whether it is live, its canvas, frame rate and bit rate, the destinations (with their state while live; stream keys are never shown, only whether one is set) and the platforms that can be added (from the streaming_platforms configuration).", func(none) (any, error) {
 		v := a.liveView()
 		var platforms []map[string]any

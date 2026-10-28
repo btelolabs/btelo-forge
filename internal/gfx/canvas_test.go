@@ -133,3 +133,46 @@ func TestRoundRectClippedOnTheLeft(t *testing.T) {
 		t.Fatal("the part inside the clip was not drawn")
 	}
 }
+
+func TestPieWedgesGoClockwiseFromTwelveWithAGapBetween(t *testing.T) {
+	bg, red, blue := Hex(0x101010), Hex(0xff0000), Hex(0x0000ff)
+	c := NewCanvas(100, 100)
+	c.Clear(bg)
+	// The right half, then the left half reaching further out.
+	c.Pie(50, 50, []Wedge{{From: 0, To: math.Pi, Radius: 30, Col: red}, {From: math.Pi, To: 2 * math.Pi, Radius: 40, Col: blue}}, 4)
+	at := func(x, y int) color.RGBA { return c.Img.RGBAAt(x, y) }
+	for _, p := range []struct {
+		x, y int
+		want color.RGBA
+		what string
+	}{
+		{70, 50, red, "right of the centre"},
+		{30, 50, blue, "left of the centre"},
+		{12, 50, blue, "left, beyond the first wedge's reach"},
+		{88, 50, bg, "right, beyond the first wedge's reach"},
+		{50, 30, bg, "straight up, in the gap"},
+		{50, 75, bg, "straight down, in the gap"},
+		{50, 5, bg, "above the pie"},
+	} {
+		if got := at(p.x, p.y); got != p.want {
+			t.Errorf("%s (%d,%d) is %v, want %v", p.what, p.x, p.y, got, p.want)
+		}
+	}
+	// The edge is anti-aliased: a pixel straddling the rim is partly covered.
+	if got := at(79, 50); got == red || got == bg {
+		t.Errorf("the rim pixel is %v, not a blend", got)
+	}
+}
+
+func TestPieOfOneWholeTurnHasNoSeam(t *testing.T) {
+	c := NewCanvas(60, 60)
+	c.Clear(Hex(0x101010))
+	c.Pie(30, 30, []Wedge{{From: 1, To: 1 + 2*math.Pi, Radius: 20, Col: Hex(0x00ff00)}}, 4)
+	for y := 15; y < 45; y++ {
+		for x := 15; x < 45; x++ {
+			if dx, dy := float64(x)+0.5-30, float64(y)+0.5-30; math.Hypot(dx, dy) < 19 && c.Img.RGBAAt(x, y) != Hex(0x00ff00) {
+				t.Fatalf("(%d,%d) inside the disc is %v", x, y, c.Img.RGBAAt(x, y))
+			}
+		}
+	}
+}

@@ -10,8 +10,9 @@ import (
 
 // outlineLine is one line of an outline: its depth and words.
 type outlineLine struct {
-	depth int
-	text  string
+	depth      int
+	text       string
+	task, done bool // a task item: - [ ] or - [x]
 }
 
 // parseOutline reads an outline: headings (#, ##…) go deeper with each #, and list items (-, *, +, 1.) or plain
@@ -36,11 +37,11 @@ func parseOutline(src string) []outlineLine {
 		line := strings.TrimSpace(raw)
 		if h := len(line) - len(strings.TrimLeft(line, "#")); h > 0 && h <= 6 && strings.HasPrefix(line[h:], " ") {
 			heading = h - 1
-			out = append(out, outlineLine{heading, strings.TrimSpace(line[h:])})
+			out = append(out, outlineLine{depth: heading, text: strings.TrimSpace(line[h:])})
 			continue
 		}
-		line = trimBullet(line)
-		out = append(out, outlineLine{heading + 1 + indent/2, line})
+		text, task, done := trimBullet(line)
+		out = append(out, outlineLine{heading + 1 + indent/2, text, task, done})
 	}
 	// Depths step down one at a time, so a line indented too far goes under the line before it.
 	for i := range out {
@@ -53,8 +54,9 @@ func parseOutline(src string) []outlineLine {
 	return out
 }
 
-// trimBullet removes a list item's mark and a task's box.
-func trimBullet(s string) string {
+// trimBullet removes a list item's mark and a task's box, reporting whether there was a box and whether it was
+// ticked.
+func trimBullet(s string) (string, bool, bool) {
 	switch {
 	case strings.HasPrefix(s, "- "), strings.HasPrefix(s, "* "), strings.HasPrefix(s, "+ "):
 		s = strings.TrimSpace(s[2:])
@@ -68,9 +70,11 @@ func trimBullet(s string) string {
 		}
 	}
 	for _, box := range []string{"[ ] ", "[x] ", "[X] "} {
-		s = strings.TrimPrefix(s, box)
+		if rest, ok := strings.CutPrefix(s, box); ok {
+			return rest, true, box != "[ ] "
+		}
 	}
-	return s
+	return s, false, false
 }
 
 // IsOutline reports whether text reads as an outline of more than one topic rather than one topic's words.
@@ -103,7 +107,7 @@ func (m *Map) AddOutline(text string, parent ID, index int, x, y float64) ([]ID,
 			} else if index >= 0 {
 				index++
 			}
-			n := Node{Text: l.text}
+			n := Node{Text: l.text, Task: l.task, Done: l.done}
 			if p == 0 {
 				n.X, n.Y = x, y+float64(len(tops))*80
 			}
@@ -140,6 +144,13 @@ func (m *Map) Outline(ids ...ID) string {
 			}
 			b.WriteString(strings.Repeat("  ", m.Depth(d)-base))
 			b.WriteString("- ")
+			if d.Task {
+				if d.Done {
+					b.WriteString("[x] ")
+				} else {
+					b.WriteString("[ ] ")
+				}
+			}
 			b.WriteString(strings.ReplaceAll(text, "\n", " "))
 			b.WriteString("\n")
 		})

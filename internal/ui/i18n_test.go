@@ -57,6 +57,16 @@ func messages(t *testing.T) map[string]string {
 							}
 						}
 					}
+				case "tn":
+					// The plural is the message; the singular must take the same values.
+					if len(n.Args) >= 3 {
+						literal(n.Args[2])
+						one, okOne := n.Args[1].(*ast.BasicLit)
+						many, okMany := n.Args[2].(*ast.BasicLit)
+						if okOne && okMany && strings.Count(one.Value, "%") != strings.Count(many.Value, "%") {
+							t.Errorf("%s: %s and %s take different values", fset.Position(one.Pos()), one.Value, many.Value)
+						}
+					}
 				case "msgs":
 					for _, arg := range n.Args {
 						literal(arg)
@@ -157,4 +167,17 @@ func sampleArgs(format string) []any {
 		i = j
 	}
 	return args
+}
+
+// A message about one thing is in the singular in English, and the same in Chinese, which has one form for both.
+func TestOneThingIsSingular(t *testing.T) {
+	en, cn := &ctx{lang: English}, &ctx{lang: Chinese}
+	for n, want := range map[int]string{0: "0 video clips", 1: "1 video clip", 2: "2 video clips"} {
+		if got := en.tn(n, "%d video clip", "%d video clips", n); got != want {
+			t.Errorf("%d: %q, want %q", n, got, want)
+		}
+	}
+	if got := cn.tn(1, "%d video clip", "%d video clips", 1); got != "1 个视频片段" {
+		t.Errorf("in Chinese: %q", got)
+	}
 }

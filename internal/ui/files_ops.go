@@ -811,7 +811,8 @@ func (a *App) jobDone(j *fileJob, res files.Result, trashed []files.Trashed, add
 			a.fm.undo[len(a.fm.undo)-1].labels = labels
 		}
 		if gone > 0 {
-			a.toast(u.tf("%d items were too large for the Recycle Bin and were deleted for good", gone), true)
+			a.toast(u.tn(gone, "%d item was too large for the Recycle Bin and was deleted for good",
+				"%d items were too large for the Recycle Bin and were deleted for good", gone), true)
 		}
 	}
 	switch {

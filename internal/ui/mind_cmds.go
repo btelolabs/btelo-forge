@@ -62,6 +62,8 @@ func (a *App) mindCommands() []mindCommand {
 		c("move-down", u.t("Move the topic after its sibling"), func() { a.mindReorder(md, 1) }, key(keyDown, "a")),
 		c("connect", u.t("Connect the chosen nodes"), func() { a.mindConnectChosen(md) }, key('L', "c")),
 		c("bold", u.t("Bold"), func() { a.mindToggleBold(md) }, key('B', "c")),
+		c("task-list", u.t("Make it a task list, or not"), func() { a.mindToggleTasks(md) }, key('K', "cs")),
+		c("done", u.t("Tick the task, or take the tick off"), func() { a.mindToggleDone(md) }, key(keyEnter, "cs")),
 		c("bigger", u.t("Larger words"), func() { a.mindStepSize(md, 1) }, key(0xdd, "c")),
 		c("smaller", u.t("Smaller words"), func() { a.mindStepSize(md, -1) }, key(0xdb, "c")),
 		c("fit", u.t("Show the whole board"), func() { md.fit = true }, key('1', "s")),
@@ -224,8 +226,15 @@ func extPattern(exts []string) string {
 	return strings.Join(parts, ";")
 }
 
-// mindViewCentre is the board point in the middle of the view.
+// mindViewCentre is the board point in the middle of the view. A map not shown yet — acted on by its file, or not
+// drawn since it was made or opened — has no view, and the middle of its board stands in for it.
 func (a *App) mindViewCentre(md *mindDoc) mind.Vec {
+	if md.view.Zoom == 0 {
+		if bounds := md.m.Bounds(); !bounds.Empty() {
+			return mind.Vec{X: bounds.CX(), Y: bounds.CY()}
+		}
+		return mind.Vec{}
+	}
 	b := a.layout().body
 	return md.view.Board(float64(b.W)/2, float64(b.H)/2)
 }
@@ -588,7 +597,8 @@ func (a *App) mindZoomToSelection(md *mindDoc, r gfx.Rect) {
 	for _, id := range ids[1:] {
 		b = b.Union(md.m.Box(md.m.Node(id)))
 	}
-	md.fitTo(b.Grow(40), r.W, r.H)
+	b = b.Grow(40)
+	md.fitTo(b, a.mindFitArea(md, r, b))
 }
 
 // mindEscape drops the tool, the chosen connector and the choice, in that order.
@@ -852,6 +862,10 @@ func (a *App) mindStyleItems(md *mindDoc) []mindStyleItem {
 			a.openMenu("mind/shape", at, a.mindShapeMenu(md))
 		}})
 	}
+	if n.Kind == mind.Topic {
+		items = append(items, mindStyleItem{id: "task", glyph: icTask, hint: withKey(u.t("Make it a task list, or not"), a.mindKeyHint("mind.task-list")),
+			on: n.Task, run: func(gfx.Rect) { a.mindToggleTasks(md) }})
+	}
 	items = append(items,
 		mindStyleItem{id: "colour", glyph: icPalette, hint: u.t("Colour"), run: func(at gfx.Rect) { a.openMenu("mind/colour", at, a.mindColourMenu(md)) }},
 		mindStyleItem{id: "bold", glyph: icBold, hint: withKey(u.t("Bold"), a.mindKeyHint("mind.bold")), on: n.Bold, run: func(gfx.Rect) { a.mindToggleBold(md) }},
@@ -960,11 +974,12 @@ func (a *App) mindShapeMenu(md *mindDoc) []menuItem {
 	return items
 }
 
-// mindColours are the colours offered: the branches' colours, in turn.
+// mindColours are the colours offered, named by mindColorNames: the default theme's branch colours, whichever
+// theme the map is in, so a colour's name always says what it is.
 func mindColours() []color.RGBA {
 	out := make([]color.RGBA, len(mindColorNames))
 	for i := range out {
-		out[i] = mind.BranchColor(i)
+		out[i] = mind.Themes[0].Branch(i)
 	}
 	return out
 }
@@ -981,7 +996,7 @@ func (a *App) mindColourMenu(md *mindDoc) []menuItem {
 				shape, _, _, _, _ := md.m.Look(n)
 				n.Line = c
 				if shape != mind.ShapeUnderline && shape != mind.ShapeNone {
-					n.Fill = gfx.Mix(mind.Paper, c, 0.3)
+					n.Fill = gfx.Mix(md.m.Theme().Paper, c, 0.3)
 				}
 			})
 		}})
@@ -1052,6 +1067,18 @@ func (a *App) mindNodeMenu(md *mindDoc, n *mind.Node) []menuItem {
 		{label: u.t("Add a child topic"), key: key("mind.add-child"), run: func() { a.mindAddChild(md) }},
 		{label: u.t("Add a topic after this one"), key: key("mind.add-sibling"), run: func() { a.mindAddSibling(md, true) }, disabled: n.Parent == 0},
 		{label: u.t("Add a topic above this one"), key: key("mind.add-parent"), run: func() { a.mindAddParent(md) }},
+	}
+	if n.Kind == mind.Topic {
+		if n.Task {
+			label := u.t("Mark done")
+			if done, tasks := m.Progress(n); tasks > 0 && done == tasks {
+				label = u.t("Mark not done")
+			}
+			items = append(items, menuItem{label: label, key: key("mind.done"), run: func() { a.mindToggleDone(md) }},
+				menuItem{label: u.t("Not a task list"), key: key("mind.task-list"), run: func() { a.mindToggleTasks(md) }})
+		} else {
+			items = append(items, menuItem{label: u.t("Make it a task list"), key: key("mind.task-list"), run: func() { a.mindToggleTasks(md) }})
+		}
 	}
 	if len(n.Children) > 0 {
 		label := u.t("Fold")
@@ -1234,6 +1261,8 @@ func (a *App) mindContext(md *mindDoc, r gfx.Rect, v mind.View, x, y float32) {
 		md.primary, md.edge = 0, e.ID
 		a.openMenu("mind/context", at, append(a.mindRouteMenu(md, e), menuSep,
 			menuItem{label: a.u.t("Label"), run: func() { a.editEdgeLabel(md, e) }},
+			menuItem{label: a.u.t("Reset the route"), disabled: e.Bend == (mind.Vec{}) && e.FromSide == mind.SideAuto && e.ToSide == mind.SideAuto,
+				run: func() { a.mindResetBend(md, e) }},
 			menuItem{label: a.u.t("Delete"), run: func() { a.mindDelete(md) }}))
 		return
 	}
@@ -1258,4 +1287,40 @@ func (a *App) mindMoreMenu(md *mindDoc) []menuItem {
 		menuSep,
 		{label: u.t("Save now"), key: key("mind.save"), run: func() { md.dirty = true; a.saveMind(md, false) }},
 	}
+}
+
+// mindToggleTasks makes the chosen topics, with everything under them, task lists, or no longer when the first is
+// one already, as MindNode does.
+func (a *App) mindToggleTasks(md *mindDoc) {
+	ids := md.m.Tops(md.chosen())
+	if len(ids) == 0 {
+		return
+	}
+	n := md.m.Node(md.primary)
+	if n == nil {
+		n = md.m.Node(ids[0])
+	}
+	on := !n.Task
+	md.m.Begin(a.u.t("Tasks"))
+	for _, id := range ids {
+		if err := md.m.SetTasks(id, on); err != nil {
+			a.toast(a.describe(err), true)
+			break
+		}
+	}
+	md.m.Commit()
+}
+
+// mindToggleDone ticks the chosen tasks, or takes their ticks off: a task with tasks under it ticks them all.
+func (a *App) mindToggleDone(md *mindDoc) {
+	md.m.Begin(a.u.t("Done"))
+	for _, id := range md.m.Tops(md.chosen()) {
+		if n := md.m.Node(id); n != nil && n.Task {
+			if err := md.m.ToggleDone(id); err != nil {
+				a.toast(a.describe(err), true)
+				break
+			}
+		}
+	}
+	md.m.Commit()
 }

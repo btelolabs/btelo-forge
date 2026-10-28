@@ -53,27 +53,11 @@ func (a *App) drawTabs(r gfx.Rect) {
 			bg = colSurface
 		}
 		u.c.Fill(gfx.Rect{X: tr.X, Y: tr.Y, W: tr.W, H: tr.H + u.px(10)}, bg)
-		glyph := icVideo
-		if d.p == nil && d.opening == "" && !d.editing {
-			glyph = icAdd
-		}
-		if d.board != nil {
-			glyph = icMind
-		}
-		if d.liveTab {
-			glyph = icLive
-		}
-		if d.files != nil {
-			glyph = icFmFolder
-			if d.files.pane().grid {
-				glyph = icCategory
-			}
-		}
 		fg := colDim
 		if active {
 			fg = colText
 		}
-		u.icon(glyph, gfx.Rect{X: tr.X + u.px(6), Y: tr.Y, W: u.px(24), H: tr.H}, 16, fg)
+		u.icon(d.glyph(), gfx.Rect{X: tr.X + u.px(6), Y: tr.Y, W: u.px(24), H: tr.H}, 16, fg)
 		cb := gfx.Rect{X: tr.Right() - u.px(30), Y: tr.Y + (tr.H-u.px(24))/2, W: u.px(24), H: u.px(24)}
 		nameBox := gfx.Rect{X: tr.X + u.px(34), Y: tr.Y, W: cb.X - tr.X - u.px(38), H: tr.H}
 		if a.renamingTab == d {

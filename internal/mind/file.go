@@ -22,7 +22,7 @@ import (
 
 const (
 	magic       = "BTMIND"
-	fileVersion = 1
+	fileVersion = 3 // 2: connectors keep their bend; 3: the map keeps its theme
 )
 
 // ErrNotAMap means a file is not a mind map saved by Save.
@@ -45,6 +45,8 @@ const (
 	fShape
 	fLayout
 	fSide
+	fTask
+	fDone
 )
 
 type writer struct {
@@ -127,6 +129,7 @@ func (s *Saving) Write(out io.Writer) error {
 // encodeBody writes what follows the file's head, before it is compressed.
 func encodeBody(w *writer, m *Map, dir string) error {
 	w.str(m.Title)
+	w.str(m.ThemeID)
 	w.uvarint(uint64(m.count))
 	prev := ID(0)
 	var write func(n *Node)
@@ -156,6 +159,8 @@ func encodeBody(w *writer, m *Map, dir string) error {
 		set(fShape, n.Shape != ShapeAuto)
 		set(fLayout, n.Layout != LayoutMap)
 		set(fSide, n.Side != SideAuto)
+		set(fTask, n.Task)
+		set(fDone, n.Done)
 		w.uvarint(flags)
 		if flags&fPlace != 0 {
 			w.quarter(n.X)
@@ -241,11 +246,18 @@ func encodeBody(w *writer, m *Map, dir string) error {
 		if e.Color.A != 0 {
 			style |= 1 << 5
 		}
+		if e.Bend != (Vec{}) {
+			style |= 1 << 6
+		}
 		w.byte1(style)
 		if e.Color.A != 0 {
 			w.color(e.Color)
 		}
 		w.str(e.Label)
+		if e.Bend != (Vec{}) {
+			w.quarter(e.Bend.X)
+			w.quarter(e.Bend.Y)
+		}
 		return w.err == nil
 	})
 	return w.err
@@ -349,6 +361,9 @@ func Load(in io.Reader, dir string, measure Measurer) (*Map, error) {
 	}
 	r := &reader{r: bufio.NewReaderSize(flate.NewReader(in), 1<<16)}
 	m := New(r.str(), measure)
+	if head[len(magic)] >= 3 {
+		m.ThemeID = r.str()
+	}
 	count := r.uvarint()
 	if count > maxNodes {
 		return nil, fmt.Errorf("%w: %d nodes", ErrNotAMap, count)
@@ -410,6 +425,7 @@ func Load(in io.Reader, dir string, measure Measurer) (*Map, error) {
 			n.Side = Side(r.byte1())
 		}
 		n.Bold, n.Folded = flags&fBold != 0, flags&fFolded != 0
+		n.Task, n.Done = flags&fTask != 0, flags&fDone != 0
 		if r.err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrNotAMap, r.err)
 		}
@@ -456,6 +472,9 @@ func Load(in io.Reader, dir string, measure Measurer) (*Map, error) {
 			e.Color = r.color()
 		}
 		e.Label = r.str()
+		if style&(1<<6) != 0 {
+			e.Bend = Vec{r.quarter(), r.quarter()}
+		}
 		if r.err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrNotAMap, r.err)
 		}

@@ -135,6 +135,8 @@ type Node struct {
 	Ref      string // a picture's, video's or nested map's file, or a smart object's link id
 	Aspect   float64
 	Cells    *Grid // a table's
+	Task     bool  // a task: a box to tick, or, with tasks under it, how much of them is done
+	Done     bool  // a task ticked off
 
 	lay place // worked out from the rest by the layout
 }
@@ -173,6 +175,7 @@ type Edge struct {
 	Dashed   bool
 	Color    color.RGBA // A == 0 is the theme's
 	Label    string
+	Bend     Vec // how far the user moved the path's middle from where it would be: the route they shaped
 
 	geo edgeGeo // worked out from the nodes' places
 }
@@ -189,11 +192,12 @@ var (
 // Map is a board with its nodes and connectors, its undo history and what its layout worked out. It is used from one
 // goroutine; Freeze-free reads from others are safe only while it is not changed (the view's tiles are drawn so).
 type Map struct {
-	Title string
-	nodes []*Node // by id; nil where a node was deleted
-	edges []*Edge // by id
-	count int     // nodes
-	links int     // connectors
+	Title   string
+	ThemeID string  // the theme it is drawn in; "" is the default
+	nodes   []*Node // by id; nil where a node was deleted
+	edges   []*Edge // by id
+	count   int     // nodes
+	links   int     // connectors
 
 	measure  Measurer
 	hist     history
@@ -375,6 +379,7 @@ func (e *Edge) saved() *Edge {
 // Clone is a copy of the map with its nodes and connectors but no history, measured as m is.
 func (m *Map) Clone() *Map {
 	c := New(m.Title, m.measure)
+	c.ThemeID = m.ThemeID
 	for _, n := range m.nodes[1:] {
 		if n == nil {
 			c.nodes = append(c.nodes, nil)
@@ -414,5 +419,36 @@ func (m *Map) reindex() {
 		}
 	}
 	m.lay.edgesStale, m.lay.all = true, true
+	m.version++
+}
+
+// Theme is the theme the map is drawn in.
+func (m *Map) Theme() *Theme { return ThemeByID(m.ThemeID) }
+
+// SetTheme draws the map in the theme named id, as a step; every node is measured again, as a theme changes their
+// looks.
+func (m *Map) SetTheme(id string) {
+	if ThemeByID(id).ID != id || id == m.Theme().ID {
+		return
+	}
+	m.Begin("Theme")
+	s := m.hist.open
+	if !s.themed {
+		s.theme[0] = m.ThemeID
+	}
+	s.theme[1], s.themed = id, true
+	m.applyTheme(id)
+	m.Commit()
+}
+
+// applyTheme switches the theme and lays everything out again.
+func (m *Map) applyTheme(id string) {
+	m.ThemeID = id
+	m.lay.all, m.lay.edgesStale = true, true
+	m.lay.everything, m.lay.regions = true, nil
+	m.Each(func(n *Node) bool {
+		n.lay.measured = false
+		return true
+	})
 	m.version++
 }

@@ -295,6 +295,67 @@ func (c *Canvas) Triangle(ax, ay, bx, by, cx, cy float32, col color.RGBA) {
 	}
 }
 
+// Wedge is a slice of a pie: the angles it spans, in radians clockwise from twelve o'clock (To after From, at most a
+// whole turn later), how far it reaches from the centre, and its colour.
+type Wedge struct {
+	From, To, Radius float32
+	Col              color.RGBA
+}
+
+// Pie fills wedges around (cx, cy), anti-aliased, leaving a strip gap pixels wide between neighbours. Each pixel's
+// angle and distance are worked out once and every wedge is tested against them, so a pie of many wedges costs
+// little more than a disc.
+func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
+	var reach float32
+	for _, w := range wedges {
+		reach = max(reach, w.Radius)
+	}
+	if reach <= 0 {
+		return
+	}
+	b := image.Rect(int(math.Floor(float64(cx-reach-1))), int(math.Floor(float64(cy-reach-1))),
+		int(math.Ceil(float64(cx+reach+1))), int(math.Ceil(float64(cy+reach+1)))).Intersect(c.clip)
+	const turn = 2 * math.Pi
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		i := c.Img.PixOffset(b.Min.X, y)
+		dy := float64(float32(y) + 0.5 - cy)
+		for x := b.Min.X; x < b.Max.X; x, i = x+1, i+4 {
+			dx := float64(float32(x) + 0.5 - cx)
+			r := math.Hypot(dx, dy)
+			if r > float64(reach)+1 {
+				continue
+			}
+			angle := math.Atan2(dx, -dy) // clockwise from straight up
+			for _, w := range wedges {
+				cov := clamp01(w.Radius - float32(r) + 0.5)
+				if cov <= 0 {
+					continue
+				}
+				span := float64(w.To - w.From)
+				if span < turn-1e-4 {
+					// The distance to the nearer of the wedge's two edges, inside positive: the edges are rays, so
+					// past a right angle from one the nearest point of it is the centre.
+					off := math.Mod(angle-float64(w.From), turn)
+					if off < 0 {
+						off += turn
+					}
+					edge := func(a float64) float64 { return r * math.Sin(min(a, math.Pi/2)) }
+					var d float64
+					if off <= span {
+						d = edge(min(off, span-off))
+					} else {
+						d = -edge(min(off-span, turn-off))
+					}
+					cov = min(cov, clamp01(float32(d)-gap/2+0.5))
+				}
+				if cov > 0 {
+					c.blend(i, w.Col, cov)
+				}
+			}
+		}
+	}
+}
+
 // Image draws src scaled into dst with bilinear filtering.
 func (c *Canvas) Image(src image.Image, dst Rect) {
 	r := dst.Pixels()

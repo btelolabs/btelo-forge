@@ -155,7 +155,7 @@ func (a *App) artCopy(ad *artDoc, merged bool) {
 	if !merged {
 		if _, v, shapes, _, ok := a.copiedShapes(ad); ok {
 			a.copyVector(v)
-			a.toast(a.u.tf("Copied %d shapes", len(shapes)), false)
+			a.toast(a.u.tn(len(shapes), "Copied %d shape", "Copied %d shapes", len(shapes)), false)
 			return
 		}
 		if n := ad.d.Node(ad.d.Active); n != nil && ad.d.Selection == nil {

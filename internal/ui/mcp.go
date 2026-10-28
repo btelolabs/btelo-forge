@@ -34,7 +34,7 @@ var mcpCommonTools = append([]string{"get_state", "new_tab", "switch_tab", "clos
 // mcpDomainTools are each domain's own tools; TestMCPToolsAreAllListed keeps them in step with the server.
 var mcpDomainTools = map[int][]string{
 	domainVideo: {"open_video", "seek", "split", "delete_item", "delete_items", "move_item", "trim_item", "set_clip",
-		"set_items", "set_track", "add_text", "add_image", "update_overlay", "add_music_file", "search_music",
+		"set_items", "set_track", "add_text", "add_image", "add_smart_object", "update_overlay", "add_music_file", "search_music",
 		"list_music_sources", "add_library_music", "generate_subtitles", "list_subtitle_models", "subtitle_status",
 		"export", "export_status", "export_options", "set_export", "list_exports", "undo", "redo", "frame_at", "player_mode", "save_edit"},
 	domainDrawing: {"canvas_new", "canvas_open", "canvas_state", "canvas_render", "canvas_save", "canvas_export",
@@ -42,9 +42,9 @@ var mcpDomainTools = map[int][]string{
 		"canvas_add_path", "canvas_set_vector", "canvas_boolean", "canvas_add_text", "canvas_filter", "canvas_transform",
 		"canvas_resize", "canvas_artboard", "canvas_history", "canvas_retouch", "canvas_adjustment", "canvas_style"},
 	domainMind: {"mind_new", "mind_open", "mind_state", "mind_add", "mind_update", "mind_set_cells", "mind_delete", "mind_move",
-		"mind_connect", "mind_update_connectors", "mind_find", "mind_outline", "mind_render", "mind_show", "mind_history", "mind_save"},
+		"mind_connect", "mind_update_connectors", "mind_find", "mind_outline", "mind_render", "mind_show", "mind_theme", "mind_history", "mind_save"},
 	domainRecording: {"recording_status", "start_recording", "pause_recording", "stop_recording", "take_screenshot",
-		"stream_status", "set_stream_destination", "remove_stream_destination", "set_stream_options", "start_stream", "stop_stream", "camera_status", "set_camera"},
+		"stream_status", "show_stream", "set_stream_destination", "remove_stream_destination", "set_stream_options", "start_stream", "stop_stream", "camera_status", "set_camera"},
 }
 
 // mcpToolsOf are the tools of a domain's server, the common ones first.
@@ -77,7 +77,8 @@ the Recycle Bin.`
 output timeline. Open a video with open_video (placement "new_tab" for a separate edit, "append" to add it to the end
 of the main track, "upper" to lay it over the picture from a time). Cut with split/delete_item/trim_item, change speed
 or clip volume with set_clip, mix tracks with set_track, add captions and images with add_text/add_image
-(update_overlay to change them), add music with search_music + add_library_music or add_music_file, make subtitles
+(update_overlay to change them), put a canvas's smart object over the picture with add_smart_object (it follows
+every change drawn in it), add music with search_music + add_library_music or add_music_file, make subtitles
 with generate_subtitles (list_music_sources and list_subtitle_models show the choices). The music sources and the
 subtitle engines and models are JSON configurations: read one with get_config (it includes a guide to the format),
 change it with set_config (it is checked before it is used) and undo that with reset_config — for example to add a
@@ -99,7 +100,8 @@ threshold, invert, desaturate). Vectors are layers of their own, sharp at any si
 ellipse, polygon, star, line), canvas_add_path (Bézier nodes, or a smooth curve through points), canvas_set_vector
 (fill, stroke, width, alignment, ends, corners, dashes), canvas_boolean (add, subtract, intersect, exclude).
 canvas_add_text adds text. canvas_layer and canvas_set_layer manage layers (add, group, order, merge, masks, opacity,
-blend modes); canvas_retouch dodges, burns, sponges, blurs, sharpens or smudges along a stroke; canvas_adjustment adds
+blend modes), and canvas_layer convert_to_smart makes the chosen layer or group a smart object, whose link id puts it
+on a mind map (mind_add kind smart) or a video (add_smart_object), where it follows every change; canvas_retouch dodges, burns, sponges, blurs, sharpens or smudges along a stroke; canvas_adjustment adds
 adjustment layers (levels, curves, hue/saturation…) that change what is under them without changing its pixels;
 canvas_style sets a layer's effects (drop shadow, glows, stroke, colour overlay); canvas_transform moves, scales and
 turns the chosen layer, or distorts it by its corners or warps it by a grid; canvas_resize changes the whole picture;
@@ -120,15 +122,15 @@ whole trees nested by children (keys let later nodes and connectors in the same 
 Markdown outline, and connectors; a flowchart is free topics with shapes (capsule for start and end, rounded for a
 step, diamond for a decision, parallelogram for input or output) joined by mind_connect. mind_update changes nodes,
 mind_set_cells tables' cells, mind_move puts a node under another or frees it, mind_delete removes nodes and
-connectors, mind_find searches, mind_show shows the user nodes in the window, and mind_render returns a PNG to check
-the result. Each call is one step, undone with mind_history; the map saves itself, and mind_save saves at once.`
+connectors, mind_find searches, mind_show shows the user nodes in the window, mind_theme changes the whole map's
+look, and mind_render returns a PNG to check the result. Each call is one step, undone with mind_history; the map saves itself, and mind_save saves at once.`
 
 	mcpRecordingInstructions = `Recording: on Windows the screen can be recorded with sound: recording_status lists the screens and
 microphones, start_recording begins, pause_recording pauses and resumes, and stop_recording saves the MP4 and opens it
 in a tab for editing; take_screenshot saves a PNG of the screen.
 
 Live streaming goes to several platforms at once, encoded once: stream_status lists the destinations and the
-platforms that can be added; set_stream_destination adds or changes one (platform, server, the stream key the user
+platforms that can be added, and show_stream brings the stream's tab forward for the user to watch; set_stream_destination adds or changes one (platform, server, the stream key the user
 gives you — it is stored encrypted and never shown again — and whether it is streamed to), remove_stream_destination
 forgets one, set_stream_options chooses the canvas (landscape, or upright for phone platforms), frame rate, bit rate
 and sound, and start_stream and stop_stream go live and end it. The stream is separate from recording, as in OBS: it

@@ -14,6 +14,7 @@ import (
 
 	"github.com/btelolabs/btelo-forge/internal/capture"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/mind"
 )
 
 // recorderHost is what a window offers beyond Host for recording the screen. A window without it, or a system the
@@ -222,14 +223,35 @@ func (a *App) capturePath(format, ext string, at time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	base := fmt.Sprintf(format, at.Format("2006-01-02 15.04.05"))
-	path := filepath.Join(dir, base+ext)
+	return a.freePath(filepath.Join(dir, fmt.Sprintf(format, at.Format("2006-01-02 15.04.05"))+ext)), nil
+}
+
+// freePath is path, or path with " (2)", " (3)"… before its extension, the first that no file has and no open
+// canvas or map is to be saved to: a canvas's file is written only with its first change, so two made in the same
+// second must not share a name.
+func (a *App) freePath(path string) string {
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
 	for i := 2; ; i++ {
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-			return path, nil
+		if a.pathFree(path) {
+			return path
 		}
-		path = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", base, i, ext))
+		path = fmt.Sprintf("%s (%d)%s", base, i, ext)
 	}
+}
+
+// pathFree reports whether a new file may be named path: nothing is there, and no open tab will save there.
+func (a *App) pathFree(path string) bool {
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	key := mind.NestKey(path)
+	for _, d := range a.docs {
+		if d.art != nil && mind.NestKey(d.art.path) == key || d.board != nil && mind.NestKey(d.board.path) == key {
+			return false
+		}
+	}
+	return true
 }
 
 // startRecording begins recording with the saved settings; done, when not nil, hears whether it started.

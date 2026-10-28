@@ -82,6 +82,9 @@ type mindNodeView struct {
 	Bold     bool       `json:"bold,omitempty"`
 	Width    float64    `json:"width,omitempty"`
 	Height   float64    `json:"height,omitempty"`
+	Task     bool       `json:"task,omitempty"`
+	Done     bool       `json:"done,omitempty"`
+	Progress []int      `json:"progress,omitempty"` // a task's: how many of the tasks at the ends of its subtree are done, of how many
 }
 
 type mindEdgeView struct {
@@ -95,6 +98,7 @@ type mindEdgeView struct {
 	Color    string      `json:"color,omitempty"`
 	FromSide string      `json:"from_side,omitempty"`
 	ToSide   string      `json:"to_side,omitempty"`
+	Bend     []float64   `json:"bend,omitempty"`
 }
 
 func rgbaHex(c color.RGBA) string {
@@ -108,7 +112,11 @@ func (a *App) mindNodeOut(m *mind.Map, n *mind.Node) mindNodeView {
 	b := m.Box(n)
 	v := mindNodeView{ID: n.ID, Kind: mind.KindNames[n.Kind], Text: n.Text, Parent: n.Parent, Children: n.Children,
 		Box: []float64{b.X0, b.Y0, b.W(), b.H()}, Folded: n.Folded, Ref: n.Ref, Fill: rgbaHex(n.Fill), Line: rgbaHex(n.Line),
-		Ink: rgbaHex(n.Ink), Size: n.Size, Bold: n.Bold, Width: n.W, Height: n.H}
+		Ink: rgbaHex(n.Ink), Size: n.Size, Bold: n.Bold, Width: n.W, Height: n.H, Task: n.Task, Done: n.Done}
+	if n.Task {
+		done, tasks := m.Progress(n)
+		v.Progress = []int{done, tasks}
+	}
 	if n.Kind == mind.Topic {
 		v.Shape = mind.ShapeNames[n.Shape]
 	}
@@ -140,6 +148,9 @@ func mindEdgeOut(e *mind.Edge) mindEdgeView {
 	if e.ToSide != mind.SideAuto {
 		v.ToSide = mind.SideNames[e.ToSide]
 	}
+	if e.Bend != (mind.Vec{}) {
+		v.Bend = []float64{e.Bend.X, e.Bend.Y}
+	}
 	return v
 }
 
@@ -147,6 +158,7 @@ func mindEdgeOut(e *mind.Edge) mindEdgeView {
 type mindStateView struct {
 	Path       string         `json:"path"`
 	Title      string         `json:"title"`
+	Theme      string         `json:"theme"`
 	Nodes      int            `json:"node_count"`
 	Connectors int            `json:"connector_count"`
 	Bounds     []float64      `json:"bounds,omitempty"`
@@ -184,6 +196,9 @@ type mindNodeIn struct {
 	Size     *float32   `json:"size,omitempty" jsonschema:"the words' size in board units, 0 for the theme's"`
 	Bold     *bool      `json:"bold,omitempty"`
 	Folded   *bool      `json:"folded,omitempty"`
+	Task     *bool      `json:"task,omitempty" jsonschema:"a task: a box to tick, or with tasks under it a ring of their progress"`
+	Done     *bool      `json:"done,omitempty" jsonschema:"a task ticked off"`
+	TaskList *bool      `json:"task_list,omitempty" jsonschema:"for mind_update: make the node and everything under it tasks (true) or not (false), as MindNode's Convert to Task List"`
 	Side     string     `json:"side,omitempty" jsonschema:"a mind map root's child: left, right or auto"`
 }
 
@@ -294,6 +309,12 @@ func (in mindNodeIn) apply(n *mind.Node) error {
 	if in.Folded != nil {
 		n.Folded = *in.Folded
 	}
+	if in.Task != nil {
+		n.Task = *in.Task
+	}
+	if in.Done != nil {
+		n.Done = *in.Done
+	}
 	return nil
 }
 
@@ -311,6 +332,7 @@ type mindEdgeIn struct {
 	Color    *string     `json:"color,omitempty" jsonschema:"#rrggbb, or empty for grey"`
 	FromSide string      `json:"from_side,omitempty" jsonschema:"auto (default), top, right, bottom or left"`
 	ToSide   string      `json:"to_side,omitempty"`
+	Bend     []float64   `json:"bend,omitempty" jsonschema:"[dx, dy]: move the path's middle by this much from where it would be, shaping its route as a drag of its middle does; [0, 0] lets it find its own way round the nodes again"`
 }
 
 func (in mindEdgeIn) apply(e *mind.Edge, keys mindIndex) error {
@@ -357,6 +379,13 @@ func (in mindEdgeIn) apply(e *mind.Edge, keys mindIndex) error {
 	}
 	if in.Dashed != nil {
 		e.Dashed = *in.Dashed
+	}
+	switch len(in.Bend) {
+	case 0:
+	case 2:
+		e.Bend = mind.Vec{X: in.Bend[0], Y: in.Bend[1]}
+	default:
+		return errors.New("bend is [dx, dy]")
 	}
 	if in.Color != nil {
 		c, err := mindColor(*in.Color)
@@ -548,6 +577,11 @@ func (a *App) addMindTools(s *mcp.Server) {
 				}
 				if bad != nil {
 					return fmt.Errorf("node %d: %w", ni.ID, bad)
+				}
+				if ni.TaskList != nil {
+					if err := md.m.SetTasks(ni.ID, *ni.TaskList); err != nil {
+						return fmt.Errorf("node %d: %w", ni.ID, err)
+					}
 				}
 			}
 			return nil
@@ -823,6 +857,26 @@ func (a *App) addMindTools(s *mcp.Server) {
 		a.requestFrame()
 		return map[string]any{"chosen": md.chosen()}, nil
 	})
+	type themeIn struct {
+		Path  string `json:"path,omitempty"`
+		Theme string `json:"theme" jsonschema:"midnight (dark, words over coloured lines, the default), paper (white), pastel (light, every topic a soft bubble), ocean (deep blue), sepia (warm parchment) or neon (dark, glowing bubbles)"`
+	}
+	tool(s, a, "mind_theme", "Draw the map in another theme: the board, its colours and how topics look. One step.", func(in themeIn) (any, error) {
+		md, err := a.mindNow(in.Path)
+		if err != nil {
+			return nil, err
+		}
+		if mind.ThemeByID(in.Theme).ID != in.Theme {
+			var ids []string
+			for _, t := range mind.Themes {
+				ids = append(ids, t.ID)
+			}
+			return nil, fmt.Errorf("theme %q is not one of %s", in.Theme, strings.Join(ids, ", "))
+		}
+		md.m.SetTheme(in.Theme)
+		a.requestFrame()
+		return map[string]string{"theme": md.m.Theme().ID}, nil
+	})
 	type historyIn struct {
 		Path   string `json:"path,omitempty"`
 		Action string `json:"action" jsonschema:"undo or redo"`
@@ -865,7 +919,7 @@ func (a *App) addMindTools(s *mcp.Server) {
 func (a *App) mindState(md *mindDoc, root mind.ID, depth, offset, limit int, edges bool) mindStateView {
 	m := md.m
 	m.Layout()
-	v := mindStateView{Path: md.path, Title: m.Title, Nodes: m.Len(), Connectors: m.EdgeCount(), Chosen: md.chosen(),
+	v := mindStateView{Path: md.path, Title: m.Title, Theme: m.Theme().ID, Nodes: m.Len(), Connectors: m.EdgeCount(), Chosen: md.chosen(),
 		CanUndo: m.CanUndo(), CanRedo: m.CanRedo(), List: []mindNodeView{}}
 	if b := m.Bounds(); !b.Empty() {
 		v.Bounds = []float64{b.X0, b.Y0, b.W(), b.H()}

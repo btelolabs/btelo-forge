@@ -177,7 +177,7 @@ func (a *App) drawProperties(x, y, w float32, e assets.Entry, info assets.Info) 
 	if info.Duration > 0 {
 		length := clock(info.Duration)
 		if info.Frames > 0 {
-			length += " · " + u.tf("%d frames", info.Frames)
+			length += " · " + u.tn(info.Frames, "%d frame", "%d frames", info.Frames)
 		}
 		y = a.propertyRow(x, y, w, u.t("Length"), length)
 	}

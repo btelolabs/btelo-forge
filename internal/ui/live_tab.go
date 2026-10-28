@@ -37,10 +37,7 @@ func (a *App) openLive() {
 func (a *App) drawLiveTab(r gfx.Rect) {
 	u := &a.u
 	u.c.Fill(r, colPanel)
-	side := min(max(u.px(400), r.W*0.32), u.px(520))
-	if r.W-side < u.px(420) {
-		side = max(r.W*0.45, u.px(300))
-	}
+	side := u.liveSideWidth(r.W)
 	stage := rectAt(r.X, r.Y, r.W-side, r.H)
 	panelR := rectAt(stage.Right(), r.Y, side, r.H)
 	a.drawLiveStage(stage)
@@ -53,6 +50,22 @@ func (a *App) drawLiveTab(r gfx.Rect) {
 		}
 	}
 }
+
+// liveSideWidth is how wide the destinations and choices are beside the picture, in a tab w wide.
+func (u *ctx) liveSideWidth(w float32) float32 {
+	side := min(max(u.px(400), w*0.32), u.px(520))
+	if w-side < u.px(420) {
+		side = max(w*0.45, u.px(300))
+	}
+	return side
+}
+
+// liveSidePad is the space around the destinations and choices, in points.
+const liveSidePad = 20
+
+// liveNameWidth is how wide a destination's name is in a row w wide: up to its buttons, edit and remove, or retry
+// and leave while live.
+func (u *ctx) liveNameWidth(w float32) float32 { return w - u.px(42) - u.px(84) }
 
 // drawLiveStage is the stream's picture, with its state above it and the buttons and figures below.
 func (a *App) drawLiveStage(r gfx.Rect) {
@@ -104,7 +117,12 @@ func (a *App) drawLiveStage(r gfx.Rect) {
 			l.preview, l.previewAt = l.stream.Preview(int(pic.W)), time.Now()
 		}
 		u.c.Image(l.preview, pic)
-		if !st.Screen {
+		switch {
+		case l.stopping:
+			caption = u.t("The stream is ending.")
+		case !st.Screen && a.rec.rec != nil && !a.rec.stopping:
+			caption = u.t("The screen being recorded is coming onto the stream…")
+		case !st.Screen:
 			caption = u.t("Nothing is being recorded, so the stream shows black. Record the screen to show it; the stream goes on meanwhile.")
 		}
 	default:
@@ -137,7 +155,7 @@ func (a *App) drawLiveStage(r gfx.Rect) {
 			col  color.RGBA
 		}
 		figures := []figure{
-			{u.tf("%d of %d destinations live", live, len(st.Targets)), col},
+			{u.tn(len(st.Targets), "%d of %d destination live", "%d of %d destinations live", live, len(st.Targets)), col},
 			{u.tf("Encoding %.1f Mb/s", st.Kbps/1000), colDim},
 			{u.t("Showing the screen being recorded"), colDim},
 		}
@@ -148,7 +166,8 @@ func (a *App) drawLiveStage(r gfx.Rect) {
 			l.lateRecent, l.lateBefore, l.lateAt = st.FrameDrops-l.lateBefore, st.FrameDrops, time.Now()
 		}
 		if fps := l.stream.Options().FPS; l.lateRecent > fps/2 {
-			figures = append(figures, figure{u.tf("%d frames late in the last few seconds: the computer cannot keep up", l.lateRecent), colWarning})
+			figures = append(figures, figure{u.tn(l.lateRecent, "%d frame late in the last few seconds: the computer cannot keep up",
+				"%d frames late in the last few seconds: the computer cannot keep up", l.lateRecent), colWarning})
 		}
 		x := in.X
 		for _, f := range figures {
@@ -200,7 +219,7 @@ func (a *App) drawLiveStage(r gfx.Rect) {
 func (a *App) drawLiveSide(r gfx.Rect) {
 	u := &a.u
 	l := &a.onAir
-	in := r.Inset(u.px(20))
+	in := r.Inset(u.px(liveSidePad))
 	draw := a.liveBody
 	foot := float32(0)
 	if l.edit != nil {

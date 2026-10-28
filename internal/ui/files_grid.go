@@ -32,8 +32,8 @@ type paneGrid struct {
 	counts    gridCounts
 	countsKey string
 
-	chipScroll float32
-	chipsW     float32
+	chipScroll float32      // how far the chips' lines are scrolled up, when there are more than show
+	barH       float32      // the filter bar's height at the last frame
 	targets    []dropTarget // the chips files can be dropped on, as drawn this frame
 	drag       []string     // the files being dragged onto a chip
 	dragMoved  bool
@@ -225,8 +225,114 @@ func (a *App) layoutGrid(p *filesPane, width float32) assetGrid {
 // gridPad is the space around a grid's cards.
 func (u *ctx) gridPad() float32 { return u.px(14) }
 
-// filterBarH is the height of the bar of chips above a grid.
-func (u *ctx) filterBarH() float32 { return u.px(42) }
+// The bar of chips above a grid: its chips wrap onto more lines as words do, up to filterLinesMax lines shown; more
+// than that scroll up and down under the wheel.
+const filterLinesMax = 3
+
+// filterChipH and filterChipGap are a chip's height and the space between chips, in points; filterBarPad is the space
+// above and below the chips.
+const (
+	filterChipH   = 28
+	filterChipGap = 6
+	filterBarPad  = 7
+)
+
+// filterChip is one chip of the bar: a filter, with how many files it lets through.
+type filterChip struct {
+	id, glyph, name string
+	hue             color.RGBA
+	count           int // -1 for a chip that counts nothing
+	chosen          bool
+	drop            func([]string) // files dropped on it, for a category or a tag
+	menu            func() []menuItem
+	pick            func()
+}
+
+// filterChips are the chips above a grid, in order.
+func (a *App) filterChips(fd *filesDoc, p *filesPane, id string) []filterChip {
+	u := &a.u
+	c := a.gridCountsOf(p)
+	lib := a.assetLibrary()
+	f := p.g.filter
+	set := func(to assetFilter) func() { return func() { a.setFilter(p, to) } }
+	chips := []filterChip{
+		{id: id + "/chip/all", name: u.t("All"), hue: colDim, count: c.all, chosen: f.what == showAll, pick: set(assetFilter{})},
+		{id: id + "/chip/untagged", glyph: icLabelOff, name: u.t("Untagged"), hue: colDim, count: c.untagged,
+			chosen: f.what == showUntagged, pick: set(assetFilter{what: showUntagged})},
+		{id: id + "/chip/uncategorized", glyph: icInbox, name: u.t("Uncategorized"), hue: colDim, count: c.uncategorized,
+			chosen: f.what == showUncategorized, pick: set(assetFilter{what: showUncategorized})},
+	}
+	for k, kind := range assets.Kinds {
+		if c.kinds[kind] == 0 {
+			continue
+		}
+		glyph, hue := kindLook(kind)
+		chips = append(chips, filterChip{id: fmt.Sprintf("%s/chip/kind/%d", id, kind), glyph: glyph, name: u.t(kindNames[k]), hue: hue,
+			count: c.kinds[kind], chosen: f.what == showKind && f.kind == kind, pick: set(assetFilter{what: showKind, kind: kind})})
+	}
+	for _, cat := range lib.Categories() {
+		name := cat.Name
+		chips = append(chips, filterChip{id: id + "/chip/category/" + name, glyph: icCategory, name: name, hue: gfx.Hex(0xe8b04b),
+			count: cat.Files, chosen: f.what == showCategory && strings.EqualFold(f.name, name),
+			drop: func(paths []string) { a.setCategory(paths, name, true) }, menu: func() []menuItem { return a.categoryMenu(fd, name) },
+			pick: set(assetFilter{what: showCategory, name: name})})
+	}
+	for _, t := range lib.Tags() {
+		name := t.Name
+		chips = append(chips, filterChip{id: id + "/chip/tag/" + name, glyph: icLabel, name: name, hue: gfx.Hex(0x7f8cff),
+			count: t.Files, chosen: f.what == showTag && strings.EqualFold(f.name, name),
+			drop: func(paths []string) { a.addTag(paths, name) }, menu: func() []menuItem { return a.tagMenu(fd, name) },
+			pick: set(assetFilter{what: showTag, name: name})})
+	}
+	return append(chips, filterChip{id: id + "/chip/new-category", glyph: icAdd, name: u.t("Category"), hue: colDim, count: -1,
+		pick: func() { fd.after = func() { a.openPrompt(fd, promptCategory) } }})
+}
+
+// label is what a chip says: its name, and how many it counts.
+func (c filterChip) label() string {
+	if c.count < 0 {
+		return c.name
+	}
+	return fmt.Sprintf("%s  %d", c.name, c.count)
+}
+
+// chipWidth is how wide a chip is drawn.
+func (u *ctx) chipWidth(c filterChip) float32 {
+	w := u.face(12).Measure(c.label()) + u.px(20)
+	if c.glyph != "" {
+		w += u.px(18)
+	}
+	return w
+}
+
+// filterStrip is the width the chips have in a bar w wide: what the search box and the size slider leave.
+func (u *ctx) filterStrip(w float32) float32 {
+	right := u.px(8)
+	if w > u.px(560) {
+		right += u.px(90) + u.px(8)
+	}
+	return max(w-right-min(u.px(200), w*0.34)-u.px(16), u.px(60))
+}
+
+// chipPlaces places chips of the widths given in lines at most w wide, as words wrap: each one's x from the line's
+// start and its line, and how many lines there are.
+func chipPlaces(widths []float32, w, gap float32) (xs []float32, lines []int, n int) {
+	x, line := float32(0), 0
+	for _, cw := range widths {
+		if x > 0 && x+cw > w {
+			x, line = 0, line+1
+		}
+		xs, lines = append(xs, x), append(lines, line)
+		x += cw + gap
+	}
+	return xs, lines, line + 1
+}
+
+// filterBarHeight is the height of the bar for chips on n lines.
+func (u *ctx) filterBarHeight(n int) float32 {
+	shown := float32(min(max(n, 1), filterLinesMax))
+	return u.px(2*filterBarPad + shown*filterChipH + (shown-1)*filterChipGap)
+}
 
 // drawGrid draws a list as a grid: the chips that filter it and the search above, the cards under them.
 func (a *App) drawGrid(fd *filesDoc, i int, p *filesPane, id string, body gfx.Rect, moved bool) {
@@ -234,25 +340,32 @@ func (a *App) drawGrid(fd *filesDoc, i int, p *filesPane, id string, body gfx.Re
 	if p.g.arranged != a.filterKey(p) {
 		a.arrange(p) // a tag or category changed what the filter lets through
 	}
-	bar := gfx.Rect{X: body.X, Y: body.Y, W: body.W, H: u.filterBarH()}
+	chips := a.filterChips(fd, p, id)
+	widths := make([]float32, len(chips))
+	for k, c := range chips {
+		widths[k] = u.chipWidth(c)
+	}
+	xs, lines, n := chipPlaces(widths, u.filterStrip(body.W), u.px(filterChipGap))
+	bar := gfx.Rect{X: body.X, Y: body.Y, W: body.W, H: u.filterBarHeight(n)}
+	p.g.barH = bar.H
 	grid := gfx.Rect{X: body.X, Y: bar.Bottom(), W: body.W, H: body.H - bar.H}
 	p.g.targets = p.g.targets[:0]
 	a.drawGridCards(fd, i, p, id, grid, moved)
-	a.drawFilterBar(fd, p, id, bar)
+	a.drawFilterBar(p, id, bar, chips, widths, xs, lines, n)
 	a.drawGridDrag(p, id)
 }
 
-// drawFilterBar draws the chips that filter the grid, each with how many files it shows, a box to search names
-// and tags, and how large the pictures are. The chips scroll sideways with the wheel when they do not all fit.
-func (a *App) drawFilterBar(fd *filesDoc, p *filesPane, id string, r gfx.Rect) {
+// drawFilterBar draws the chips that filter the grid, each with how many files it shows, placed in lines by
+// drawGrid; a box to search names and tags; and how large the pictures are.
+func (a *App) drawFilterBar(p *filesPane, id string, r gfx.Rect, chips []filterChip, widths, xs []float32, lines []int, n int) {
 	u := &a.u
 	u.c.Fill(r, colPanel)
 	u.c.Fill(gfx.Rect{X: r.X, Y: r.Bottom() - max(1, u.px(1)), W: r.W, H: max(1, u.px(1))}, colBorder)
-	y := r.Y + (r.H-u.px(28))/2
+	y := r.Y + u.px(filterBarPad)
 	right := r.Right() - u.px(8)
 	if r.W > u.px(560) {
 		sw := u.px(90)
-		sr := gfx.Rect{X: right - sw, Y: y, W: sw, H: u.px(28)}
+		sr := gfx.Rect{X: right - sw, Y: y, W: sw, H: u.px(filterChipH)}
 		if changed, _ := u.slider(id+"/size", sr, &p.g.size, gridSizeMin, gridSizeMax, true); changed {
 			p.g.layoutKey = ""
 		}
@@ -260,121 +373,84 @@ func (a *App) drawFilterBar(fd *filesDoc, p *filesPane, id string, r gfx.Rect) {
 		right = sr.X - u.px(8)
 	}
 	searchW := min(u.px(200), r.W*0.34)
-	search := gfx.Rect{X: right - searchW, Y: y, W: searchW, H: u.px(28)}
+	search := gfx.Rect{X: right - searchW, Y: y, W: searchW, H: u.px(filterChipH)}
 	if changed, _ := u.textBox(filterBoxID(p), search, &p.g.search, withKey(u.t("Search names and tags"), a.fileKeyHint("filter")), false); changed {
 		p.g.scroll = 0
 		a.arrange(p)
 	}
-	strip := gfx.Rect{X: r.X + u.px(8), Y: r.Y, W: search.X - u.px(8) - r.X - u.px(8), H: r.H}
-	if u.hover(id+"/chips", strip) && u.wheel != 0 && !u.blocked {
-		p.g.chipScroll -= u.wheel * u.px(60)
+
+	// The lines of chips, scrolled up and down by the wheel when there are more than show.
+	line := u.px(filterChipH + filterChipGap)
+	strip := gfx.Rect{X: r.X + u.px(8), Y: y, W: u.filterStrip(r.W), H: r.H - 2*u.px(filterBarPad)}
+	hidden := float32(max(n-filterLinesMax, 0)) * line
+	if hidden > 0 && u.hover(id+"/chips", strip) && u.wheel != 0 && !u.blocked {
+		p.g.chipScroll -= u.wheel * line
 		u.wheel = 0
 	}
-	p.g.chipScroll = min(max(p.g.chipScroll, 0), max(p.g.chipsW-strip.W, 0))
-
-	c := a.gridCountsOf(p)
-	lib := a.assetLibrary()
+	p.g.chipScroll = min(max(p.g.chipScroll, 0), hidden)
 	u.c.Push(strip)
-	x := strip.X - p.g.chipScroll
-	chip := func(cid, glyph string, hue color.RGBA, name string, count int, chosen bool, drop func([]string), menu func() []menuItem) bool {
-		f := u.face(12)
-		label := name
-		if count >= 0 {
-			label = fmt.Sprintf("%s  %d", name, count)
-		}
-		w := f.Measure(label) + u.px(20)
-		if glyph != "" {
-			w += u.px(18)
-		}
-		cr := gfx.Rect{X: x, Y: y, W: w, H: u.px(28)}
-		x += w + u.px(6)
-		if cr.Right() < strip.X || cr.X > strip.Right() {
-			return false
-		}
-		visible := intersect(cr, strip)
-		hot := u.hover(cid, visible)
-		if drop != nil {
-			p.g.targets = append(p.g.targets, dropTarget{id: cid, name: name, rect: visible})
-		}
-		target := drop != nil && len(p.g.drag) > 0 && p.g.dragMoved && visible.Contains(u.mx, u.my)
-		bg, fg := colSurface, colDim
-		switch {
-		case target:
-			bg, fg = gfx.Mix(colSurface, colAccent, 0.35), colText
-		case chosen:
-			bg, fg = colSelected, colText
-		case hot:
-			bg, fg = colSurfaceHi, colText
-			u.cursor = CursorHand
-		}
-		u.c.Fill(cr, bg)
-		if chosen || target {
-			u.c.Outline(cr, u.px(1.2), colAccent)
-		}
-		tx := cr.X + u.px(10)
-		if glyph != "" {
-			u.icon(glyph, gfx.Rect{X: tx - u.px(2), Y: cr.Y, W: u.px(18), H: cr.H}, 11, hue)
-			tx += u.px(18)
-		}
-		u.c.Text(f, tx, cr.Y+(cr.H-f.Height())/2, label, fg)
-		if target && u.letGo(id+"/drag") {
-			drop(p.g.drag)
-			p.g.drag = nil
-		}
-		if menu != nil && u.rightAt != nil && visible.Contains(u.rightAt.X, u.rightAt.Y) && !u.blocked {
-			a.openMenu(cid+"/menu", gfx.Rect{X: u.rightAt.X, Y: u.rightAt.Y, W: 1, H: 1}, menu())
-			u.rightAt = nil
-		}
-		return u.clicked(cid, visible)
-	}
-	f := p.g.filter
-	if chip(id+"/chip/all", "", colDim, u.t("All"), c.all, f.what == showAll, nil, nil) {
-		a.setFilter(p, assetFilter{})
-	}
-	if chip(id+"/chip/untagged", icLabelOff, colDim, u.t("Untagged"), c.untagged, f.what == showUntagged, nil, nil) {
-		a.setFilter(p, assetFilter{what: showUntagged})
-	}
-	if chip(id+"/chip/uncategorized", icInbox, colDim, u.t("Uncategorized"), c.uncategorized, f.what == showUncategorized, nil, nil) {
-		a.setFilter(p, assetFilter{what: showUncategorized})
-	}
-	for k, kind := range assets.Kinds {
-		if c.kinds[kind] == 0 {
+	for k, c := range chips {
+		cr := gfx.Rect{X: strip.X + xs[k], Y: strip.Y + float32(lines[k])*line - p.g.chipScroll, W: widths[k], H: u.px(filterChipH)}
+		if cr.Bottom() < strip.Y || cr.Y > strip.Bottom() {
 			continue
 		}
-		glyph, hue := kindLook(kind)
-		if chip(fmt.Sprintf("%s/chip/kind/%d", id, kind), glyph, hue, u.t(kindNames[k]), c.kinds[kind], f.what == showKind && f.kind == kind, nil, nil) {
-			a.setFilter(p, assetFilter{what: showKind, kind: kind})
+		if a.drawFilterChip(p, id, strip, cr, c) {
+			c.pick()
+		}
+		if c.count < 0 {
+			u.hint(c.id, u.t("New category: drag files onto it to put them in"), intersect(cr, strip))
 		}
 	}
-	for _, cat := range lib.Categories() {
-		name := cat.Name
-		if chip(id+"/chip/category/"+name, icCategory, gfx.Hex(0xe8b04b), name, cat.Files, f.what == showCategory && strings.EqualFold(f.name, name),
-			func(paths []string) { a.setCategory(paths, name, true) }, func() []menuItem { return a.categoryMenu(fd, name) }) {
-			a.setFilter(p, assetFilter{what: showCategory, name: name})
-		}
-	}
-	for _, t := range lib.Tags() {
-		name := t.Name
-		if chip(id+"/chip/tag/"+name, icLabel, gfx.Hex(0x7f8cff), name, t.Files, f.what == showTag && strings.EqualFold(f.name, name),
-			func(paths []string) { a.addTag(paths, name) }, func() []menuItem { return a.tagMenu(fd, name) }) {
-			a.setFilter(p, assetFilter{what: showTag, name: name})
-		}
-	}
-	if chip(id+"/chip/new-category", icAdd, colDim, u.t("Category"), -1, false, nil, nil) {
-		fd.after = func() { a.openPrompt(fd, promptCategory) }
-	}
-	u.hint(id+"/chip/new-category", u.t("New category: drag files onto it to put them in"), gfx.Rect{X: x - u.px(100), Y: y, W: u.px(100), H: u.px(28)})
-	p.g.chipsW = x + p.g.chipScroll - strip.X
 	u.c.Pop()
-	if p.g.chipsW > strip.W {
-		// A fade at the edge where more chips are hidden.
-		if p.g.chipScroll < p.g.chipsW-strip.W {
-			u.c.Fill(gfx.Rect{X: strip.Right() - u.px(2), Y: r.Y + u.px(8), W: u.px(2), H: r.H - u.px(16)}, colBorderHi)
-		}
-		if p.g.chipScroll > 0 {
-			u.c.Fill(gfx.Rect{X: strip.X, Y: r.Y + u.px(8), W: u.px(2), H: r.H - u.px(16)}, colBorderHi)
-		}
+	// A line at the edge where more chips are hidden.
+	if p.g.chipScroll < hidden {
+		u.c.Fill(gfx.Rect{X: strip.X, Y: strip.Bottom() - u.px(1), W: strip.W, H: u.px(2)}, colBorderHi)
 	}
+	if p.g.chipScroll > 0 {
+		u.c.Fill(gfx.Rect{X: strip.X, Y: strip.Y - u.px(1), W: strip.W, H: u.px(2)}, colBorderHi)
+	}
+}
+
+// drawFilterChip draws a chip at cr, cut to the strip, as a target for dragged files when it takes them; it reports
+// a click on it.
+func (a *App) drawFilterChip(p *filesPane, id string, strip, cr gfx.Rect, c filterChip) bool {
+	u := &a.u
+	visible := intersect(cr, strip)
+	hot := u.hover(c.id, visible)
+	if c.drop != nil {
+		p.g.targets = append(p.g.targets, dropTarget{id: c.id, name: c.name, rect: visible})
+	}
+	target := c.drop != nil && len(p.g.drag) > 0 && p.g.dragMoved && visible.Contains(u.mx, u.my)
+	bg, fg := colSurface, colDim
+	switch {
+	case target:
+		bg, fg = gfx.Mix(colSurface, colAccent, 0.35), colText
+	case c.chosen:
+		bg, fg = colSelected, colText
+	case hot:
+		bg, fg = colSurfaceHi, colText
+		u.cursor = CursorHand
+	}
+	u.c.Fill(cr, bg)
+	if c.chosen || target {
+		u.c.Outline(cr, u.px(1.2), colAccent)
+	}
+	f := u.face(12)
+	tx := cr.X + u.px(10)
+	if c.glyph != "" {
+		u.icon(c.glyph, gfx.Rect{X: tx - u.px(2), Y: cr.Y, W: u.px(18), H: cr.H}, 11, c.hue)
+		tx += u.px(18)
+	}
+	u.c.Text(f, tx, cr.Y+(cr.H-f.Height())/2, c.label(), fg)
+	if target && u.letGo(id+"/drag") {
+		c.drop(p.g.drag)
+		p.g.drag = nil
+	}
+	if c.menu != nil && u.rightAt != nil && visible.Contains(u.rightAt.X, u.rightAt.Y) && !u.blocked {
+		a.openMenu(c.id+"/menu", gfx.Rect{X: u.rightAt.X, Y: u.rightAt.Y, W: 1, H: 1}, c.menu())
+		u.rightAt = nil
+	}
+	return u.clicked(c.id, visible)
 }
 
 // filterBoxID is the id of a grid's search box.

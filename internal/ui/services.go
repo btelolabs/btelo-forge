@@ -13,10 +13,12 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/web"
 )
 
-// The services listen on these ports, or the next free one within a few.
-const (
+// The services listen on these ports, or the next free one within a few; the phone page on every network the
+// computer is on. Tests change them, so as never to take a running app's ports or show a page to the network.
+var (
 	mcpPort   = 38471
 	phonePort = 38481
+	phoneHost = "0.0.0.0"
 )
 
 // services are the local MCP endpoint for AI tools and the page phones download exports from.
@@ -29,13 +31,14 @@ type services struct {
 	phoneErr error
 }
 
-// listen opens host:port, or one of the next ports when it is taken.
+// listen opens host:port, or one of the next ports when it is taken, and returns the port it has; port 0 is one of
+// the system's choosing.
 func listen(host string, port int) (net.Listener, int, error) {
 	var err error
 	for p := port; p < port+10; p++ {
 		var l net.Listener
 		if l, err = net.Listen("tcp", fmt.Sprintf("%s:%d", host, p)); err == nil {
-			return l, p, nil
+			return l, l.Addr().(*net.TCPAddr).Port, nil
 		}
 	}
 	return nil, 0, err
@@ -75,7 +78,7 @@ func (a *App) applyServices() {
 			a.settings.PhoneKey = newKey()
 			a.saveSettings()
 		}
-		l, port, err := listen("0.0.0.0", phonePort)
+		l, port, err := listen(phoneHost, phonePort)
 		s.phoneErr = err
 		if err == nil {
 			key := a.settings.PhoneKey

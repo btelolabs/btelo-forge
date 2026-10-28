@@ -45,13 +45,6 @@ func TestReadmeScreens(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		title := x.a.p.Overlays[0].Items[0].ID
-		x.a.selectOnly(selection{kind: selOverlay, id: title})
-		x.a.tab = tabOverlays
-		x.a.seek(2.2)
-		x.settle(30 * time.Second)
-		save("editor")
-
 		var lines []int
 		for _, o := range x.a.p.Overlays[1].Items {
 			lines = append(lines, o.ID)

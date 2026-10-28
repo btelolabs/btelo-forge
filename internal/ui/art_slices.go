@@ -111,9 +111,9 @@ func (a *App) exportSlices(ad *artDoc) {
 				a.toast(u.tf("Export failed: %s", a.describe(err)), true)
 				return
 			}
-			msg := u.tf("Exported %d slices to %s", len(outs), base)
+			msg := u.tn(len(outs), "Exported %d slice to %s", "Exported %d slices to %s", len(outs), base)
 			if kept > 0 {
-				msg += " · " + u.tf("%d files replaced, the old ones kept in %s", kept, filepath.Join(sliceBackups, stamp))
+				msg += " · " + u.tn(kept, "%d file replaced, the old one kept in %s", "%d files replaced, the old ones kept in %s", kept, filepath.Join(sliceBackups, stamp))
 			}
 			if len(empty) > 0 {
 				msg += " · " + u.tf("Left out, showing nothing: %s", strings.Join(empty, ", "))

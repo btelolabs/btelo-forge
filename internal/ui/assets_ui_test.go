@@ -125,7 +125,7 @@ func (x *harness) cardOf(name string) gfx.Rect {
 			body := x.a.layout().body
 			pad := u.gridPad()
 			cr := p.g.layout.cards[k]
-			return gfx.Rect{X: body.X + pad + cr.X, Y: body.Y + u.px(38) + u.filterBarH() + pad + cr.Y - p.g.scroll,
+			return gfx.Rect{X: body.X + pad + cr.X, Y: body.Y + u.px(38) + p.g.barH + pad + cr.Y - p.g.scroll,
 				W: cr.W, H: cr.H - u.assetLabelH()}
 		}
 	}
@@ -312,7 +312,7 @@ func TestGridBrowsesTagsAndActsOnHover(t *testing.T) {
 		t.Fatalf("q again: grid %v, on %s", p.grid, p.current().Name)
 	}
 
-	// A double click on the folder goes in; h comes out onto it.
+	// A double click on the folder goes in; Backspace comes out onto it (h, in pictures, is the picture before).
 	x.frame(Input{})
 	sub := x.cardOf("sub folder")
 	x.mx, x.my = sub.X+sub.W/2, sub.Y+sub.H/2
@@ -324,7 +324,7 @@ func TestGridBrowsesTagsAndActsOnHover(t *testing.T) {
 		t.Fatalf("in %s", p.dir)
 	}
 	x.mx, x.my = 5, 300
-	x.press('H', "")
+	x.press(keyBack, "")
 	x.waitFiles()
 	if p.dir != filepath.Clean(dir) || p.current() == nil || p.current().Name != "sub folder" {
 		t.Fatalf("back in %s on %v", p.dir, p.current())

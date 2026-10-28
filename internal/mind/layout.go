@@ -4,6 +4,7 @@ import (
 	"math"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // The layout. Each node's box is measured from its content and look; a tree node's place is an offset from its
@@ -55,6 +56,10 @@ type place struct {
 	cells   []string   // a table's cells as shown: formulas worked out
 	cellLn  [][]string // and wrapped
 
+	task   Rect // where a task's box or ring is, in the box
+	tasks  int  // the tasks at the ends of its subtree (itself, when it has none under it) and how many are done
+	done   int
+	under  bool   // tasks are counted under it: it shows a ring of their progress rather than a box
 	rel    Vec    // the box's top-left from its parent's
 	sub    Rect   // the subtree's box from its own top-left
 	dir    Layout // which way its children grow
@@ -72,10 +77,19 @@ type layoutState struct {
 	regions    []Rect // areas whose drawing changed, on the board
 	everything bool   // too many to list: all of it
 	wrap       wrapCache
+	budget     time.Duration // how long a frame may spend routing connectors round the nodes; 0 is no bound
+	spent      time.Duration // spent so far in this frame, by every layout in it
+	routing    bool          // connectors are still being routed
+	// The connectors to look at again besides those running through the areas that changed: those changed
+	// themselves, those not shown (an end hidden), whose ends may show again, and those still being routed.
+	edgeDirty   map[EdgeID]bool
+	edgeOff     map[EdgeID]bool
+	edgePending map[EdgeID]bool
 }
 
 func (l *layoutState) init() {
 	l.roots, l.gone = map[ID]bool{}, map[ID]bool{}
+	l.edgeDirty, l.edgeOff, l.edgePending = map[EdgeID]bool{}, map[EdgeID]bool{}, map[EdgeID]bool{}
 	l.regions, l.everything = nil, true
 }
 
@@ -124,6 +138,7 @@ func (m *Map) forgetArea(n *Node) {
 // Changed returns the areas of the board whose drawing changed since it was last called, or all = true when the
 // whole board may have; it lays the map out first.
 func (m *Map) Changed() (regions []Rect, all bool) {
+	m.lay.spent = 0 // a frame begins: its routing budget is whole again
 	m.Layout()
 	regions, all = m.lay.regions, m.lay.everything
 	m.lay.regions, m.lay.everything = nil, false
@@ -136,6 +151,7 @@ func (m *Map) Layout() {
 	if len(l.roots) == 0 && len(l.gone) == 0 && !l.all && !l.edgesStale {
 		return
 	}
+	start := len(l.regions)
 	for id := range l.gone {
 		m.grid.remove(id)
 	}
@@ -181,7 +197,11 @@ func (m *Map) Layout() {
 		}
 	}
 	l.roots = map[ID]bool{}
-	m.layEdges()
+	if l.everything {
+		m.layEdges(nil, true)
+	} else {
+		m.layEdges(l.regions[start:], false)
+	}
 }
 
 // layNode lays out n's subtree, n being at depth on main branch branch, its children growing in direction dir, its
@@ -221,6 +241,7 @@ func (m *Map) stack(n *Node, at Vec) {
 	p := &n.lay
 	p.stacks[0], p.stacks[1] = p.stacks[0][:0], p.stacks[1][:0]
 	own := R(0, 0, p.w, p.h)
+	defer m.countTasks(n, at)
 	if n.Folded || len(n.Children) == 0 {
 		p.sub = own
 		if n.Folded && len(n.Children) > 0 {
@@ -424,7 +445,7 @@ func inAnchor(n *Node, dir Layout) Vec {
 // measureNode works out n's look and the size of its box.
 func (m *Map) measureNode(n *Node) {
 	p := &n.lay
-	lk := lookOf(n, p.depth, p.branch, p.dir)
+	lk := lookOf(n, p.depth, p.branch, p.dir, m.Theme())
 	p.lk = lk
 	p.lineH = m.measure.LineHeight(lk.size)
 	p.text, p.media, p.caption = Rect{}, Rect{}, Rect{}
@@ -475,6 +496,14 @@ func (m *Map) measureTopic(n *Node) {
 		cw, _ := shapeRoom(lk.shape, 100, 10)
 		limit = math.Max(16, (n.W-2*lk.padX)*100/cw)
 	}
+	// A task's box or ring stands before its words.
+	icon, gap := 0.0, 0.0
+	if n.Task {
+		icon, gap = math.Round(float64(lk.size)*1.05), math.Round(float64(lk.size)*0.45)
+		if n.W > 0 {
+			limit = math.Max(16, limit-icon-gap)
+		}
+	}
 	p.lines = m.wrap(n.Text, lk.size, lk.bold, limit)
 	tw := m.widest(p.lines, lk.size, lk.bold)
 	th := float64(max(len(p.lines), 1)) * p.lineH
@@ -483,6 +512,8 @@ func (m *Map) measureTopic(n *Node) {
 	} else {
 		tw = math.Max(tw, float64(lk.size)*2)
 	}
+	th = math.Max(th, icon)
+	tw += icon + gap
 	sw, sh := shapeRoom(lk.shape, tw+2*lk.padX, th+2*lk.padY)
 	p.w, p.h = sw, sh
 	if n.W > 0 {
@@ -502,6 +533,13 @@ func (m *Map) measureTopic(n *Node) {
 	if lk.shape == ShapeUnderline {
 		p.text = R(left, lk.padY, tw, th)
 		p.h = th + 2*lk.padY + lk.lineW
+	}
+	p.task = Rect{}
+	if n.Task {
+		// The box sits by the first line; the words move along to make room for it.
+		first := math.Min(p.lineH, p.text.H())
+		p.task = R(p.text.X0, p.text.Y0+(first-icon)/2, icon, icon)
+		p.text.X0 += icon + gap
 	}
 }
 
@@ -724,4 +762,65 @@ func (m *Map) Look(n *Node) (shape Shape, fill, line, ink [4]uint8, size float32
 	c := func(v [4]uint8) [4]uint8 { return v }
 	return lk.shape, c([4]uint8{lk.fill.R, lk.fill.G, lk.fill.B, lk.fill.A}), c([4]uint8{lk.line.R, lk.line.G, lk.line.B, lk.line.A}),
 		c([4]uint8{lk.ink.R, lk.ink.G, lk.ink.B, lk.ink.A}), lk.size
+}
+
+// countTasks works out how many tasks lie at the ends of n's subtree and how many of them are done, from its
+// children's counts, which are laid out before it (a folded node's are counted afresh); when they changed, n's box,
+// which shows them, is drawn again.
+func (m *Map) countTasks(n *Node, at Vec) {
+	p := &n.lay
+	tasks, done := 0, 0
+	for _, id := range n.Children {
+		c := m.nodes[id]
+		if n.Folded {
+			t, d := m.subtreeTasks(c)
+			tasks, done = tasks+t, done+d
+			continue
+		}
+		tasks, done = tasks+c.lay.tasks, done+c.lay.done
+	}
+	under := tasks > 0
+	if tasks == 0 && n.Task {
+		tasks = 1
+		if n.Done {
+			done = 1
+		}
+	}
+	if tasks != p.tasks || done != p.done || under != p.under {
+		p.tasks, p.done, p.under = tasks, done, under
+		if n.Task {
+			m.lay.region(R(0, 0, p.w, p.h).Add(at))
+		}
+	}
+}
+
+// subtreeTasks counts the tasks at the ends of n's subtree and how many are done, reading every node in it.
+func (m *Map) subtreeTasks(n *Node) (tasks, done int) {
+	for _, id := range n.Children {
+		t, d := m.subtreeTasks(m.nodes[id])
+		tasks, done = tasks+t, done+d
+	}
+	if tasks == 0 && n.Task {
+		tasks = 1
+		if n.Done {
+			done = 1
+		}
+	}
+	return tasks, done
+}
+
+// Progress is how many of the tasks at the ends of n's subtree are done, and how many there are: for a task with
+// none under it, 1 of 1 or 0 of 1.
+func (m *Map) Progress(n *Node) (done, tasks int) {
+	m.Layout()
+	return n.lay.done, n.lay.tasks
+}
+
+// TaskBox is where a task's box or ring is on the board, and ok when n is a task.
+func (m *Map) TaskBox(n *Node) (Rect, bool) {
+	m.Layout()
+	if !n.Task || n.Kind != Topic {
+		return Rect{}, false
+	}
+	return n.lay.task.Add(m.Pos(n)), true
 }

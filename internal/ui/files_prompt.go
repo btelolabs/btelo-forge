@@ -85,9 +85,7 @@ func (a *App) openPrompt(fd *filesDoc, kind promptKind) {
 		pr.pick = -1
 	}
 	fd.prompt = pr
-	u.setFocus(promptID)
-	u.edit = editor{text: []rune(pr.text)}
-	u.edit.caret = len(u.edit.text)
+	u.beginEdit(promptID, pr.text, false, utf8.RuneCountInString(pr.text), utf8.RuneCountInString(pr.text))
 	if kind == promptRename {
 		// The name is chosen without its extension, as Explorer does, so typing replaces just the name.
 		stem := strings.TrimSuffix(pr.text, filepath.Ext(pr.text))
