@@ -40,10 +40,12 @@ type Input struct {
 	Keys     []KeyEvent
 	Typed    []rune
 	Dropped  []string
+	Hotkeys  []int // indexes, in the list given to SetHotkeys, of the hotkeys pressed
 	Woken    bool
-	Inactive bool
+	Inactive bool // the window does not have the keyboard focus
 	Ctrl     bool
 	Shift    bool
+	Alt      bool
 }
 
 var (
@@ -122,7 +124,8 @@ func (w *Window) key(msg uint32, wp uintptr) bool {
 	if vk == 0x12 || vk == 0x10 || vk == 0x11 { // Alt, Shift, Ctrl alone
 		return msg == 0x0100
 	}
-	alt := msg == 0x0104
+	// WM_SYSKEYDOWN also comes for F10 alone, so Alt is read from the keyboard.
+	alt := held(0x12)
 	if alt && vk == 0x73 { // Alt+F4 stays with the system
 		return false
 	}

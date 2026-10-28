@@ -96,7 +96,7 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 	}
 	if u.press(id, r) {
 		if !focused {
-			u.focus, focused = id, true
+			u.focus, u.focusDrawn, focused = id, true, true
 			u.edit = editor{text: []rune(*value), multiline: true}
 		}
 		u.edit.caret = pos(u.pressX, u.pressY)

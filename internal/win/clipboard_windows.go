@@ -217,3 +217,82 @@ func (w *Window) ChooseFolder(title string) string {
 	}
 	return syscall.UTF16ToString(path)
 }
+
+// globalBytes copies data into memory the clipboard can own.
+func globalBytes(data []byte) (uintptr, error) {
+	const moveable = 0x0002
+	h, _, e := globalAlloc.Call(moveable, uintptr(len(data)))
+	if h == 0 {
+		return 0, e
+	}
+	p, _, _ := globalLock.Call(h)
+	if p == 0 {
+		globalFree.Call(h)
+		return 0, errors.New("clipboard memory lock failed")
+	}
+	moveMemory.Call(p, uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)))
+	globalUnlock.Call(h)
+	return h, nil
+}
+
+// SetClipboardImage puts a picture on the clipboard twice: as PNG, which keeps transparency for the programs that
+// read it (Photoshop, Office, browsers), and as a bitmap over white for the ones that do not.
+func (w *Window) SetClipboardImage(img image.Image) error {
+	var pngData bytes.Buffer
+	if err := png.Encode(&pngData, img); err != nil {
+		return err
+	}
+	b := img.Bounds()
+	width, height := b.Dx(), b.Dy()
+	if width == 0 || height == 0 {
+		return errors.New("the picture is empty")
+	}
+	// A BITMAPINFOHEADER and 32-bit rows from the bottom up, in BGRX order.
+	dib := make([]byte, 40+width*height*4)
+	binary.LittleEndian.PutUint32(dib[0:], 40)
+	binary.LittleEndian.PutUint32(dib[4:], uint32(width))
+	binary.LittleEndian.PutUint32(dib[8:], uint32(height))
+	binary.LittleEndian.PutUint16(dib[12:], 1)
+	binary.LittleEndian.PutUint16(dib[14:], 32)
+	binary.LittleEndian.PutUint32(dib[20:], uint32(width*height*4))
+	for y := 0; y < height; y++ {
+		row := dib[40+(height-1-y)*width*4:]
+		for x := 0; x < width; x++ {
+			r, g, bl, a := img.At(b.Min.X+x, b.Min.Y+y).RGBA() // premultiplied, 16 bits
+			white := 0xffff - a
+			row[x*4] = uint8((bl + white) >> 8)
+			row[x*4+1] = uint8((g + white) >> 8)
+			row[x*4+2] = uint8((r + white) >> 8)
+			row[x*4+3] = 0xff
+		}
+	}
+	name, _ := syscall.UTF16PtrFromString("PNG")
+	pngFormat, _, _ := registerFormat.Call(uintptr(unsafe.Pointer(name)))
+	hPNG, err := globalBytes(pngData.Bytes())
+	if err != nil {
+		return err
+	}
+	hDIB, err := globalBytes(dib)
+	if err != nil {
+		globalFree.Call(hPNG)
+		return err
+	}
+	if r, _, _ := openClipboard.Call(w.Handle); r == 0 {
+		globalFree.Call(hPNG)
+		globalFree.Call(hDIB)
+		return errors.New("clipboard busy")
+	}
+	defer closeClipboard.Call()
+	emptyClipboard.Call()
+	// Once set, the clipboard owns the memory; what it refused is freed here.
+	if pngFormat == 0 {
+		globalFree.Call(hPNG)
+	} else if r, _, _ := setClipboardData.Call(pngFormat, hPNG); r == 0 {
+		globalFree.Call(hPNG)
+	}
+	if r, _, e := setClipboardData.Call(cfDIB, hDIB); r == 0 {
+		globalFree.Call(hDIB)
+		return e
+	}
+	return nil
+}

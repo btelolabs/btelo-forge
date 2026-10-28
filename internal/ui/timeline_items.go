@@ -349,10 +349,11 @@ func (a *App) drawOverlayItems(t tracks) {
 			id := o.ID
 			selected := a.isPicked(id)
 			hot := u.hover(fmt.Sprintf("ov/%d", id), r)
-			bg, hi, glyph, label := colCaption, colCaptionHi, icFont, firstLine(o.Body)
+			bg, hi := colCaption, colCaptionHi
 			if o.Kind == project.ImageOverlay {
-				bg, hi, glyph, label = colImage, colImageHi, icImage, baseName(o.Image)
+				bg, hi = colImage, colImageHi
 			}
+			glyph, label := overlayLook(o)
 			if hot || selected {
 				bg = hi
 			}

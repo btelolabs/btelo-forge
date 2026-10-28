@@ -21,6 +21,21 @@
 - Box-select or Ctrl-click several items, then delete them or set their volume and opacity together.
 - Preview and export use the same filter graph, so the export matches what you saw.
 
+**Screen recording** (Windows)
+- Records a screen with the computer's sound and a microphone, the way OBS Studio does: Desktop Duplication hands frames straight to the graphics card's encoder (NVIDIA NVENC, AMD AMF or Media Foundation), so recording a 3440×1440 screen at 60 fps takes about 3% of one processor core.
+- Pause and resume, Ctrl+Shift+F9 to stop from anywhere, and the editor window can keep itself out of the picture.
+- Recordings are saved in the export folder (or your Videos folder) and open in a tab, ready to cut.
+- Screenshots of a screen or a dragged region, and drawing on the screen itself, with or without recording.
+
+**Painting**
+- A layered canvas in the manner of Photoshop: brushes and eraser with hardness, flow, smoothing and tip shape; marquee, lasso and magic wand selections; layers with groups, masks, 26 blend modes and lock transparency.
+- Free Transform with skew, distort, perspective and warp, crop, image and canvas size, flips and rotations; paint bucket, gradients, shapes, clone stamp and editable text layers.
+- Retouching brushes (dodge, burn, sponge, blur, sharpen, smudge), adjustment layers with masks, and layer styles (drop and inner shadow, outer and inner glow, stroke, colour overlay).
+- Adjustments (levels, curves, hue/saturation and more) and filters (Gaussian blur, unsharp mask, noise, mosaic) with live previews, and a History panel.
+- Vectors in the manner of Affinity Designer: shapes (rectangle, ellipse, polygon, star, line), the pen, a pencil that fits smooth curves, a node tool for nodes and handles, booleans (add, subtract, intersect, exclude), snapping, and fill and stroke settings (width, alignment, caps, joins, dashes). Vectors stay sharp at any zoom and in export.
+- An infinite canvas with no size to choose first, and artboards: fixed-size areas exported as pictures of their own.
+- Open a screenshot as a canvas, or draw over the video as an overlay: the drawing follows every save of its canvas.
+
 **Compression**
 - Presets from *High quality* to *Extreme compression*, plus *Fit a size*, which aims for a file of a chosen size using two-pass encoding.
 - Every setting is open: resolution, frame rate, H.264 / H.265 / AV1, five quality steps, encoder speed and audio bitrate.
@@ -32,7 +47,8 @@
 - Speech recognised on your machine with whisper.cpp. Six models, CPU or CUDA. Subtitles land on their own track, ready to edit.
 
 **Beyond the window**
-- A built-in MCP server lets Claude, Codex, Cursor or any MCP client open, cut, caption, score and export videos. Every feature has a tool.
+- A built-in MCP server lets Claude, Codex, Cursor or any MCP client edit videos, draw on canvases and record the screen. Every feature has a tool, and each kind of work has its own server and setup to copy, so an AI hears only about the tools it needs.
+- Keyboard shortcuts are chosen in Settings for each kind of work on its own: general, video editing, drawing and recording.
 - Your phone can play and download exports, and upload clips back to the computer, over the local network with a private link.
 - Music sites, speech models and the ffmpeg download source are plain JSON, editable in Settings or by an AI.
 
@@ -67,6 +83,9 @@ Requires Go 1.27. Windows needs nothing else; macOS needs the Xcode command-line
 go build ./cmd/btelo-video-cut
 go test ./...
 ```
+
+On Windows, `scripts\dev.ps1` builds the working tree and opens it; `-InstallShortcut` puts a desktop shortcut
+that does the same, so a change can be tried with a double-click.
 
 Pure Go on Windows (Win32, no cgo) and Cocoa on macOS. The interface is drawn in software, and ffmpeg does all
 media work.

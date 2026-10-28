@@ -95,6 +95,7 @@ type Overlay struct {
 	Outline bool
 	Box     bool
 	Image   string
+	Canvas  string  `json:",omitempty"` // for a drawing: the layered canvas file the image is exported from
 	Aspect  float64 // image width over height
 	Opacity float64 // 1 is solid
 }

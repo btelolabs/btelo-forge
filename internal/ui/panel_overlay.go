@@ -47,20 +47,25 @@ func (a *App) drawPanel(r gfx.Rect) {
 	}
 }
 
-// scrolled draws content that may be taller than r, scrolled by the wheel and clipped to r, with a scroll bar.
+// scrolled draws the side panel's content, which may be taller than r.
 func (a *App) scrolled(r gfx.Rect, draw func(gfx.Rect) float32) {
+	a.scrolledBy("panel/scroll", r, &a.panelScroll[a.tab], &a.panelContent[a.tab], draw)
+}
+
+// scrolledBy draws content that may be taller than r, scrolled by the wheel and clipped to r, with a scroll bar;
+// offset is how far it is scrolled and content its height at the last frame.
+func (a *App) scrolledBy(id string, r gfx.Rect, offset, contentH *float32, draw func(gfx.Rect) float32) {
 	u := &a.u
-	offset := &a.panelScroll[a.tab]
-	// Clamp to the content height of the last frame first, so a shorter panel never shows an empty view.
-	if last := a.panelContent[a.tab]; last > 0 {
+	// Clamp to the content height of the last frame first, so shorter content never shows an empty view.
+	if last := *contentH; last > 0 {
 		*offset = min(max(*offset, 0), max(last-r.H, 0))
 	}
 	u.c.Push(r)
 	bottom := draw(gfx.Rect{X: r.X, Y: r.Y - *offset, W: r.W - u.px(8), H: r.H + *offset})
 	u.c.Pop()
 	content := bottom + *offset - r.Y + u.px(12)
-	a.panelContent[a.tab] = content
-	if u.hover("panel/scroll", r) && u.wheel != 0 {
+	*contentH = content
+	if u.hover(id, r) && u.wheel != 0 {
 		*offset -= u.wheel * u.px(60)
 		u.wheel = 0
 	}
@@ -75,16 +80,18 @@ func (a *App) scrolled(r gfx.Rect, draw func(gfx.Rect) float32) {
 // drawOverlayPanel draws the overlays tab and returns the bottom of its content.
 func (a *App) drawOverlayPanel(r gfx.Rect) float32 {
 	u := &a.u
-	bw := (r.W - u.px(16)) / 3
+	// Two rows of two, so every label fits the panel's width.
+	bw := (r.W - u.px(8)) / 2
 	for i, b := range []struct {
 		id, glyph, label, hint string
 		run                    func()
 	}{
 		{"ov/addtext", icFont, u.t("Text"), u.t("Add text at the playhead (T)"), a.addText},
 		{"ov/addimage", icImage, u.t("Image"), u.t("Add an image file at the playhead"), a.chooseImage},
+		{"ov/adddrawing", icBrush, u.t("Drawing"), u.t("Draw over the video at the playhead, with brushes and layers"), a.addDrawing},
 		{"ov/paste", icPaste, u.t("Paste"), u.t("Paste an image or text from the clipboard (Ctrl+V)"), a.paste},
 	} {
-		br := gfx.Rect{X: r.X + float32(i)*(bw+u.px(8)), Y: r.Y, W: bw, H: u.px(34)}
+		br := gfx.Rect{X: r.X + float32(i%2)*(bw+u.px(8)), Y: r.Y + float32(i/2)*u.px(42), W: bw, H: u.px(34)}
 		kind := plain
 		if i == 0 {
 			kind = primary
@@ -94,7 +101,7 @@ func (a *App) drawOverlayPanel(r gfx.Rect) float32 {
 		}
 		u.hint(b.id, b.hint, br)
 	}
-	y := r.Y + u.px(46)
+	y := r.Y + u.px(88)
 	if a.sel.kind == selOverlay && !a.selectionCard() {
 		if o, ok := a.p.Overlay(a.sel.id); ok {
 			return a.drawOverlayEditor(gfx.Rect{X: r.X, Y: y, W: r.W, H: r.Bottom() - y}, o)
@@ -124,11 +131,10 @@ func (a *App) drawOverlayPanel(r gfx.Rect) float32 {
 		}
 		u.c.RoundRect(row, u.px(8), bg)
 		sw := gfx.Rect{X: row.X + u.px(10), Y: row.Y + u.px(11), W: u.px(20), H: u.px(20)}
-		label := firstLine(o.Body)
+		glyph, label := overlayLook(o)
 		if o.Kind == project.ImageOverlay {
 			u.c.RoundRect(sw, u.px(4), colImage)
-			u.icon(icImage, sw, 10, colText)
-			label = baseName(o.Image)
+			u.icon(glyph, sw, 10, colText)
 		} else {
 			u.c.RoundRect(sw, u.px(4), gfx.RGBA(o.Color))
 		}
@@ -151,6 +157,9 @@ func (a *App) drawOverlayEditor(r gfx.Rect, o project.Overlay) float32 {
 	if o.Kind == project.ImageOverlay {
 		title = u.t("Edit the selected image")
 	}
+	if o.Canvas != "" {
+		title = u.t("Edit the selected drawing")
+	}
 	u.heading(gfx.Rect{X: r.X, Y: y, W: r.W - u.px(80), H: u.px(22)}, title)
 	if u.button("ov/done", gfx.Rect{X: r.Right() - u.px(70), Y: y - u.px(3), W: u.px(70), H: u.px(28)}, "", u.t("Done"), ghost, true) {
 		a.sel = selection{}
@@ -168,6 +177,11 @@ func (a *App) drawOverlayEditor(r gfx.Rect, o project.Overlay) float32 {
 			a.dirty = true
 		}
 		y += u.px(84)
+	} else if o.Canvas != "" {
+		if u.button("ov/drawing", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(34)}, icBrush, u.t("Draw in it"), primary, true) {
+			a.editDrawing(o)
+		}
+		y += u.px(44)
 	} else {
 		u.label(u.face(12), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(20)}, o.Image, colDim, 0)
 		y += u.px(28)
@@ -267,7 +281,10 @@ func (a *App) drawOverlayEditor(r gfx.Rect, o project.Overlay) float32 {
 		y += u.px(40)
 	}
 	del := u.t("Delete this text")
-	if o.Kind == project.ImageOverlay {
+	switch {
+	case o.Canvas != "":
+		del = u.t("Delete this drawing")
+	case o.Kind == project.ImageOverlay:
 		del = u.t("Delete this image")
 	}
 	if u.button("ov/delete", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(34)}, icDelete, del, danger, true) {

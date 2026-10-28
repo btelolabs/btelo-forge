@@ -66,6 +66,8 @@ const (
 	icInfo     = "\ue88e"
 	icPanelOut = "\ueac9"
 	icPanelIn  = "\ueac3"
+	icRecord   = "\ue061"
+	icCamera   = "\ue412"
 )
 
 // textColors are the caption colour swatches.

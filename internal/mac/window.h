@@ -7,6 +7,7 @@ void bvc_wait(double seconds);
 void bvc_wake(void);
 void bvc_size(int *width, int *height);
 double bvc_scale(void);
+int bvc_key_window(void);
 void bvc_present(const void *rgba, int width, int height);
 void bvc_title(const char *title);
 void bvc_cursor(int kind);

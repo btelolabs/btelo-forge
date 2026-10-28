@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -12,66 +13,173 @@ import (
 	"github.com/btelolabs/btelo-video-cut/internal/project"
 )
 
-// mcpInstructions tells an AI what the server is and how to use it; it is also part of the text the settings copy.
-const mcpInstructions = ProductName + ` is a desktop video editor running on this computer. These tools drive the open editor window directly.
-Workflow: call get_state first; ids of clips, overlays and music come from it. Times are seconds on the output timeline.
-Open a video with open_video (placement "new_tab" for a separate edit, "append" to add it to the end of the main track,
-"upper" to lay it over the picture from a time). Cut with split/delete_item/trim_item, change speed or clip volume with
-set_clip, mix tracks with set_track, add captions and images with add_text/add_image (update_overlay to change them),
-add music with search_music + add_library_music or add_music_file, make subtitles with generate_subtitles
-(list_music_sources and list_subtitle_models show the choices). The music sources and the subtitle engines and models
-are JSON configurations: read one with get_config (it includes a guide to the format), change it with set_config
-(it is checked before it is used) and undo that with reset_config — for example to add a music site, a new model
-or another ffmpeg download (name ffmpeg). Change several items at once with set_items (volume, opacity) and
-delete_items. Before exporting, export_options lists the presets — from high quality to extreme compression, or fit a
-size in megabytes — and set_export or export applies them. get_state reports whether ffmpeg is ready.
-Check the result with frame_at (a picture of the output at a time) or screenshot (the editor window), then export with
-export and poll export_status. Every change can be undone with undo.`
+// The MCP server comes in one piece for each kind of work, so an AI is told only about what it is asked to do: video
+// editing, drawing, recording the screen, or everything. Each holds that domain's tools and the common ones (tabs and
+// a picture of the window), with instructions to match; Settings copies the setup for each.
 
-// mcpServer builds the MCP server whose tools act on the editor.
-func (a *App) mcpServer() *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "btelo-cut", Title: ProductName, Version: Version}, &mcp.ServerOptions{Instructions: mcpInstructions})
+// mcpDomainAll is the server with every tool.
+const mcpDomainAll = -1
+
+// mcpDomains are the domains Settings offers to copy, in order, named by mcpDomainNames; mcpDomainPaths are where
+// each is served, under /mcp.
+var (
+	mcpDomains     = []int{domainVideo, domainDrawing, domainRecording, mcpDomainAll}
+	mcpDomainNames = msgs("Video editing", "Drawing", "Recording", "Everything")
+	mcpDomainPaths = map[int]string{domainVideo: "/video", domainDrawing: "/drawing", domainRecording: "/recording", mcpDomainAll: ""}
+)
+
+// mcpCommonTools are in every domain's server.
+var mcpCommonTools = []string{"get_state", "new_tab", "switch_tab", "close_tab", "screenshot"}
+
+// mcpDomainTools are each domain's own tools; TestMCPToolsAreAllListed keeps them in step with the server.
+var mcpDomainTools = map[int][]string{
+	domainVideo: {"open_video", "seek", "split", "delete_item", "delete_items", "move_item", "trim_item", "set_clip",
+		"set_items", "set_track", "add_text", "add_image", "update_overlay", "add_music_file", "search_music",
+		"list_music_sources", "add_library_music", "generate_subtitles", "list_subtitle_models", "subtitle_status",
+		"export", "export_status", "export_options", "set_export", "list_exports", "undo", "redo", "frame_at",
+		"get_config", "set_config", "reset_config"},
+	domainDrawing: {"canvas_new", "canvas_open", "canvas_state", "canvas_render", "canvas_save", "canvas_export",
+		"canvas_layer", "canvas_set_layer", "canvas_select", "canvas_paint", "canvas_fill", "canvas_add_shape",
+		"canvas_add_path", "canvas_set_vector", "canvas_boolean", "canvas_add_text", "canvas_filter", "canvas_transform",
+		"canvas_resize", "canvas_artboard", "canvas_history", "canvas_retouch", "canvas_adjustment", "canvas_style"},
+	domainRecording: {"recording_status", "start_recording", "pause_recording", "stop_recording", "take_screenshot"},
+}
+
+// mcpToolsOf are the tools of a domain's server, the common ones first.
+func mcpToolsOf(domain int) []string {
+	out := slices.Clone(mcpCommonTools)
+	for _, d := range []int{domainVideo, domainDrawing, domainRecording} {
+		if domain == mcpDomainAll || domain == d {
+			out = append(out, mcpDomainTools[d]...)
+		}
+	}
+	return out
+}
+
+// mcpToolNames lists every tool.
+var mcpToolNames = mcpToolsOf(mcpDomainAll)
+
+// The instructions: what the app is and its common tools, then each domain's part.
+const (
+	mcpIntro = ProductName + ` is a desktop app on this computer for editing videos, drawing and recording the screen.
+These tools drive its open window directly. It works in tabs, each a video edit or a drawing canvas: get_state lists
+them, new_tab, switch_tab and close_tab manage them, and screenshot shows the window as it looks.`
+
+	mcpVideoInstructions = `Video editing: call get_state first; ids of clips, overlays and music come from it. Times are seconds on the
+output timeline. Open a video with open_video (placement "new_tab" for a separate edit, "append" to add it to the end
+of the main track, "upper" to lay it over the picture from a time). Cut with split/delete_item/trim_item, change speed
+or clip volume with set_clip, mix tracks with set_track, add captions and images with add_text/add_image
+(update_overlay to change them), add music with search_music + add_library_music or add_music_file, make subtitles
+with generate_subtitles (list_music_sources and list_subtitle_models show the choices). The music sources and the
+subtitle engines and models are JSON configurations: read one with get_config (it includes a guide to the format),
+change it with set_config (it is checked before it is used) and undo that with reset_config — for example to add a
+music site, a new model or another ffmpeg download (name ffmpeg). Change several items at once with set_items
+(volume, opacity) and delete_items. Before exporting, export_options lists the presets — from high quality to extreme
+compression, or fit a size in megabytes — and set_export or export applies them. get_state reports whether ffmpeg is
+ready. Check the result with frame_at (a picture of the output at a time), then export with export and poll
+export_status. Every change can be undone with undo.`
+
+	mcpDrawingInstructions = `Drawing: a canvas is a layered picture, as in Photoshop, with vector layers as in Affinity Designer, on an
+infinite canvas (a frame or artboards give it fixed sizes to export). Make one with canvas_new (no size for an
+infinite canvas) or open one with canvas_open, then call canvas_state: it lists the layers with their ids, kinds and
+bounds, the artboards, the selection and the history. Coordinates are canvas pixels; rectangles are
+[x, y, width, height]. Pixel work goes to the chosen pixel layer, within the selection: canvas_select (rect,
+ellipse, polygon, wand…), canvas_paint (brush strokes along points, or erasing), canvas_fill (colour, paint bucket,
+gradients), canvas_filter (blur, sharpen, noise, mosaic, levels, hue/saturation, brightness/contrast, posterize,
+threshold, invert, desaturate). Vectors are layers of their own, sharp at any size: canvas_add_shape (rectangle,
+ellipse, polygon, star, line), canvas_add_path (Bézier nodes, or a smooth curve through points), canvas_set_vector
+(fill, stroke, width, alignment, ends, corners, dashes), canvas_boolean (add, subtract, intersect, exclude).
+canvas_add_text adds text. canvas_layer and canvas_set_layer manage layers (add, group, order, merge, masks, opacity,
+blend modes); canvas_retouch dodges, burns, sponges, blurs, sharpens or smudges along a stroke; canvas_adjustment adds
+adjustment layers (levels, curves, hue/saturation…) that change what is under them without changing its pixels;
+canvas_style sets a layer's effects (drop shadow, glows, stroke, colour overlay); canvas_transform moves, scales and
+turns the chosen layer, or distorts it by its corners or warps it by a grid; canvas_resize changes the whole picture;
+canvas_artboard manages artboards. Look at the result with canvas_render and export PNGs with canvas_export (the
+picture, the selection or the artboards); the canvas saves itself, and canvas_save saves at once. canvas_history
+undoes and redoes.`
+
+	mcpRecordingInstructions = `Recording: on Windows the screen can be recorded with sound: recording_status lists the screens and
+microphones, start_recording begins, pause_recording pauses and resumes, and stop_recording saves the MP4 and opens it
+in a tab for editing; take_screenshot saves a PNG of the screen.`
+)
+
+// mcpInstructionsFor are the instructions of a domain's server.
+func mcpInstructionsFor(domain int) string {
+	parts := []string{mcpIntro}
+	for _, p := range []struct {
+		domain int
+		text   string
+	}{{domainVideo, mcpVideoInstructions}, {domainDrawing, mcpDrawingInstructions}, {domainRecording, mcpRecordingInstructions}} {
+		if domain == mcpDomainAll || domain == p.domain {
+			parts = append(parts, p.text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// mcpServer builds the MCP server whose tools act on the window: a domain's, or with every tool.
+func (a *App) mcpServer(domain int) *mcp.Server {
+	s := mcp.NewServer(&mcp.Implementation{Name: mcpServerName(domain), Title: ProductName, Version: Version},
+		&mcp.ServerOptions{Instructions: mcpInstructionsFor(domain)})
 	a.addStateTools(s)
 	a.addEditTools(s)
 	a.addMediaTools(s)
 	a.addConfigTools(s)
 	a.addExportTools(s)
+	a.addRecordTools(s)
+	a.addDrawTools(s)
+	a.addDrawToolsMore(s)
+	if domain != mcpDomainAll {
+		keep := mcpToolsOf(domain)
+		var drop []string
+		for _, name := range mcpToolNames {
+			if !slices.Contains(keep, name) {
+				drop = append(drop, name)
+			}
+		}
+		s.RemoveTools(drop...)
+	}
 	return s
 }
 
 // Version is the app version, set at build time.
 var Version = "dev"
 
-// mcpConnection is the text Settings copies: paste it to an AI and it knows how to connect and what it can do.
-func (a *App) mcpConnection() string {
-	url := ""
-	if a.services != nil {
-		url = a.services.mcpURL
+// mcpServerName is the name a domain's server is added to an AI under.
+func mcpServerName(domain int) string {
+	if p := mcpDomainPaths[domain]; p != "" {
+		return "btelo-cut-" + p[1:]
 	}
-	if url == "" {
-		url = fmt.Sprintf("http://127.0.0.1:%d/mcp", mcpPort)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Connect to the %s video editor over MCP and use it to edit videos for me.\n\n", ProductName)
-	fmt.Fprintf(&b, "MCP server (Streamable HTTP, no authentication, only reachable from this computer): %s\n\n", url)
-	fmt.Fprintf(&b, "Claude Code:\n  claude mcp add --transport http btelo-cut %s\n\n", url)
-	fmt.Fprintf(&b, "Codex (~/.codex/config.toml):\n  [mcp_servers.btelo-cut]\n  url = \"%s\"\n\n", url)
-	fmt.Fprintf(&b, "Other clients (JSON):\n  {\"mcpServers\": {\"btelo-cut\": {\"type\": \"http\", \"url\": \"%s\"}}}\n\n", url)
-	fmt.Fprintf(&b, "If your client only speaks stdio, run: npx -y mcp-remote %s\n\n", url)
-	b.WriteString(mcpInstructions)
-	b.WriteString("\n\nTools: ")
-	b.WriteString(strings.Join(mcpToolNames, ", "))
-	b.WriteString("\n")
-	return b.String()
+	return "btelo-cut"
 }
 
-// mcpToolNames lists every tool, for the copied instructions; TestMCPToolsAreAllListed keeps it in step.
-var mcpToolNames = []string{
-	"get_state", "new_tab", "switch_tab", "close_tab", "open_video", "seek", "split", "delete_item", "delete_items", "move_item",
-	"trim_item", "set_clip", "set_items", "set_track", "add_text", "add_image", "update_overlay", "add_music_file", "search_music",
-	"list_music_sources", "add_library_music", "generate_subtitles", "list_subtitle_models", "subtitle_status",
-	"export", "export_status", "export_options", "set_export", "list_exports", "undo", "redo", "screenshot", "frame_at",
-	"get_config", "set_config", "reset_config",
+// mcpTasks say what an AI is asked to do with each domain's server.
+var mcpTasks = map[int]string{domainVideo: "edit videos", domainDrawing: "draw and edit pictures",
+	domainRecording: "record the screen", mcpDomainAll: "edit videos, draw and record the screen"}
+
+// mcpConnection is the text Settings copies for a domain: paste it to an AI and it knows how to connect and what it
+// can do there.
+func (a *App) mcpConnection(domain int) string {
+	base := ""
+	if a.services != nil {
+		base = a.services.mcpURL
+	}
+	if base == "" {
+		base = fmt.Sprintf("http://127.0.0.1:%d/mcp", mcpPort)
+	}
+	url, name := base+mcpDomainPaths[domain], mcpServerName(domain)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Connect to the %s app over MCP and use it to %s for me.\n\n", ProductName, mcpTasks[domain])
+	fmt.Fprintf(&b, "MCP server (Streamable HTTP, no authentication, only reachable from this computer): %s\n\n", url)
+	fmt.Fprintf(&b, "Claude Code:\n  claude mcp add --transport http %s %s\n\n", name, url)
+	fmt.Fprintf(&b, "Codex (~/.codex/config.toml):\n  [mcp_servers.%s]\n  url = \"%s\"\n\n", name, url)
+	fmt.Fprintf(&b, "Other clients (JSON):\n  {\"mcpServers\": {\"%s\": {\"type\": \"http\", \"url\": \"%s\"}}}\n\n", name, url)
+	fmt.Fprintf(&b, "If your client only speaks stdio, run: npx -y mcp-remote %s\n\n", url)
+	b.WriteString(mcpInstructionsFor(domain))
+	b.WriteString("\n\nTools: ")
+	b.WriteString(strings.Join(mcpToolsOf(domain), ", "))
+	b.WriteString("\n")
+	return b.String()
 }
 
 // tool registers a handler that runs on the UI goroutine and answers with JSON.

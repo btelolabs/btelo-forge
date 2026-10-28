@@ -106,7 +106,7 @@ func (u *ctx) textBox(id string, r gfx.Rect, value *string, placeholder string, 
 	lineH := f.Height() * 1.2
 	if u.press(id, r) {
 		if !focused {
-			u.focus = id
+			u.focus, u.focusDrawn = id, true // drawn this frame, so end does not take the focus straight back
 			focused = true
 			u.edit = editor{text: []rune(*value), multiline: multiline}
 		}

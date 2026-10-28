@@ -60,6 +60,22 @@ func messages(t *testing.T) map[string]string {
 					for _, arg := range n.Args {
 						literal(arg)
 					}
+				case "tc", "msgsIn":
+					// A message in a context is keyed context|message.
+					if len(n.Args) < 2 {
+						break
+					}
+					ctxLit, ok := n.Args[0].(*ast.BasicLit)
+					if !ok || ctxLit.Kind != token.STRING {
+						break
+					}
+					context, _ := strconv.Unquote(ctxLit.Value)
+					for _, arg := range n.Args[1:] {
+						if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+							s, _ := strconv.Unquote(lit.Value)
+							found[context+"|"+s] = fset.Position(lit.Pos()).String()
+						}
+					}
 				}
 			case *ast.ValueSpec:
 				if len(n.Names) == 1 && n.Names[0].Name == "knownErrors" {

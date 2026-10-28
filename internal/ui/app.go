@@ -11,6 +11,7 @@ import (
 	"github.com/btelolabs/btelo-video-cut/internal/gfx"
 	"github.com/btelolabs/btelo-video-cut/internal/library"
 	"github.com/btelolabs/btelo-video-cut/internal/media"
+	"github.com/btelolabs/btelo-video-cut/internal/paint"
 	"github.com/btelolabs/btelo-video-cut/internal/playback"
 	"github.com/btelolabs/btelo-video-cut/internal/transcribe"
 )
@@ -43,26 +44,48 @@ type App struct {
 	stopLife context.CancelFunc
 	running  sync.WaitGroup // background work started with background
 
-	settings     settings
-	settingsOpen bool
-	tab          int
-	media        mediaCache
-	music        musicPanel
-	subtitles    subtitlePanel
-	export       *exportJob
-	last         lastExport
-	known        map[string]library.Track
-	toasts       []toast
-	settingsPage int
-	extensions   extensionsPage
-	mcpScroll    float32 // how far the AI setup text in Settings is scrolled
-	exportForm   exportForm
-	encoders     media.Encoders // nil until probed
-	tools        toolsState
-	panelScroll  [4]float32
-	panelContent [4]float32 // height of each panel's content at the last frame
-	screen       gfx.Rect
-	services     *services
+	settings       settings
+	settingsOpen   bool
+	tab            int
+	media          mediaCache
+	music          musicPanel
+	subtitles      subtitlePanel
+	export         *exportJob
+	last           lastExport
+	known          map[string]library.Track
+	toasts         []toast
+	settingsPage   int
+	extensions     extensionsPage
+	mcpScroll      float32 // how far the AI setup text in Settings is scrolled
+	exportForm     exportForm
+	encoders       media.Encoders // nil until probed
+	tools          toolsState
+	panelScroll    [4]float32
+	rec            recordState
+	hotkeys        hotkeyState
+	keysDomain     int         // the domain the Hotkeys page shows
+	mcpDomain      int         // the domain whose AI setup the MCP page shows
+	keysScroll     float32     // how far its list is scrolled
+	keyCapture     *keyCapture // the command whose new key the Hotkeys page waits for
+	brush          paint.Brush // shared by every canvas
+	artTool        artTool
+	marqueeEllipse bool               // the marquee draws ellipses
+	toolSlots      map[uint16]artTool // the tool each shared place in the tool box shows, by its key
+	pickBackground bool               // the colour panel sets the background colour
+	picker         colorPicker
+	menu           *popupMenu
+	dialog         artDialog     // the canvas editor's open dialog
+	adjust         *adjustDialog // an adjustment or filter being tried
+	style          *styleDialog  // a layer's effects being edited
+	sidePage       int           // the canvas side panel's lower page: layers or history
+	layerOpacity   float64       // the layer opacity slider while it is dragged
+	opacityMark    paint.Mark    // the picture before that drag
+	layersScroll   float32
+	thumbs         map[int]*layerThumb // by layer id
+	over           screenState         // the windows over the screen
+	panelContent   [4]float32          // height of each panel's content at the last frame
+	screen         gfx.Rect
+	services       *services
 }
 
 // New builds the editor; cacheDir holds downloads and models, stateDir remembers settings and unfinished edits.
@@ -77,11 +100,13 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 		jobs:     make(chan func(), 1024),
 		media:    newMediaCache(),
 		known:    map[string]library.Track{},
+		thumbs:   map[int]*layerThumb{},
 	}
 	a.life, a.stopLife = context.WithCancel(context.Background())
 	a.u.fonts, a.u.host = fonts, host
 	a.loadSettings()
 	a.u.lang = a.settings.Language
+	a.brush = a.settings.Paint.brush()
 	host.SetTitle(a.Title())
 	a.player = playback.New(host.Wake)
 	a.audition = playback.NewAudition(host.Wake)
@@ -93,6 +118,8 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	a.prepareTools()
 	a.newTab()
 	a.applyServices()
+	a.hotkeys.capturing = -1
+	a.applyHotkeys()
 	return a
 }
 
@@ -108,14 +135,9 @@ func (a *App) post(fn func()) {
 
 // Frame handles input and draws everything; it returns how soon it wants to be drawn again (0 = only on input).
 func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) time.Duration {
-	for drained := false; !drained; {
-		select {
-		case fn := <-a.jobs:
-			fn()
-		default:
-			drained = true
-		}
-	}
+	a.drainJobs()
+	a.recordTick(in)
+	a.screenTick()
 	u := &a.u
 	u.c, u.s = c, scale
 	u.begin(in)
@@ -126,13 +148,16 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) time.Duration {
 	a.handleDrops(in.Dropped)
 	a.syncPlayback()
 	a.preToasts()
-	u.blocked = a.export != nil || a.settingsOpen
+	u.blocked = a.export != nil || a.settingsOpen || a.rec.open || a.menu != nil || a.dialog.kind != dialogNone || a.adjust != nil || a.style != nil
 
 	l := a.layout()
 	a.drawTabs(l.tabs)
-	if a.p == nil {
+	switch {
+	case a.art != nil:
+		a.drawArt(l.body)
+	case a.p == nil:
 		a.drawEmpty(l.body)
-	} else {
+	default:
 		a.drawPreview(l.preview)
 		a.drawTransport(l.transport)
 		a.drawTimeline(l.timeline)
@@ -140,7 +165,8 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) time.Duration {
 			a.drawPanel(l.panel)
 		}
 	}
-	if u.focus == "" {
+	// A dialog or menu that is open takes the keys (Esc, Enter), so the window's shortcuts wait.
+	if u.focus == "" && a.hotkeys.capturing < 0 && a.keyCapture == nil && !u.blocked {
 		a.shortcuts()
 	}
 	if a.bodyBefore != nil && u.focus != "overlay/body" {
@@ -151,6 +177,17 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) time.Duration {
 	a.drawExportModal()
 	if a.export == nil {
 		a.drawSettings()
+		a.drawRecorder()
+		a.drawArtDialog()
+		a.drawAdjustDialog()
+		a.drawStyleDialog()
+	}
+	if a.menu != nil && a.dialog.kind == dialogNone && a.adjust == nil && a.style == nil {
+		if a.menu.id == "art/tipshape" {
+			a.drawTipShape()
+		} else {
+			a.drawMenu()
+		}
 	}
 	a.drawToasts()
 	wait := u.drawTip(a.screen)
@@ -163,6 +200,7 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) time.Duration {
 	}
 	a.host.SetCursor(u.cursor)
 	a.autosave()
+	a.autosaveArt()
 	return a.nextFrame(wait, in.acted())
 }
 
@@ -188,13 +226,38 @@ func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 	if key, _ := a.audition.Playing(); key != "" || a.music.downloading() || a.subtitles.busy() {
 		sooner(time.Second / 10)
 	}
-	if a.u.blinking {
+	if a.u.blinking && !a.u.inactive { // a caret only blinks in the window being typed in
 		sooner(265 * time.Millisecond)
 	}
-	if a.export != nil || a.opening != "" || len(a.toasts) > 0 {
+	// Edits are saved a moment after they settle: wake then, rather than ticking until it is time.
+	for _, d := range a.docs {
+		if d.p != nil && d.dirty {
+			sooner(max(time.Until(d.savedAt.Add(time.Second)), redrawNow))
+		}
+		if ad := d.art; ad != nil {
+			if due, ok := a.artSaveDue(ad); ok {
+				sooner(max(time.Until(due), redrawNow))
+			}
+		}
+	}
+	// Progress and clocks that change without telling: an export's progress, a recording's time, toasts running
+	// out. Work that posts its result (opening a video, checking the screen recorder) wakes the window itself.
+	if a.export != nil || len(a.toasts) > 0 || a.recording() || a.over.bar != nil {
 		sooner(time.Second / 10)
 	}
 	return next
+}
+
+// drainJobs runs the work other goroutines posted for the UI goroutine.
+func (a *App) drainJobs() {
+	for {
+		select {
+		case fn := <-a.jobs:
+			fn()
+		default:
+			return
+		}
+	}
 }
 
 type layout struct {
@@ -231,6 +294,8 @@ func (a *App) Close() {
 	if a.life.Err() != nil {
 		return
 	}
+	a.finishRecordingForClose()
+	a.closeScreen()
 	a.stopLife()
 	a.player.Stop()
 	a.audition.Stop()
@@ -240,6 +305,9 @@ func (a *App) Close() {
 	a.subtitles.cancel()
 	for _, d := range a.docs {
 		d.save(a.saveDir)
+		if d.art != nil {
+			a.saveArt(d.art, true)
+		}
 	}
 	if a.services != nil {
 		a.services.stop()
@@ -270,8 +338,8 @@ func (a *App) background(work func(ctx context.Context)) {
 	}()
 }
 
-// Open loads a video into the current tab as if it had been dropped on the window.
-func (a *App) Open(path string) { a.openVideo(path, false) }
+// Open opens a file, a video, a picture, a sound or a canvas, as if it had been dropped on the window.
+func (a *App) Open(path string) { a.openFiles([]string{path}, func() bool { return false }) }
 
 // Idle reports whether nothing is loading or decoding in the background, for tools that capture settled frames.
 func (a *App) Idle() bool {

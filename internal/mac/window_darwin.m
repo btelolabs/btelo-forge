@@ -242,8 +242,13 @@ int bvc_poll(void) {
 
 void bvc_wait(double seconds) {
 	@autoreleasepool {
-		[NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate dateWithTimeIntervalSinceNow:seconds] inMode:NSDefaultRunLoopMode dequeue:NO];
+		NSDate *until = seconds < 0 ? [NSDate distantFuture] : [NSDate dateWithTimeIntervalSinceNow:seconds];
+		[NSApp nextEventMatchingMask:NSEventMaskAny untilDate:until inMode:NSDefaultRunLoopMode dequeue:NO];
 	}
+}
+
+int bvc_key_window(void) {
+	return window.isKeyWindow ? 1 : 0;
 }
 
 void bvc_wake(void) {

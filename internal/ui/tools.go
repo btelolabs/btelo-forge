@@ -61,6 +61,7 @@ func (a *App) prepareTools() {
 				return
 			}
 			t.ready, t.found, a.encoders = true, found, enc
+			a.checkRecording()
 			waiting := t.waiting
 			t.waiting = nil
 			for i, path := range waiting {

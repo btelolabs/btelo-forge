@@ -76,6 +76,9 @@ func (w *Window) Size() (int, int) {
 // Scale is the display's pixels per point.
 func (w *Window) Scale() float32 { return float32(C.bvc_scale()) }
 
+// Focused reports whether the window has the keyboard focus.
+func (w *Window) Focused() bool { return C.bvc_key_window() != 0 }
+
 // Present shows an RGBA image of the content size.
 func (w *Window) Present(rgba []byte, width, height int) error {
 	if width <= 0 || height <= 0 {

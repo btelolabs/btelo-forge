@@ -11,65 +11,6 @@ import (
 	"github.com/btelolabs/btelo-video-cut/internal/project"
 )
 
-func (a *App) shortcuts() {
-	u := &a.u
-	for _, k := range u.keys {
-		switch {
-		case k.Code == 'T' && k.Ctrl:
-			a.newTab()
-		case k.Code == 'W' && k.Ctrl:
-			a.closeTab(a.current())
-		case k.Code == keyTab && k.Ctrl:
-			step := 1
-			if k.Shift {
-				step = len(a.docs) - 1
-			}
-			a.switchTab((a.current() + step) % len(a.docs))
-		case k.Code == 'O' && k.Ctrl:
-			a.chooseVideo()
-		case k.Code == 'V' && k.Ctrl:
-			a.paste()
-		}
-		if a.p == nil {
-			continue
-		}
-		switch {
-		case k.Code == keySpace && !k.Ctrl:
-			a.togglePlay()
-		case k.Code == 'S' && !k.Ctrl:
-			a.split()
-		case (k.Code == keyDelete || k.Code == keyBack) && !k.Ctrl:
-			a.deleteSelection()
-		case k.Code == 'Z' && k.Ctrl && !k.Shift:
-			a.undo()
-		case (k.Code == 'Y' && k.Ctrl) || (k.Code == 'Z' && k.Ctrl && k.Shift):
-			a.redo()
-		case k.Code == 'T' && !k.Ctrl:
-			a.addText()
-		case k.Code == 'E' && k.Ctrl:
-			a.startExport()
-		case k.Code == keyLeft || k.Code == keyRight:
-			step := 1 / max(a.p.Canvas.FPS, 1)
-			if k.Shift {
-				step = 1
-			}
-			if k.Code == keyLeft {
-				step = -step
-			}
-			a.seek(a.playhead + step)
-		case k.Code == keyHome:
-			a.seek(0)
-		case k.Code == keyEnd:
-			a.seek(a.p.Duration())
-		case k.Code == keyEscape:
-			a.selectOnly(selection{})
-		case k.Code == 'A' && k.Ctrl:
-			a.selectAll()
-		}
-	}
-	u.keys = nil
-}
-
 func (a *App) current() int {
 	for i, d := range a.docs {
 		if d == a.doc {

@@ -12,6 +12,7 @@ import (
 	"github.com/btelolabs/btelo-video-cut/internal/gfx"
 	"github.com/btelolabs/btelo-video-cut/internal/library"
 	"github.com/btelolabs/btelo-video-cut/internal/media"
+	"github.com/btelolabs/btelo-video-cut/internal/paint"
 	"github.com/btelolabs/btelo-video-cut/internal/project"
 )
 
@@ -47,16 +48,32 @@ func (a *App) chooseImage() {
 }
 
 // handleDrops sorts dropped files: sounds become music, images overlays, anything else is opened as video.
-func (a *App) handleDrops(paths []string) {
+func (a *App) handleDrops(paths []string) { a.openFiles(paths, a.dropUpper) }
+
+// openFiles opens files by what they are, as dropping them does: a canvas as a canvas, sounds as music, a picture as
+// a canvas in an empty tab or a layer or overlay where something is open, anything else as video, on an upper
+// track when upper says so.
+func (a *App) openFiles(paths []string, upper func() bool) {
 	var audio []string
 	for _, p := range paths {
 		switch {
+		case strings.EqualFold(filepath.Ext(p), paint.Ext):
+			a.openCanvasFile(p)
 		case library.IsAudio(p):
 			audio = append(audio, p)
+		case isImage(p) && a.p == nil && a.art == nil:
+			a.openImageAsArt(p)
+		case isImage(p) && a.art != nil:
+			if img, err := loadImage(p); err == nil {
+				a.art.d.Paste(img, filepath.Base(p), nil)
+				a.art.changedAll()
+			} else {
+				a.toast(a.u.tf("Cannot open %s: %s", filepath.Base(p), a.describe(err)), true)
+			}
 		case isImage(p):
 			a.addImage(p)
 		case a.export == nil:
-			a.openVideo(p, a.dropUpper())
+			a.openVideo(p, upper())
 		}
 	}
 	if len(audio) > 0 {

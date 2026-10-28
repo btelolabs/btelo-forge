@@ -22,7 +22,7 @@ type window interface {
 	ui.Host
 	Poll() bool
 	Input() ui.Input
-	Wait(timeout time.Duration)
+	Wait(timeout time.Duration) // a negative timeout waits for input or Wake only
 	Size() (int, int)
 	Scale() float32
 	Present(rgba []byte, width, height int) error
@@ -70,6 +70,8 @@ func run(background bool, capture string, deadline time.Duration, files []string
 	draw := func(in ui.Input) error {
 		width, height := w.Size()
 		if width == 0 || height == 0 {
+			// Minimized: nothing to draw, but background work and a recording still need looking after.
+			next = app.Tick(in)
 			return nil
 		}
 		canvas.Resize(width, height)
@@ -104,7 +106,9 @@ func run(background bool, capture string, deadline time.Duration, files []string
 				next = 50 * time.Millisecond
 			}
 		}
-		timeout := time.Second
+		// With nothing to animate the window sleeps until input or a Wake from background work: an idle or
+		// inactive window costs nothing.
+		timeout := time.Duration(-1)
 		if next > 0 {
 			timeout = next
 		}

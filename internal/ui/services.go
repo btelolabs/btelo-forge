@@ -57,10 +57,12 @@ func (a *App) applyServices() {
 		l, port, err := listen("127.0.0.1", mcpPort)
 		s.mcpErr = err
 		if err == nil {
-			server := a.mcpServer()
-			handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+			// Each domain at its own path, so an AI set up for one is told about its tools alone.
 			mux := http.NewServeMux()
-			mux.Handle("/mcp", handler)
+			for _, domain := range mcpDomains {
+				server := a.mcpServer(domain)
+				mux.Handle("/mcp"+mcpDomainPaths[domain], mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
+			}
 			s.mcp, s.mcpURL = serve(mux, l), fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
 		}
 	}

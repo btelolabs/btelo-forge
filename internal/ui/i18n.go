@@ -6,8 +6,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/btelolabs/btelo-video-cut/internal/capture"
 	"github.com/btelolabs/btelo-video-cut/internal/gfx"
 	"github.com/btelolabs/btelo-video-cut/internal/media"
+	"github.com/btelolabs/btelo-video-cut/internal/paint"
 	"github.com/btelolabs/btelo-video-cut/internal/render"
 	"github.com/btelolabs/btelo-video-cut/internal/transcribe"
 )
@@ -63,11 +65,38 @@ func (u *ctx) ts(list []string) []string {
 // msgs marks a list of English labels as messages to translate; it returns them unchanged.
 func msgs(s ...string) []string { return s }
 
+// tc translates a message that means something else elsewhere, such as Photoshop's "Screen" blend mode against a
+// computer screen; its Chinese entry is keyed context|message.
+func (u *ctx) tc(context, s string) string {
+	if u.lang == Chinese {
+		if z, ok := zh[context+"|"+s]; ok {
+			return z
+		}
+	}
+	return s
+}
+
+// msgsIn marks a list of labels to translate with tc in a context; it returns them unchanged.
+func msgsIn(context string, s ...string) []string { return s }
+
+// tcs translates a list with tc.
+func (u *ctx) tcs(context string, list []string) []string {
+	out := make([]string, len(list))
+	for i, s := range list {
+		out[i] = u.tc(context, s)
+	}
+	return out
+}
+
 // describe turns an error into a message for the user, translating the ones the app knows.
 func (a *App) describe(err error) string {
 	var small *render.TargetTooSmall
 	if errors.As(err, &small) {
 		return a.u.tf("The target size is too small for this video; allow at least %.1f MB", small.MinimumMB)
+	}
+	var old *capture.OldWindowsError
+	if errors.As(err, &old) {
+		return a.u.tf("Screen recording needs Windows 10 version 2004 or later; this computer runs Windows %d.%d (build %d)", old.Major, old.Minor, old.Build)
 	}
 	var missing *transcribe.MissingEngine
 	if errors.As(err, &missing) {
@@ -94,6 +123,20 @@ var knownErrors = []struct {
 	{errToolsNotReady, "ffmpeg is still being prepared"},
 	{render.ErrEncoderMissing, "This ffmpeg cannot encode the chosen format; pick another format or install a full ffmpeg build"},
 	{render.ErrCredits, "The video was exported, but its credits file could not be written"},
+	{paint.ErrHidden, "The chosen layer is hidden; show it to paint on it"},
+	{paint.ErrGroup, "Choose a layer, not a group, in the layers panel"},
+	{paint.ErrNoLayer, "Choose a layer in the layers panel"},
+	{paint.ErrNothingBelow, "There is no layer below to merge into"},
+	{paint.ErrLastLayer, "A picture keeps at least one layer"},
+	{paint.ErrTooBig, "The picture is too large; its sides can be up to 16384 pixels"},
+	{paint.ErrNotACanvas, "This is not a canvas file, or it is damaged"},
+	{capture.ErrUnsupported, "Screen recording is not supported on this system"},
+	{capture.ErrNoEncoder, "Neither the graphics card nor ffmpeg's own encoder could record this screen"},
+	{capture.ErrNoDisplay, "No screen that can be recorded is attached to this computer"},
+	{capture.ErrNoGrabber, "This ffmpeg cannot grab the screen (it was built without ddagrab); choose a full ffmpeg build in Settings → Extensions"},
+	{capture.ErrSystemSound, "The computer's sound could not be recorded"},
+	{capture.ErrMicrophone, "The microphone could not be recorded; check that it is plugged in and that Windows lets apps use it (Settings → Privacy → Microphone)"},
+	{capture.ErrNothingRecorded, "Nothing was recorded"},
 }
 
 var gfxShade = gfx.Alpha(colBlack, 0.55)

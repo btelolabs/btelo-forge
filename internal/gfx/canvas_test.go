@@ -101,3 +101,15 @@ func TestRoundCornersClearsOnlyTheCorners(t *testing.T) {
 		}
 	}
 }
+
+func TestClearToKeepsTransparency(t *testing.T) {
+	c := NewCanvas(3, 2)
+	c.ClearTo(color.RGBA{0, 0, 0, 110})
+	if got := c.Img.RGBAAt(2, 1); got != (color.RGBA{0, 0, 0, 110}) {
+		t.Errorf("ClearTo gives %v", got)
+	}
+	c.Clear(color.RGBA{10, 20, 30, 40})
+	if got := c.Img.RGBAAt(2, 1); got.A != 255 {
+		t.Errorf("Clear gives %v, want opaque", got)
+	}
+}

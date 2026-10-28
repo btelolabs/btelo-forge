@@ -35,6 +35,18 @@ func (u *ctx) hint(id, text string, r gfx.Rect) {
 	u.tipSeen = true
 }
 
+// buttonWidth is how wide button needs to be to show its icon and text in full.
+func (u *ctx) buttonWidth(glyph, text string) float32 {
+	w := u.face(13).Measure(text) + u.px(16)
+	if glyph != "" {
+		w += u.px(16)
+		if text != "" {
+			w += u.px(6)
+		}
+	}
+	return w + u.px(4)
+}
+
 // button draws a labelled button with an optional icon and reports a click.
 func (u *ctx) button(id string, r gfx.Rect, glyph, text string, kind buttonKind, enabled bool) bool {
 	hot := enabled && u.hover(id, r)
@@ -210,6 +222,9 @@ func (u *ctx) slider(id string, r gfx.Rect, value *float64, lo, hi float64, enab
 	}
 	return changed, done
 }
+
+// checkboxWidth is how wide a checkbox needs to be to show its box and text in full.
+func checkboxWidth(u *ctx, text string) float32 { return u.px(18+8+6) + u.face(13).Measure(text) }
 
 // checkbox is a small toggle with a label; it returns the new state.
 func (u *ctx) checkbox(id string, r gfx.Rect, text string, on bool) bool {

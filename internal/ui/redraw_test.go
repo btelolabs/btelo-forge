@@ -15,7 +15,12 @@ func TestInputIsShownWithoutWaitingForMoreInput(t *testing.T) {
 	}
 	l := x.a.layout()
 	gear := l.tabs.Right() - x.a.u.px(40)
-	toggle := gear - x.a.u.px(36) + x.a.u.px(16)
+	end := gear
+	if x.a.recorder() != nil {
+		record, _ := x.a.recordButtons(gear, 0, 0) // the recording buttons sit between them
+		end = record.X
+	}
+	toggle := end - x.a.u.px(36) + x.a.u.px(16)
 	y := l.tabs.Y + x.a.u.px(20)
 	x.a.Frame(Input{X: toggle, Y: y, Down: true, Pointer: []Pointer{{X: toggle, Y: y, Down: true}}}, x.c, x.scale)
 	next := x.a.Frame(Input{X: toggle, Y: y, Pointer: []Pointer{{X: toggle, Y: y}}}, x.c, x.scale)

@@ -23,7 +23,10 @@ type mcpSession struct {
 	cs *mcp.ClientSession
 }
 
-func connectMCP(t *testing.T, x *harness) *mcpSession {
+func connectMCP(t *testing.T, x *harness) *mcpSession { t.Helper(); return connectMCPAt(t, x, "") }
+
+// connectMCPAt connects to the server of one domain, at its path under the MCP address.
+func connectMCPAt(t *testing.T, x *harness, path string) *mcpSession {
 	t.Helper()
 	if x.a.services == nil || x.a.services.mcpURL == "" {
 		t.Fatalf("MCP server not running: %+v", x.a.services)
@@ -34,7 +37,7 @@ func connectMCP(t *testing.T, x *harness) *mcpSession {
 	go func() {
 		defer close(done)
 		client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
-		cs, err = client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: x.a.services.mcpURL, MaxRetries: -1}, nil)
+		cs, err = client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: x.a.services.mcpURL + path, MaxRetries: -1}, nil)
 	}()
 	x.pump(20*time.Second, func() bool {
 		select {
@@ -122,7 +125,7 @@ func TestMCPToolsAreAllListed(t *testing.T) {
 	if !slices.Equal(names, listed) {
 		t.Fatalf("server tools %v\nlisted in the copied instructions %v", names, listed)
 	}
-	text := x.a.mcpConnection()
+	text := x.a.mcpConnection(mcpDomainAll)
 	if !strings.Contains(text, x.a.services.mcpURL) || !strings.Contains(text, "claude mcp add") {
 		t.Fatalf("connection text %s", text)
 	}

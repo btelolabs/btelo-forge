@@ -186,6 +186,14 @@ func (p *Project) AddImage(path string, aspect, t float64) int {
 	return p.placeOverlay(Overlay{Kind: ImageOverlay, Image: path, Aspect: aspect, Start: start, End: end, X: 0.5, Y: 0.5, Size: 0.35, Opacity: 1})
 }
 
+// AddDrawing places a drawing over the whole frame at t for five seconds: image is its flattened picture, the
+// size of the frame, and canvas the layered file it is drawn in.
+func (p *Project) AddDrawing(image, canvas string, aspect, t float64) int {
+	start, end := p.span(t, 5)
+	return p.placeOverlay(Overlay{Kind: ImageOverlay, Image: image, Canvas: canvas, Aspect: aspect, Start: start, End: end,
+		X: 0.5, Y: 0.5, Size: 1, Opacity: 1})
+}
+
 // AddCaptions adds timed text on a new overlay track of its own, styled as subtitles, and returns the track.
 func (p *Project) AddCaptions(lines []Overlay) int {
 	tr := OverlayTrack{}

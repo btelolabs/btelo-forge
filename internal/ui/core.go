@@ -17,6 +17,7 @@ const (
 	CursorText
 	CursorResize
 	CursorMove
+	CursorCross
 )
 
 // Key codes the UI reacts to (Windows virtual keys).
@@ -59,14 +60,18 @@ type Input struct {
 	Wheel   float32
 	Ctrl    bool
 	Shift   bool
+	Alt     bool
 	Keys    []Key
 	Typed   []rune
 	Dropped []string
+	Hotkeys []int // the hotkey actions pressed, system-wide
+	// Inactive is set while the window does not have the keyboard focus; nothing then animates for the eye alone.
+	Inactive bool
 }
 
 // acted reports whether the input carries anything the frame may act on, as opposed to only a pointer position.
 func (in Input) acted() bool {
-	return len(in.Pointer) > 0 || in.Wheel != 0 || len(in.Keys) > 0 || len(in.Typed) > 0 || len(in.Dropped) > 0
+	return len(in.Pointer) > 0 || in.Wheel != 0 || len(in.Keys) > 0 || len(in.Typed) > 0 || len(in.Dropped) > 0 || len(in.Hotkeys) > 0
 }
 
 // Host is what the UI needs from the window it runs in.
@@ -88,28 +93,30 @@ type Host interface {
 
 // ctx is the per-frame immediate-mode state.
 type ctx struct {
-	c       *gfx.Canvas
-	fonts   gfx.Fonts
-	s       float32
-	mx, my  float32
-	down    bool
-	pressed bool
-	pressX  float32
-	pressY  float32
-	double  bool
-	rightAt *Pointer
-	wheel   float32
-	shift   bool
-	ctrl    bool
-	keys    []Key
-	typed   []rune
-	active  string
-	focus   string
-	cursor  Cursor
-	blocked bool
-	drag    dragState
-	host    Host
-	lang    Language
+	c        *gfx.Canvas
+	fonts    gfx.Fonts
+	s        float32
+	mx, my   float32
+	down     bool
+	pressed  bool
+	pressX   float32
+	pressY   float32
+	double   bool
+	rightAt  *Pointer
+	wheel    float32
+	shift    bool
+	ctrl     bool
+	alt      bool
+	inactive bool // the window does not have the keyboard focus
+	keys     []Key
+	typed    []rune
+	active   string
+	focus    string
+	cursor   Cursor
+	blocked  bool
+	drag     dragState
+	host     Host
+	lang     Language
 
 	tip        tip
 	tipSeen    bool
@@ -142,7 +149,7 @@ func (u *ctx) begin(in Input) {
 	if u.pressed {
 		u.drag = dragState{x: u.pressX, y: u.pressY}
 	}
-	u.wheel, u.ctrl, u.shift, u.keys, u.typed = in.Wheel, in.Ctrl, in.Shift, in.Keys, in.Typed
+	u.wheel, u.ctrl, u.shift, u.alt, u.keys, u.typed, u.inactive = in.Wheel, in.Ctrl, in.Shift, in.Alt, in.Keys, in.Typed, in.Inactive
 	u.cursor = CursorArrow
 }
 

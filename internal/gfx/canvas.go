@@ -71,6 +71,20 @@ func (c *Canvas) Pop() {
 }
 
 // Clear fills the whole canvas, ignoring the clip.
+// ClearTo fills the whole canvas with col exactly, transparency included (col is premultiplied), for windows whose
+// pixels may be see-through.
+func (c *Canvas) ClearTo(col color.RGBA) {
+	p := c.Img.Pix
+	if len(p) == 0 {
+		return
+	}
+	p[0], p[1], p[2], p[3] = col.R, col.G, col.B, col.A
+	for k := 4; k < len(p); k *= 2 {
+		copy(p[k:], p[:k])
+	}
+}
+
+// Clear fills the whole canvas with col, opaque.
 func (c *Canvas) Clear(col color.RGBA) {
 	p := c.Img.Pix
 	if len(p) == 0 {

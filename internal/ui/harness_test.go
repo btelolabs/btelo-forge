@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"image"
 	"image/png"
 	"net/http"
@@ -25,6 +26,13 @@ type fakeHost struct {
 	clip       string
 	pasteImage image.Image
 	languages  []string
+	minimized  bool
+	excluded   bool
+	hotkeys    []Hotkey
+	clipImage  image.Image
+	overlaysOn bool           // OpenOverlay works; off, it fails, as on a window without overlays
+	overlays   []*fakeOverlay // every overlay opened, closed ones too
+	title      string
 }
 
 func (h *fakeHost) Wake() {
@@ -33,7 +41,7 @@ func (h *fakeHost) Wake() {
 	default:
 	}
 }
-func (h *fakeHost) SetTitle(string)                              {}
+func (h *fakeHost) SetTitle(t string)                            { h.title = t }
 func (h *fakeHost) SetCursor(c Cursor)                           { h.cursor = c }
 func (h *fakeHost) TextInput(on bool, _, _, _ float32)           { h.typing = on }
 func (h *fakeHost) Clipboard() (string, error)                   { return h.clip, nil }
@@ -45,6 +53,14 @@ func (h *fakeHost) Reveal(path string) error                     { h.opened = ap
 func (h *fakeHost) Launch(path string) error                     { h.opened = append(h.opened, path); return nil }
 func (h *fakeHost) LaunchURL(string) error                       { return nil }
 func (h *fakeHost) Languages() []string                          { return h.languages }
+func (h *fakeHost) Minimize()                                    { h.minimized = true }
+func (h *fakeHost) Restore()                                     { h.minimized = false }
+func (h *fakeHost) ExcludeFromCapture(on bool) error             { h.excluded = on; return nil }
+func (h *fakeHost) SetClipboardImage(img image.Image) error      { h.clipImage = img; return nil }
+func (h *fakeHost) SetHotkeys(keys []Hotkey) []error {
+	h.hotkeys = keys
+	return make([]error, len(keys))
+}
 
 // harness drives the editor headlessly with synthetic input at a fixed size.
 type harness struct {
@@ -216,3 +232,75 @@ func (x *harness) open(path string) {
 		x.t.Fatalf("%s did not open; toasts %+v", path, x.a.toasts)
 	}
 }
+
+func (h *fakeHost) OpenOverlay(o OverlayOptions) (Overlay, error) {
+	if !h.overlaysOn {
+		return nil, errors.New("no overlays here")
+	}
+	f := &fakeOverlay{opts: o, bounds: o.Bounds, clickThrough: o.ClickThrough}
+	h.overlays = append(h.overlays, f)
+	return f, nil
+}
+
+// open lists the overlays that are still open.
+func (h *fakeHost) open() []*fakeOverlay {
+	var out []*fakeOverlay
+	for _, o := range h.overlays {
+		if !o.closed {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// fakeOverlay keeps what was presented and hands out input the test queued.
+type fakeOverlay struct {
+	opts         OverlayOptions
+	bounds       image.Rectangle
+	queued       []Input
+	mx, my       float32
+	down         bool
+	shown        *image.RGBA
+	presents     int
+	clickThrough bool
+	cursor       Cursor
+	closed       bool
+}
+
+func (o *fakeOverlay) Bounds() image.Rectangle { return o.bounds }
+func (o *fakeOverlay) Scale() float32          { return 1 }
+func (o *fakeOverlay) Input() Input {
+	if len(o.queued) == 0 {
+		return Input{X: o.mx, Y: o.my, Down: o.down}
+	}
+	in := o.queued[0]
+	o.queued = o.queued[1:]
+	return in
+}
+func (o *fakeOverlay) Present(img *image.RGBA, dirty image.Rectangle) error {
+	if o.shown == nil || o.shown.Rect != img.Rect {
+		o.shown = image.NewRGBA(img.Rect)
+	}
+	copy(o.shown.Pix, img.Pix)
+	o.presents++
+	return nil
+}
+func (o *fakeOverlay) SetClickThrough(on bool) { o.clickThrough = on }
+func (o *fakeOverlay) SetCursor(c Cursor)      { o.cursor = c }
+func (o *fakeOverlay) Move(r image.Rectangle)  { o.bounds = r }
+func (o *fakeOverlay) Closed() bool            { return false }
+func (o *fakeOverlay) Close()                  { o.closed = true }
+
+// drag queues a press at (x0, y0), moves to (x1, y1) and a release there, in the overlay's pixels.
+func (o *fakeOverlay) drag(x0, y0, x1, y1 float32) {
+	o.queued = append(o.queued, Input{X: x0, Y: y0}, Input{X: x0, Y: y0, Down: true, Pointer: []Pointer{{X: x0, Y: y0, Down: true}}})
+	for i := 1; i <= 6; i++ {
+		f := float32(i) / 6
+		o.queued = append(o.queued, Input{X: x0 + (x1-x0)*f, Y: y0 + (y1-y0)*f, Down: true})
+	}
+	o.queued = append(o.queued, Input{X: x1, Y: y1, Pointer: []Pointer{{X: x1, Y: y1}}})
+	o.mx, o.my = x1, y1
+}
+
+// click queues a press and release at (x, y).
+func (o *fakeOverlay) click(x, y float32) { o.drag(x, y, x, y) }

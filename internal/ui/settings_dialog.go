@@ -10,12 +10,37 @@ import (
 	"github.com/btelolabs/btelo-video-cut/internal/gfx"
 )
 
-var settingsPages = msgs("General", "AI (MCP)", "Phone", "Extensions", "About")
+var settingsPages = msgs("General", "AI (MCP)", "Phone", "Hotkeys", "Extensions", "About")
 
-const settingsExtensionsPage = 3
+// The settings pages, by their place in settingsPages.
+const (
+	settingsGeneralPage = iota
+	settingsMCPPage
+	settingsPhonePage
+	settingsHotkeysPage
+	settingsExtensionsPage
+	settingsAboutPage
+)
+
+// visibleSettingsPages are the settings pages, in order.
+func (a *App) visibleSettingsPages() []int {
+	pages := make([]int, len(settingsPages))
+	for i := range pages {
+		pages[i] = i
+	}
+	return pages
+}
 
 // drawSettings is the settings dialog opened from the end of the tab strip.
 func (a *App) drawSettings() {
+	if !a.settingsOpen || a.settingsPage != settingsHotkeysPage {
+		// Waiting for a key ends when its page is left, so the window's own keys come back.
+		a.keyCapture = nil
+		if a.hotkeys.capturing >= 0 {
+			a.hotkeys.capturing = -1
+			a.applyHotkeys()
+		}
+	}
 	if !a.settingsOpen {
 		return
 	}
@@ -30,8 +55,9 @@ func (a *App) drawSettings() {
 		a.settingsOpen = false
 	}
 	nav := rectAt(in.X, in.Y+u.px(44), u.px(150), in.H-u.px(44))
-	for i, name := range settingsPages {
-		row := rectAt(nav.X, nav.Y+float32(i)*u.px(38), nav.W, u.px(34))
+	for row, i := range a.visibleSettingsPages() {
+		name := settingsPages[i]
+		row := rectAt(nav.X, nav.Y+float32(row)*u.px(38), nav.W, u.px(34))
 		id := fmt.Sprintf("settings/page/%d", i)
 		bg, fg := colPanel, colDim
 		if i == a.settingsPage {
@@ -49,15 +75,17 @@ func (a *App) drawSettings() {
 	body := rectAt(nav.Right()+u.px(22), nav.Y, in.Right()-nav.Right()-u.px(22), nav.H)
 	u.c.Push(body.Inset(-u.px(2)))
 	switch a.settingsPage {
-	case 0:
+	case settingsGeneralPage:
 		a.settingsGeneral(body)
-	case 1:
+	case settingsMCPPage:
 		a.settingsMCP(body)
-	case 2:
+	case settingsPhonePage:
 		a.settingsPhone(body)
+	case settingsHotkeysPage:
+		a.settingsHotkeys(body)
 	case settingsExtensionsPage:
 		a.settingsExtensions(body)
-	case 4:
+	case settingsAboutPage:
 		a.settingsAbout(body)
 	}
 	u.c.Pop()
@@ -126,7 +154,7 @@ func (a *App) settingsGeneral(r gfx.Rect) {
 
 func (a *App) settingsMCP(r gfx.Rect) {
 	u := &a.u
-	y := a.paragraph(r.X, r.Y, r.W, u.t("Any AI that speaks MCP (Claude, Codex, Cursor and others) can drive this app: open videos, cut, add text, images, music and subtitles, look at the result and export. Copy the text below and give it to your AI — that is all it needs."), 12.5, colDim)
+	y := a.paragraph(r.X, r.Y, r.W, u.t("Any AI that speaks MCP (Claude, Codex, Cursor and others) can drive this app: edit videos, draw on canvases and record the screen, look at the result and export. Choose what your AI will do, copy the text below and give it to your AI — that is all it needs."), 12.5, colDim)
 	y += u.px(10)
 	if on := u.checkbox("settings/mcp", rectAt(r.X, y, r.W, u.px(26)), u.tf("Let AI tools control %s (only from this computer)", ProductName), a.settings.MCP); on != a.settings.MCP {
 		a.settings.MCP = on
@@ -152,8 +180,16 @@ func (a *App) settingsMCP(r gfx.Rect) {
 	u.c.RoundRect(addr, u.px(6), colSurface)
 	u.label(u.face(12.5), addr.Inset(u.px(8)), s.mcpURL, colAccentHi, 0)
 	y += u.px(44)
-	if u.button("settings/mcp/copy", rectAt(r.X, y, r.W, u.px(38)), icCopy, u.t("Copy the setup for your AI"), primary, true) {
-		a.copyText(a.mcpConnection())
+	// Each kind of work has its own server and setup, so the AI hears only about the tools it needs.
+	names := u.ts(mcpDomainNames)
+	at := max(slices.Index(mcpDomains, a.mcpDomain), 0)
+	if pick := u.tabs("settings/mcp/domain", rectAt(r.X, y, r.W, u.px(34)), names, at); pick != at {
+		a.mcpDomain, a.mcpScroll = mcpDomains[pick], 0
+	}
+	domain := mcpDomains[max(slices.Index(mcpDomains, a.mcpDomain), 0)]
+	y += u.px(44)
+	if u.button("settings/mcp/copy", rectAt(r.X, y, r.W, u.px(38)), icCopy, u.tf("Copy the setup for your AI: %s", names[slices.Index(mcpDomains, domain)]), primary, true) {
+		a.copyText(a.mcpConnection(domain))
 	}
 	y += u.px(50)
 	box := rectAt(r.X, y, r.W, r.Bottom()-y)
@@ -164,7 +200,7 @@ func (a *App) settingsMCP(r gfx.Rect) {
 		u.wheel = 0
 	}
 	u.c.Push(inner)
-	bottom := a.paragraph(box.X+u.px(12), inner.Y-a.mcpScroll, box.W-u.px(30), a.mcpConnection(), 11, colDim)
+	bottom := a.paragraph(box.X+u.px(12), inner.Y-a.mcpScroll, box.W-u.px(30), a.mcpConnection(domain), 11, colDim)
 	u.c.Pop()
 	content := bottom + a.mcpScroll - inner.Y
 	a.mcpScroll = min(max(a.mcpScroll, 0), max(content-inner.H, 0))

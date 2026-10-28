@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -285,5 +286,39 @@ func TestVersionTwoEditsLoadOpaque(t *testing.T) {
 	}
 	if got.Video[0].Clips[0].Opacity != 1 || got.Overlays[0].Items[0].Opacity != 1 {
 		t.Fatal("a version 2 edit did not load opaque")
+	}
+}
+
+func TestDrawingsCoverTheFrameAndKeepTheirCanvas(t *testing.T) {
+	p := sample()
+	id := p.AddDrawing(`C:\d\Drawing.png`, `C:\d\Drawing.btcanvas`, 16.0/9, 2)
+	o, ok := p.Overlay(id)
+	if !ok || o.Kind != ImageOverlay || o.Canvas != `C:\d\Drawing.btcanvas` || o.Size != 1 || o.X != 0.5 || o.Y != 0.5 {
+		t.Fatalf("drawing %+v", o)
+	}
+	// Moving or resizing it keeps the link to its canvas.
+	p.UpdateOverlay(id, func(o *Overlay) { o.X, o.Size = 0.4, 0.5 })
+	if o, _ := p.Overlay(id); o.Canvas == "" {
+		t.Fatal("an update dropped the canvas")
+	}
+	path := filepath.Join(t.TempDir(), "p.json")
+	if err := Save(path, p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path, p.Sources[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o, _ := got.Overlay(id); o.Canvas != `C:\d\Drawing.btcanvas` {
+		t.Errorf("loaded drawing %+v", o)
+	}
+	// A plain image has no canvas, and its saved form says nothing of one.
+	img := p.AddImage("x.png", 1, 8)
+	if o, _ := p.Overlay(img); o.Canvas != "" {
+		t.Errorf("an image has a canvas %q", o.Canvas)
+	}
+	data, _ := json.Marshal(p.Overlays)
+	if n := strings.Count(string(data), `"Canvas"`); n != 1 {
+		t.Errorf("Canvas is written %d times", n)
 	}
 }

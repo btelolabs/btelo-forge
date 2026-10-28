@@ -31,7 +31,8 @@ func (h macWindow) Present(rgba []byte, width, height int) error {
 
 func (h macWindow) Input() ui.Input {
 	raw := h.w.Input()
-	in := ui.Input{X: raw.X, Y: raw.Y, Down: raw.Down, Wheel: raw.Wheel, Ctrl: raw.Ctrl, Shift: raw.Shift, Typed: raw.Typed, Dropped: raw.Dropped}
+	in := ui.Input{X: raw.X, Y: raw.Y, Down: raw.Down, Wheel: raw.Wheel, Ctrl: raw.Ctrl, Shift: raw.Shift, Typed: raw.Typed, Dropped: raw.Dropped,
+		Inactive: !h.w.Focused()}
 	for _, p := range raw.Pointer {
 		in.Pointer = append(in.Pointer, ui.Pointer{X: p.X, Y: p.Y, Right: p.Right, Down: p.Down, Double: p.Double})
 	}

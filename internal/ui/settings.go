@@ -21,14 +21,18 @@ const Repository = "https://github.com/btelolabs/btelo-video-cut"
 
 // settings are the preferences kept between runs.
 type settings struct {
-	Language    Language       `json:"language"`
-	Export      project.Export `json:"export"`
-	ExportDir   string         `json:"exportDir"`
-	Exported    []exportRecord `json:"exported"`
-	MCP         bool           `json:"mcp"`
-	Phone       bool           `json:"phone"`
-	PhoneKey    string         `json:"phoneKey"`
-	PanelHidden bool           `json:"panelHidden"`
+	Language    Language            `json:"language"`
+	Export      project.Export      `json:"export"`
+	ExportDir   string              `json:"exportDir"`
+	Exported    []exportRecord      `json:"exported"`
+	MCP         bool                `json:"mcp"`
+	Phone       bool                `json:"phone"`
+	PhoneKey    string              `json:"phoneKey"`
+	PanelHidden bool                `json:"panelHidden"`
+	Record      recordSettings      `json:"record"`
+	Hotkeys     hotkeySettings      `json:"hotkeys"`
+	Keys        map[string][]Hotkey `json:"keys,omitempty"` // the in-window shortcuts chosen, by command id; none means the defaults
+	Paint       paintSettings       `json:"paint"`
 
 	SubtitleModel    string `json:"subtitleModel"`
 	SubtitleLanguage string `json:"subtitleLanguage"`
@@ -45,7 +49,7 @@ const maxExportRecords = 200
 func (a *App) settingsPath() string { return filepath.Join(a.stateDir, "settings.json") }
 
 func defaultSettings() settings {
-	return settings{Language: English, Export: project.Export{Quality: project.Balanced}, MCP: true}
+	return settings{Language: English, Export: project.Export{Quality: project.Balanced}, MCP: true, Record: defaultRecordSettings(), Hotkeys: defaultHotkeys(), Paint: defaultPaintSettings()}
 }
 
 func (a *App) loadSettings() {

@@ -15,9 +15,9 @@ func (a *App) drawTabs(r gfx.Rect) {
 	if u.iconButton("tabs/settings", gear, icSettings, u.t("Settings"), a.settingsOpen, a.export == nil) {
 		a.settingsOpen = true
 	}
-	end := gear.X
+	end := a.drawRecordControl(gear.X, gear.Y, gear.H)
 	if a.p != nil {
-		toggle := gfx.Rect{X: gear.X - u.px(36), Y: gear.Y, W: gear.W, H: gear.H}
+		toggle := gfx.Rect{X: end - u.px(36), Y: gear.Y, W: gear.W, H: gear.H}
 		glyph, hint := icPanelOut, u.t("Hide the side panel")
 		if a.settings.PanelHidden {
 			glyph, hint = icPanelIn, u.t("Show the side panel")
@@ -114,9 +114,28 @@ func (a *App) drawEmpty(r gfx.Rect) {
 		u.t("mp4, mov, mkv, avi, webm and other common formats · cut, change speed, add music and text, compress"), colDim, 0.5)
 	u.label(sf, gfx.Rect{X: box.X + u.px(20), Y: circle.Bottom() + u.px(74), W: box.W - u.px(40), H: u.px(20)},
 		u.t("Drop more videos later to add them to the end; open another tab for a separate edit"), colDim, 0.5)
-	br := gfx.Rect{X: box.X + box.W/2 - u.px(80), Y: box.Bottom() - u.px(60), W: u.px(160), H: u.px(38)}
-	if u.button("empty/open", br, icFolder, u.t("Choose a video…"), primary, a.opening == "") {
+	// The buttons are as wide as their words need, in every language, and centred together.
+	openLabel, recordLabel := u.t("Choose a video…"), u.t("Record the screen…")
+	ow := max(u.px(160), u.buttonWidth(icFolder, openLabel))
+	br := gfx.Rect{X: box.X + box.W/2 - ow/2, Y: box.Bottom() - u.px(60), W: ow, H: u.px(38)}
+	if a.recorder() != nil {
+		rw := max(u.px(160), u.buttonWidth(icRecord, recordLabel))
+		br.X = box.X + box.W/2 - (ow+u.px(8)+rw)/2
+		rr := gfx.Rect{X: br.Right() + u.px(8), Y: br.Y, W: rw, H: br.H}
+		if u.button("empty/record", rr, icRecord, recordLabel, plain, !a.recording() && a.export == nil) {
+			a.openRecorder()
+		}
+		if reason, _ := a.recordBlocker(); reason != "" {
+			u.hint("empty/record", u.tf("Screen recording is not available: %s", reason), rr)
+		}
+	}
+	if u.button("empty/open", br, icFolder, openLabel, primary, a.opening == "") {
 		a.chooseVideo()
+	}
+	canvasLabel := u.t("New canvas")
+	cw := u.buttonWidth(icCanvas, canvasLabel)
+	if u.button("empty/canvas", gfx.Rect{X: box.X + box.W/2 - cw/2, Y: box.Bottom() + u.px(14), W: cw, H: u.px(32)}, icCanvas, canvasLabel, ghost, true) {
+		a.newCanvasNow()
 	}
 	if status, failed := a.toolsStatus(); status != "" {
 		col := colDim

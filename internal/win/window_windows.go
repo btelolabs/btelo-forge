@@ -93,6 +93,8 @@ type Window struct {
 	cursor  Cursor
 	minSize [2]int32
 	bgra    []byte
+	hotkeys []Hotkey      // registered with SetHotkeys, by id less one
+	overlay *overlayState // set for a window made by OpenOverlay
 	// Refresh runs on WM_SIZE and WM_PAINT, so the window keeps drawing while Windows runs its modal resize loop.
 	Refresh func()
 }
@@ -151,6 +153,8 @@ func Open(title string, width, height int, at Placement) (*Window, error) {
 		return nil, fmt.Errorf("CreateWindowExW: %w", e)
 	}
 	w := &Window{Handle: hwnd, cursor: Arrow, minSize: [2]int32{int32(960 * scale), int32(600 * scale)}}
+	w.input.Inactive = true // until the window gets the keyboard focus
+	mainWindow.CompareAndSwap(0, hwnd)
 	windows.Store(hwnd, w)
 	if err := associateIME(hwnd, false); err != nil {
 		w.Close()
@@ -195,13 +199,19 @@ func windowProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 				return 0
 			}
 		case wmClose:
+			// Closing the app from outside (taskkill, an installer) may reach an overlay first; the toolbar and the
+			// drawing pass it on to the main window, while the region picker takes it as cancelling.
+			if o := w.overlay; o != nil && o.forwardClose && mainWindow.Load() != 0 {
+				postMessage.Call(mainWindow.Load(), wmClose, 0, 0)
+				return 0
+			}
 			w.closed = true
 			return 0
 		case wmApp:
 			w.input.Woken = true
 			return 0
 		}
-		if w.mouse(msg, wp, lp) || w.key(msg, wp) || w.char(msg, wp) || w.drop(msg, wp) {
+		if w.mouse(msg, wp, lp) || w.key(msg, wp) || w.char(msg, wp) || w.drop(msg, wp) || w.hotkey(msg, wp) {
 			return 0
 		}
 	}
@@ -219,6 +229,7 @@ func (w *Window) Poll() bool {
 	w.input.Typed = w.input.Typed[:0]
 	w.input.Dropped = w.input.Dropped[:0]
 	w.input.Wheel = 0
+	w.input.Hotkeys = w.input.Hotkeys[:0]
 	w.input.Woken = false
 	for {
 		r, _, _ := syscall.SyscallN(peekMessage.Addr(), uintptr(unsafe.Pointer(&w.msg)), 0, 0, 0, 1)
@@ -231,11 +242,14 @@ func (w *Window) Poll() bool {
 		syscall.SyscallN(translateMessage.Addr(), uintptr(unsafe.Pointer(&w.msg)))
 		syscall.SyscallN(dispatchMessage.Addr(), uintptr(unsafe.Pointer(&w.msg)))
 	}
-	w.input.Ctrl, w.input.Shift = held(0x11), held(0x10)
+	w.input.Ctrl, w.input.Shift, w.input.Alt = held(0x11), held(0x10), held(0x12)
 	return !w.closed
 }
 
 // Wait blocks until input arrives, Wake is called, or timeoutMillis passes.
+// Forever is a Wait timeout that waits for input or Wake only.
+const Forever = 0xffffffff
+
 func (w *Window) Wait(timeoutMillis uint32) {
 	const allInput, inputAvailable = 0x04ff, 0x0004
 	msgWait.Call(0, 0, uintptr(timeoutMillis), allInput, inputAvailable)
@@ -341,6 +355,10 @@ func (w *Window) Close() {
 	destroyWindow.Call(w.Handle)
 	windows.Delete(w.Handle)
 	w.Handle = 0
+	if w.overlay != nil {
+		w.overlay.release() // an overlay shares the main window's thread, which stays locked
+		return
+	}
 	runtime.UnlockOSThread()
 }
 

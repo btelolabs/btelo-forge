@@ -51,10 +51,13 @@ type doc struct {
 	shown      shownFrame
 	times      timeFields
 	opening    string
+	art        *artDoc // a canvas tab instead of an edit
 }
 
 func (d *doc) title(a *App) string {
 	switch {
+	case d.art != nil:
+		return a.artTitle(d.art)
 	case d.p != nil:
 		return filepath.Base(d.p.Sources[0].Path)
 	case d.opening != "":
@@ -93,6 +96,14 @@ func (a *App) closeTab(i int) {
 	d := a.docs[i]
 	if err := d.save(a.saveDir); err != nil {
 		a.toast(a.u.tf("The edit could not be saved: %v", err), true)
+	}
+	if d.art != nil {
+		if d.art.stroke != nil {
+			d.art.stroke.End()
+		}
+		if err := a.saveArt(d.art, true); err != nil {
+			a.toast(a.u.tf("The canvas could not be saved: %s", a.describe(err)), true)
+		}
 	}
 	if a.doc == d {
 		a.player.Stop()
