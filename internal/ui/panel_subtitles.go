@@ -101,42 +101,10 @@ func (a *App) drawSubtitlePanel(r gfx.Rect) float32 {
 	u.heading(gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(22)}, u.t("Model"))
 	y += u.px(26)
 	lang := string(u.lang)
-	chosen := a.subtitleModel()
-	for _, m := range s.config.Models {
-		row := gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(34)}
-		id := "sub/model/" + m.ID
-		selected := m.ID == chosen.ID
-		bg := colSurface
-		edge := colBorder
-		if selected {
-			bg, edge = colSelected, colBorderHi
-		} else if u.hover(id, row) {
-			bg = colSurfaceHi
-			u.cursor = CursorHand
-		}
-		u.c.Fill(row, bg)
-		u.c.Outline(row, max(1, u.px(1)), edge)
-		dot := gfx.Rect{X: row.X + u.px(10), Y: row.Y + u.px(10), W: u.px(14), H: u.px(14)}
-		if selected {
-			u.c.Fill(dot, colPrimary)
-			u.c.Fill(dot.Inset(u.px(4)), colOnPrimary)
-		} else {
-			u.c.Outline(dot, u.px(1.5), colFaint)
-		}
-		u.label(u.bold(12.5), gfx.Rect{X: row.X + u.px(32), Y: row.Y, W: u.px(120), H: row.H}, m.Name.In(lang), colText, 0)
-		info := m.Note.In(lang)
-		if m.Size > 0 {
-			info = size(m.Size) + " · " + info
-		}
-		if _, ok := s.manager.ModelPath(m); ok {
-			info = u.t("Downloaded") + " · " + m.Note.In(lang)
-		}
-		u.label(u.face(11), gfx.Rect{X: row.X + u.px(150), Y: row.Y, W: row.W - u.px(158), H: row.H}, info, colDim, 0)
-		if u.clicked(id, row) && s.job == nil {
-			a.settings.SubtitleModel = m.ID
-			a.saveSettings()
-		}
-		y += u.px(38)
+	modelPick, y := a.drawModelRows("sub/model/", gfx.Rect{X: r.X, Y: y, W: r.W}, s.config.Models, a.subtitleModel().ID, s.manager)
+	if modelPick != "" && s.job == nil {
+		a.settings.SubtitleModel = modelPick
+		a.saveSettings()
 	}
 	y += u.px(6)
 	u.heading(gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(22)}, u.t("Spoken language"))
@@ -166,29 +134,10 @@ func (a *App) drawSubtitlePanel(r gfx.Rect) float32 {
 		}
 		return y + u.px(8)
 	}
-	if len(engines) > 1 {
-		names, current := make([]string, len(engines)), 0
-		for i, e := range engines {
-			names[i] = e.Name.In(lang)
-			if e.ID == engine.ID {
-				current = i
-			}
-		}
-		pick, h := u.flowChips("sub/engine", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(28)}, names, current)
-		if pick != current && s.job == nil {
-			a.settings.SubtitleEngine = engines[pick].ID
-			a.saveSettings()
-		}
-		y += h + u.px(4)
-	} else {
-		u.label(u.bold(12.5), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(22)}, engine.Name.In(lang), colText, 0)
-		y += u.px(26)
-	}
-	if note := engine.Note.In(lang); note != "" {
-		for _, l := range u.face(11).Wrap(note, r.W) {
-			u.c.Text(u.face(11), r.X, y, l, colFaint)
-			y += u.face(11).Height() * 1.3
-		}
+	enginePick, y := a.drawEngineChoice("sub/engine", gfx.Rect{X: r.X, Y: y, W: r.W}, engines, engine)
+	if enginePick != "" && s.job == nil {
+		a.settings.SubtitleEngine = enginePick
+		a.saveSettings()
 	}
 	return y + u.px(10)
 }

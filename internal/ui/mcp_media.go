@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -16,6 +17,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/media"
 	"github.com/btelolabs/btelo-forge/internal/project"
 	"github.com/btelolabs/btelo-forge/internal/render"
+	"github.com/btelolabs/btelo-forge/internal/speech"
 	"github.com/btelolabs/btelo-forge/internal/transcribe"
 )
 
@@ -220,6 +222,90 @@ func (a *App) addMediaTools(s *mcp.Server) {
 			st["added"], st["error"] = a.subtitles.lastDone, a.subtitles.lastErr
 		}
 		return st, nil
+	})
+
+	type speechIn struct {
+		Text        string   `json:"text,omitempty" jsonschema:"what to say, in Mandarin or English; leave out with subtitles"`
+		Start       *float64 `json:"start,omitempty" jsonschema:"where the speech starts on the timeline in seconds; the playhead when omitted"`
+		Subtitles   bool     `json:"subtitles,omitempty" jsonschema:"read the subtitles aloud instead: each text overlay of the last track with text (or of the selected overlay's track) is spoken where it starts"`
+		Voice       string   `json:"voice,omitempty" jsonschema:"voice id from list_speech_voices; the last one used when omitted"`
+		Description string   `json:"description,omitempty" jsonschema:"an English description of a voice to use instead of a listed one, such as 'An old man with a slow, husky voice'"`
+		Model       string   `json:"model,omitempty" jsonschema:"model id from list_speech_voices; Qwen3-TTS may be used commercially, Breeze TTS 2 for non-commercial work only"`
+		Engine      string   `json:"engine,omitempty" jsonschema:"engine id from list_speech_voices"`
+	}
+	tool(s, a, "generate_speech", "Make a voice-over with a local AI model (Qwen3-TTS by default, or Breeze TTS 2) and put it on a music track. Runs in the background; poll speech_status. The same words in the same voice are made once and reused.",
+		func(in speechIn) (any, error) {
+			c := a.speech.config
+			if a.p == nil {
+				return nil, errNoProject
+			}
+			if in.Subtitles == (strings.TrimSpace(in.Text) != "") {
+				return nil, errors.New("give either text or subtitles: true")
+			}
+			if in.Voice != "" && in.Description != "" {
+				return nil, errors.New("give either voice or description")
+			}
+			if in.Voice != "" {
+				if _, ok := c.Voice(in.Voice); !ok {
+					return nil, fmt.Errorf("unknown voice %q; see list_speech_voices", in.Voice)
+				}
+				a.settings.SpeechVoice = in.Voice
+			}
+			if d := strings.TrimSpace(in.Description); d != "" {
+				a.settings.SpeechVoice, a.settings.SpeechDescription = speechDescribed, d
+			}
+			if in.Model != "" {
+				if _, ok := c.Model(in.Model); !ok {
+					return nil, fmt.Errorf("unknown model %q; see list_speech_voices", in.Model)
+				}
+				a.settings.SpeechModel = in.Model
+			}
+			if in.Engine != "" {
+				if !slices.ContainsFunc(c.Available(a.speechModel()), func(e speech.Engine) bool { return e.ID == in.Engine }) {
+					return nil, fmt.Errorf("engine %q does not run model %s on this computer; see list_speech_voices", in.Engine, a.speechModel().ID)
+				}
+				a.settings.SpeechEngine = in.Engine
+			}
+			a.saveSettings()
+			lines := []speechLine{{text: in.Text, at: a.playhead}}
+			if in.Start != nil {
+				lines[0].at = *in.Start
+			}
+			if in.Subtitles {
+				if lines = a.captionLines(); len(lines) == 0 {
+					return nil, errors.New("the edit has no text overlays to read; add some or generate_subtitles first")
+				}
+			}
+			return map[string]any{"status": "started", "lines": len(lines)}, a.generateSpeech(lines, false)
+		})
+	tool(s, a, "list_speech_voices", "The voices, models and engines of generate_speech that run on this computer; a model runs on an engine of its api, and says whether it may be used commercially (see get_config speech_voices to change them).",
+		func(none) (any, error) {
+			c := a.speech.config
+			engine, _ := a.speechEngine()
+			out := map[string]any{"voice": a.speechVoiceID(), "model": a.speechModel().ID, "engine": engine.ID}
+			if a.speechVoiceID() == speechDescribed {
+				out["description"] = a.speechVoice().Instruction
+			}
+			var engines, models, voices []map[string]any
+			for _, e := range c.Engines {
+				if e.Runs() {
+					_, ready := a.speech.manager.EnginePath(e.Engine)
+					engines = append(engines, map[string]any{"id": e.ID, "api": e.API, "name": e.Name.In("en"), "note": e.Note.In("en"), "ready": ready})
+				}
+			}
+			for _, m := range c.Models {
+				_, ready := a.speech.manager.ModelPath(m.Model)
+				models = append(models, map[string]any{"id": m.ID, "api": m.API, "name": m.Name.In("en"), "note": m.Note.In("en"), "bytes": m.Size,
+					"downloaded": ready, "commercial": m.Commercial, "license": m.License.In("en")})
+			}
+			for _, v := range c.Voices {
+				voices = append(voices, map[string]any{"id": v.ID, "name": v.Name.In("en"), "description": v.Instruction})
+			}
+			out["engines"], out["models"], out["voices"] = engines, models, voices
+			return out, nil
+		})
+	tool(s, a, "speech_status", "Progress of generate_speech: running with its stage, or the outcome of the last run.", func(none) (any, error) {
+		return a.speechStatus(), nil
 	})
 
 	tool(s, a, "export_status", "Progress of the running export, or the outcome of the last one.", func(none) (any, error) {

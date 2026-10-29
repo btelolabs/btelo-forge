@@ -36,6 +36,7 @@ var mcpDomainTools = map[int][]string{
 	domainVideo: {"open_video", "seek", "split", "delete_item", "delete_items", "move_item", "trim_item", "set_clip",
 		"set_items", "set_track", "add_text", "add_image", "add_smart_object", "update_overlay", "add_music_file", "search_music",
 		"list_music_sources", "add_library_music", "generate_subtitles", "list_subtitle_models", "subtitle_status",
+		"generate_speech", "list_speech_voices", "speech_status",
 		"export", "export_status", "export_options", "set_export", "list_exports", "undo", "redo", "frame_at", "player_mode", "save_edit"},
 	domainDrawing: {"canvas_new", "canvas_open", "canvas_state", "canvas_render", "canvas_save", "canvas_export",
 		"canvas_layer", "canvas_set_layer", "canvas_select", "canvas_paint", "canvas_fill", "canvas_add_shape",
@@ -67,7 +68,7 @@ const (
 streaming live.
 These tools drive its open window directly. It works in tabs, each a video edit, a drawing canvas or a mind map: get_state lists
 them, new_tab, switch_tab and close_tab manage them, and screenshot shows the window as it looks. The app is
-extended by JSON configurations — music_sources, subtitle_models, ffmpeg and streaming_platforms: get_config reads
+extended by JSON configurations — music_sources, subtitle_models, speech_voices, ffmpeg and streaming_platforms: get_config reads
 one with a guide to its format, set_config replaces it after checking it, and reset_config goes back to the built-in.
 Files are managed as in Eagle: assets_browse shows a folder in the asset manager tab, assets_list lists a folder's
 files with their tags and categories, assets_tag and assets_categorize organise them, and assets_trash moves files to
@@ -79,8 +80,9 @@ of the main track, "upper" to lay it over the picture from a time). Cut with spl
 or clip volume with set_clip, mix tracks with set_track, add captions and images with add_text/add_image
 (update_overlay to change them), put a canvas's smart object over the picture with add_smart_object (it follows
 every change drawn in it), add music with search_music + add_library_music or add_music_file, make subtitles
-with generate_subtitles (list_music_sources and list_subtitle_models show the choices). The music sources and the
-subtitle engines and models are JSON configurations: read one with get_config (it includes a guide to the format),
+with generate_subtitles, and a voice-over from text or from the subtitles with generate_speech (list_music_sources,
+list_subtitle_models and list_speech_voices show the choices). The music sources, the subtitle engines and models
+and the voice-over voices are JSON configurations: read one with get_config (it includes a guide to the format),
 change it with set_config (it is checked before it is used) and undo that with reset_config — for example to add a
 music site, a new model or another ffmpeg download (name ffmpeg). Change several items at once with set_items
 (volume, opacity) and delete_items. Before exporting, export_options lists the presets — from high quality to extreme

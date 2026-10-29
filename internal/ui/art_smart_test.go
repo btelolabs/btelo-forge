@@ -255,3 +255,43 @@ func TestLayersPanelSmartObjects(t *testing.T) {
 		t.Errorf("the clipboard holds %q", x.h.clip)
 	}
 }
+
+// Changes to a smart object made faster than they are kept are kept once they end: the write under way finishes,
+// the versions made meanwhile wait as one, the latest, and an older one given after a newer is left out.
+func TestSmartChangesKeptLatestOnly(t *testing.T) {
+	x, _, n := smartCanvas(t)
+	a := x.a
+	id := n.Smart.ID
+	x.keptFile(id)
+	c, err := a.readSmart(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := paint.SmartFile(c)
+	var versions []paint.SmartContent
+	for i := range 5 {
+		f.Choose(f.Root.Children[0].ID)
+		f.Select(image.Rect(20+i*5, 20, 25+i*5, 25))
+		f.Fill(color.NRGBA{G: 255, A: 255})
+		versions = append(versions, f.SmartChanges()[0])
+	}
+	for _, v := range versions {
+		a.keepSmart(v, true)
+	}
+	k := &a.smartKeep
+	if len(k.waiting) != 1 || k.waiting[id].c.Version != versions[4].Version {
+		t.Fatalf("waiting %+v, not the latest alone", k.waiting)
+	}
+	a.keepSmart(versions[1], true) // older than the one waiting: left out
+	if k.waiting[id].c.Version != versions[4].Version {
+		t.Fatal("an older version took the latest's place")
+	}
+	x.pump(10*time.Second, func() bool { return !k.busy[id] && len(k.waiting) == 0 })
+	if kept, err := a.readSmart(id); err != nil || kept.Version != versions[4].Version {
+		t.Fatalf("kept version %v (%v), want the latest", kept.Version, err)
+	}
+	a.keepSmart(versions[2], true)
+	if k.busy[id] || len(k.waiting) != 0 {
+		t.Error("an older version than the one kept was written again")
+	}
+}

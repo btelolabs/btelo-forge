@@ -236,3 +236,80 @@ func TestTheFileKeepsEveryDrawing(t *testing.T) {
 		t.Errorf("a new layer took id %d", n.ID)
 	}
 }
+
+// A boarded canvas starts with its layer in the board, chosen, and nothing to undo; what is painted on the layer is
+// cut to the board.
+func TestNewBoarded(t *testing.T) {
+	d, err := NewBoarded("Layer 1", "Artboard 1", image.Rect(0, 0, 64, 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := d.Boards()
+	if len(b) != 1 || b[0].Name != "Artboard 1" || b[0].Rect != image.Rect(0, 0, 64, 64) || d.BoardOf(d.Active) != b[0].ID ||
+		d.Node(d.Active).Name != "Layer 1" || d.CanUndo() {
+		t.Fatalf("boards %+v, active %d", b, d.Active)
+	}
+	d.Select(image.Rect(-20, -20, 20, 20))
+	if err := d.Fill(color.NRGBA{R: 255, A: 255}); err != nil {
+		t.Fatal(err)
+	}
+	red := color.RGBA{R: 255, A: 255}
+	if c := d.Composite(image.Rect(-20, -20, 64, 64)); c.RGBAAt(-10, -10) == red || c.RGBAAt(10, 10) != red {
+		t.Errorf("off the board %v, on it %v", c.RGBAAt(-10, -10), c.RGBAAt(10, 10))
+	}
+	if _, err := NewBoarded("Layer 1", "Artboard 1", image.Rectangle{}); err == nil {
+		t.Error("an empty board was made")
+	}
+}
+
+// A layer copied from one artboard and pasted while another is chosen goes into that one, at the place it had in
+// its own; pasted with nothing of a board chosen it stays where it was on the canvas.
+func TestPasteBetweenArtboards(t *testing.T) {
+	d, err := NewBoarded("Layer 1", "A", image.Rect(0, 0, 100, 100))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Paper = false
+	d.Select(image.Rect(10, 20, 30, 40))
+	if err := d.Fill(color.NRGBA{R: 255, A: 255}); err != nil {
+		t.Fatal(err)
+	}
+	d.Deselect()
+	layer := d.Active
+	b, err := d.AddBoard(image.Rect(300, 500, 400, 600), "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, from, err := d.CopyNode(layer)
+	if err != nil || from != image.Rect(0, 0, 100, 100) {
+		t.Fatalf("copied from %v: %v", from, err)
+	}
+	d.Choose(b.ID) // the board itself, closed or not
+	d.Node(b.ID).Open = false
+	pasted := d.PasteNode(n, from)
+	if d.BoardOf(pasted.ID) != b.ID || d.Active != pasted.ID {
+		t.Fatalf("pasted into board %d", d.BoardOf(pasted.ID))
+	}
+	at := func(x, y int) color.RGBA { return d.Composite(image.Rect(x, y, x+1, y+1)).RGBAAt(x, y) }
+	if at(315, 525) != (color.RGBA{R: 255, A: 255}) || at(15, 25) != (color.RGBA{R: 255, A: 255}) {
+		t.Errorf("in B %v, still in A %v", at(315, 525), at(15, 25))
+	}
+	// Pasted again with the new copy chosen, inside B, it goes above it in B, at the same place.
+	again := d.PasteNode(n, from)
+	if d.BoardOf(again.ID) != b.ID || boundsOf2(again) != boundsOf2(pasted) {
+		t.Errorf("the second paste in board %d at %v", d.BoardOf(again.ID), boundsOf2(again))
+	}
+	// Copied off any board, it pastes where it was.
+	e := New("Loose")
+	e.Paper = false
+	e.Select(image.Rect(-50, -50, -40, -40))
+	e.Fill(color.NRGBA{B: 255, A: 255})
+	m, off, _ := e.CopyNode(e.Active)
+	if !off.Empty() {
+		t.Fatalf("a loose layer copied from %v", off)
+	}
+	loose := d.PasteNode(m, off)
+	if boundsOf2(loose) != image.Rect(-50, -50, -40, -40) {
+		t.Errorf("the loose layer pasted at %v", boundsOf2(loose))
+	}
+}

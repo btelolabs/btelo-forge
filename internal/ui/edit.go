@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"image"
 	"image/png"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/btelolabs/btelo-forge/internal/project"
 )
@@ -108,10 +110,12 @@ func (a *App) addImage(path string) {
 	a.showPanel(tabOverlays)
 }
 
-// paste adds what the clipboard holds: an image, files, or text as a caption.
+// paste adds what the clipboard holds: an image, files, the paths of files copied as text, or else text as a
+// caption.
 func (a *App) paste() {
 	img, files, text := a.host.Paste()
-	if n := a.pastedNode(img, files); n != nil && n.IsSmart() && a.p != nil {
+	if nc := a.pastedNode(img, files); nc != nil && nc.n.IsSmart() && a.p != nil {
+		n := nc.n
 		a.addSmartOverlay(n.Smart.ID) // its picture, following its layers
 		return
 	}
@@ -125,10 +129,43 @@ func (a *App) paste() {
 		a.addImage(path)
 	case len(files) > 0:
 		a.handleDrops(files)
+	case len(pastedPaths(text)) > 0:
+		a.handleDrops(pastedPaths(text))
 	case text != "" && a.p != nil:
 		a.change(func() { a.sel = selection{kind: selOverlay, id: a.p.AddText(text, a.playhead)} })
 		a.showPanel(tabOverlays)
 	}
+}
+
+// pastedPaths are the files and folders text names, one a line, as Explorer's Copy as path and a terminal give
+// them: quoted or not, or as file:// addresses. Text with any line that is not a full path to something there names
+// none: it is words.
+func pastedPaths(text string) []string {
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if len(line) >= 2 && (line[0] == '"' && line[len(line)-1] == '"' || line[0] == '\'' && line[len(line)-1] == '\'') {
+			line = line[1 : len(line)-1]
+		}
+		if u, err := url.Parse(line); err == nil && u.Scheme == "file" {
+			p := u.Path
+			if len(p) >= 3 && p[0] == '/' && p[2] == ':' {
+				p = p[1:] // file:///C:/… names C:\…
+			}
+			line = filepath.FromSlash(p)
+		}
+		if !filepath.IsAbs(line) {
+			return nil
+		}
+		if _, err := os.Stat(line); err != nil {
+			return nil
+		}
+		out = append(out, filepath.Clean(line))
+	}
+	return out
 }
 
 // storeImage keeps a pasted image as a PNG named after its content, so saved edits can find it again.

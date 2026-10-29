@@ -3,8 +3,10 @@ package paint
 import (
 	"image"
 	"image/color"
+	"maps"
 	"math"
 	"slices"
+	"sync/atomic"
 )
 
 // Tiles are 256×256 pixels; a tile's key is its position in tiles.
@@ -19,6 +21,28 @@ const (
 type tile struct {
 	pix    []uint8
 	frozen bool
+	// edge is where a frozen tile differs from a fill, once measured: a selection dragged about is a new snapshot
+	// of the same tiles every frame, whose bounds are so known at once. Snapshots on other goroutines share it.
+	edge atomic.Pointer[tileEdge]
+}
+
+// tileEdge is where a tile's pixels differ from fill, in the tile.
+type tileEdge struct {
+	fill uint8
+	r    image.Rectangle
+}
+
+// differing is where the tile differs from fill, as measure finds it, kept when the tile is frozen.
+func (t *tile) differing(fill uint8, measure func(pix []uint8) image.Rectangle) image.Rectangle {
+	if !t.frozen {
+		return measure(t.pix)
+	}
+	if e := t.edge.Load(); e != nil && e.fill == fill {
+		return e.r
+	}
+	r := measure(t.pix)
+	t.edge.Store(&tileEdge{fill: fill, r: r})
+	return r
 }
 
 // plane is a sparse, unbounded grid of tiles: a raster's colour (4 bytes a pixel) or a mask's coverage (1 byte).
@@ -101,6 +125,21 @@ func (p *plane) snapshot() plane {
 		c.tiles[k] = t
 	}
 	c.mips = nil
+	return c
+}
+
+// moved is a snapshot moved by (dx, dy) that keeps the halved levels made so far: they are of the plane's own
+// pixels, wherever it lies, and their tiles are never written, only dropped, so the two share them. A plane dragged
+// about, moved again every frame, so keeps them rather than halving all its tiles each time it is drawn small.
+func (p *plane) moved(dx, dy int) plane {
+	c := p.snapshot()
+	c.off = c.off.Add(image.Pt(dx, dy))
+	if len(p.mips) > 0 {
+		c.mips = make([]map[image.Point]*tile, len(p.mips))
+		for i, level := range p.mips {
+			c.mips[i] = maps.Clone(level)
+		}
+	}
 	return c
 }
 
@@ -309,6 +348,9 @@ func RasterFrom(img *image.RGBA) *Raster {
 // Snapshot is a copy that shares the tiles until either is written.
 func (r *Raster) Snapshot() *Raster { return &Raster{p: r.p.snapshot()} }
 
+// Moved is a snapshot moved by (dx, dy), keeping the halved levels: see plane.moved.
+func (r *Raster) Moved(dx, dy int) *Raster { return &Raster{p: r.p.moved(dx, dy)} }
+
 // Same reports whether two rasters hold the same tiles, as a raster and an unchanged snapshot of it do.
 func (r *Raster) Same(o *Raster) bool { return r == o || r != nil && o != nil && r.p.same(&o.p) }
 
@@ -356,7 +398,7 @@ func (r *Raster) TileBounds() image.Rectangle { return r.p.tileBounds() }
 func (r *Raster) Bounds() image.Rectangle {
 	var b image.Rectangle
 	for k, t := range r.p.tiles {
-		tb := opaqueIn(t.pix, 4, 3)
+		tb := t.differing(0, func(pix []uint8) image.Rectangle { return opaqueIn(pix, 4, 3) })
 		if !tb.Empty() {
 			b = b.Union(tb.Add(tileRect(k).Min))
 		}
@@ -415,6 +457,7 @@ func MaskFrom(img *image.Alpha, fill uint8) *Mask {
 func (m *Mask) Fill() uint8 { return m.p.fill }
 
 func (m *Mask) Snapshot() *Mask        { return &Mask{p: m.p.snapshot()} }
+func (m *Mask) Moved(dx, dy int) *Mask { return &Mask{p: m.p.moved(dx, dy)} }
 func (m *Mask) Same(o *Mask) bool      { return m == o || m != nil && o != nil && m.p.same(&o.p) }
 func (m *Mask) Write(img *image.Alpha) { m.p.write(img.Pix, img.Stride, img.Rect) }
 func (m *Mask) Move(dx, dy int)        { m.p.off = m.p.off.Add(image.Pt(dx, dy)) }
@@ -450,8 +493,9 @@ func (m *Mask) TileBounds() image.Rectangle { return m.p.tileBounds() }
 // Bounds is the smallest rectangle beyond which the mask is Fill; for a mask whose fill is 0, where it is not 0.
 func (m *Mask) Bounds() image.Rectangle {
 	var b image.Rectangle
+	fill := m.p.fill
 	for k, t := range m.p.tiles {
-		tb := differsIn(t.pix, m.p.fill)
+		tb := t.differing(fill, func(pix []uint8) image.Rectangle { return differsIn(pix, fill) })
 		if !tb.Empty() {
 			b = b.Union(tb.Add(tileRect(k).Min))
 		}

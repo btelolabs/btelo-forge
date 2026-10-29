@@ -121,10 +121,10 @@ func TestBreakingTheLink(t *testing.T) {
 func TestSmartAcrossPictures(t *testing.T) {
 	d, a, _ := smartPicture(t)
 	// A copy pasted into another picture keeps its link.
-	n, _ := d.CopyNode(a.ID)
+	n, from, _ := d.CopyNode(a.ID)
 	e := New("Other")
 	e.Paper = false
-	pasted := e.PasteNode(n)
+	pasted := e.PasteNode(n, from)
 	if pasted.Smart == nil || pasted.Smart.ID != a.Smart.ID || pasted.ID == a.ID && e.Node(pasted.ID) == nil {
 		t.Fatalf("pasted %+v", pasted.Smart)
 	}

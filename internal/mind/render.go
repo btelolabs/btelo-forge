@@ -98,6 +98,11 @@ type renderer struct {
 	z    float32
 }
 
+// overdraw is how far, in board units, a node's drawing reaches past its box: the shadow under it, and half of its
+// outline. A tile draws the trees within that of it, and a change gives up that much round what changed, so no
+// tile keeps a piece of a node that moved, nor cuts one off at its edge.
+const overdraw = 12
+
 // Render draws the part of the map within the canvas's clip as seen through v. The map must be laid out.
 func Render(c *gfx.Canvas, m *Map, v View, o *Options) {
 	cl := c.Clip()
@@ -109,7 +114,7 @@ func Render(c *gfx.Canvas, m *Map, v View, o *Options) {
 	if o.Paper {
 		r.paper()
 	}
-	area := v.BoardRect(cl).Grow(4 / v.Zoom)
+	area := v.BoardRect(cl).Grow(4/v.Zoom + overdraw)
 	var edges []*Edge
 	m.edgeGrid.query(area, func(id uint32, _ Rect) {
 		if e := m.Edge(EdgeID(id)); e != nil && e.geo.ok && !o.SkipEdges[e.ID] {
@@ -135,7 +140,7 @@ func RenderNode(c *gfx.Canvas, m *Map, v View, o *Options, n *Node) {
 	}
 	r := &renderer{c: c, th: m.Theme(), m: m, v: v, o: o, z: float32(v.Zoom),
 		clip: gfx.Rect{X: float32(cl.Min.X), Y: float32(cl.Min.Y), W: float32(cl.Dx()), H: float32(cl.Dy())}}
-	r.tree(n, m.Pos(n), v.BoardRect(cl).Grow(4/v.Zoom))
+	r.tree(n, m.Pos(n), v.BoardRect(cl).Grow(4/v.Zoom+overdraw))
 }
 
 // RenderEdge draws one connector over what is drawn already.
@@ -168,7 +173,7 @@ func (r *renderer) paper() { r.c.Fill(r.clip, r.th.Paper) }
 func (r *renderer) tree(n *Node, at Vec, area Rect) {
 	p := &n.lay
 	sub := r.v.ScreenRect(p.sub.Add(at))
-	if !sub.Intersects(r.clip) {
+	if !r.v.ScreenRect(p.sub.Add(at).Grow(overdraw)).Intersects(r.clip) {
 		return
 	}
 	if sub.W < 3 && sub.H < 3 {

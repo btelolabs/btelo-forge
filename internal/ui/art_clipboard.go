@@ -18,21 +18,23 @@ import (
 // other programs; pasting it combines it, as a shape, into the chosen vector layer, or makes it the vector mask of
 // the chosen pixel layer or group, or else puts it on a layer of its own.
 
-// nodeClip is a layer, group or smart object cut or copied on a canvas, frozen; sig and system are as vectorClip's.
+// nodeClip is a layer, group or smart object cut or copied on a canvas, frozen, and the area of the artboard it was
+// in, empty when none; sig and system are as vectorClip's.
 type nodeClip struct {
 	n      *paint.Node
+	board  image.Rectangle
 	sig    uint64
 	system bool
 }
 
 // copyNode keeps node n of the canvas as the layer clipboard and puts its picture on the system clipboard.
 func (a *App) copyNode(ad *artDoc, n *paint.Node) {
-	frozen, err := ad.d.CopyNode(n.ID)
+	frozen, board, err := ad.d.CopyNode(n.ID)
 	if err != nil {
 		a.artFailed(ad, err)
 		return
 	}
-	nc := &nodeClip{n: frozen}
+	nc := &nodeClip{n: frozen, board: board}
 	if cb, ok := a.host.(imageClipboard); ok {
 		if pic := paint.NodePicture(frozen); pic != nil && cb.SetClipboardImage(pic) == nil {
 			if back, _, _ := a.host.Paste(); back != nil {
@@ -45,22 +47,23 @@ func (a *App) copyNode(ad *artDoc, n *paint.Node) {
 }
 
 // pastedNode is the layer clipboard when the system clipboard still holds it, or holds nothing of its own.
-func (a *App) pastedNode(img image.Image, files []string) *paint.Node {
+func (a *App) pastedNode(img image.Image, files []string) *nodeClip {
 	nc := a.nodeClip
 	switch {
 	case nc == nil:
 		return nil
 	case img == nil && len(files) == 0, nc.system && img != nil && clipSig(img) == nc.sig:
-		return nc.n
+		return nc
 	}
 	return nil
 }
 
-// pasteNode pastes a copied layer, group or smart object into the canvas; its smart objects take what is kept of
-// their links, so an old clipboard does not take a change back.
-func (a *App) pasteNode(ad *artDoc, n *paint.Node) {
+// pasteNode pastes a copied layer, group or smart object into the canvas, into the chosen artboard at the place it
+// had in its own; its smart objects take what is kept of their links, so an old clipboard does not take a change
+// back.
+func (a *App) pasteNode(ad *artDoc, nc *nodeClip) {
 	a.artRun(ad, func() error {
-		ad.d.PasteNode(n)
+		ad.d.PasteNode(nc.n, nc.board)
 		return nil
 	})
 	for _, id := range ad.d.SmartLinks() {

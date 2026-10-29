@@ -19,15 +19,9 @@ import (
 // Icons of the mind map tab.
 const (
 	icMind        = "\ue97a" // account_tree
-	icNewMap      = "\uea4a" // psychology
-	icTopic       = "\ueb54" // rectangle
 	icShapeTool   = "\ue574" // category
 	icTextTool    = "\ue262" // text_fields
-	icTable       = "\ue265" // table_chart
-	icPicture     = "\ue410" // photo
-	icVideoNode   = "\ue04b" // videocam
 	icConnect     = "\ue157" // link
-	icSelect      = "\ue569" // near_me
 	icFitBoard    = "\ue56b" // fit_screen
 	icMinimap     = "\ue55b" // map
 	icFold        = "\ue5d6" // unfold_less
@@ -56,8 +50,7 @@ type mindDoc struct {
 	act      *mindAction // what the pointer is doing
 	text     *mindText   // words being typed into a node or a connector's label
 	cell     *mindCell   // a table cell being typed into
-	tool     mindTool
-	shape    mind.Shape  // what the shape tool adds
+	shape    mind.Shape  // the shape the board's menu last added
 	video    mind.ID     // the video playing in place
 	panning  bool        // Space held, or the hand dragging the view
 	themes   bool        // the theme panel is open

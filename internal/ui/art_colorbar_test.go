@@ -129,3 +129,36 @@ func TestChosenSwatchInFront(t *testing.T) {
 		t.Errorf("with the foreground chosen the overlap shows %v", c)
 	}
 }
+
+// Swapping the colours leaves each where it is shown and brings the other to the front: the swatches trade places in
+// depth, and D puts black back in front at the top left.
+func TestSwappedSwatchesTradePlaces(t *testing.T) {
+	x, _ := canvasHarness(t)
+	a := x.a
+	a.pickBackground = false
+	a.brush.Color = color.NRGBA{R: 255, A: 255}
+	a.settings.Paint.Background = "#0000ff"
+	picker, _ := a.sideLayout(a.artLayout(a.layout().body).side)
+	tools := a.colourSwatchArea(picker).Pixels()
+	at := func(dx, dy int) color.RGBA { return x.c.Img.RGBAAt(tools.Min.X+dx, tools.Min.Y+dy) }
+	px := func(v float32) int { return int(a.u.px(v)) }
+	topLeft, bottomRight, overlap := [2]int{px(5), px(5)}, [2]int{px(38), px(35)}, [2]int{px(22), px(20)}
+	red, blue := color.RGBA{255, 0, 0, 255}, color.RGBA{0, 0, 255, 255}
+	x.frame(Input{})
+	if at(topLeft[0], topLeft[1]) != red || at(bottomRight[0], bottomRight[1]) != blue || at(overlap[0], overlap[1]) != red {
+		t.Fatalf("before the swap: %v, %v, the overlap %v", at(topLeft[0], topLeft[1]), at(bottomRight[0], bottomRight[1]), at(overlap[0], overlap[1]))
+	}
+	x.key('X', false)
+	x.frame(Input{})
+	if a.brush.Color != (color.NRGBA{B: 255, A: 255}) || !a.settings.Paint.ColoursSwapped {
+		t.Fatalf("X left the foreground %v", a.brush.Color)
+	}
+	if at(topLeft[0], topLeft[1]) != red || at(bottomRight[0], bottomRight[1]) != blue || at(overlap[0], overlap[1]) != blue {
+		t.Errorf("after the swap: %v, %v, the overlap %v", at(topLeft[0], topLeft[1]), at(bottomRight[0], bottomRight[1]), at(overlap[0], overlap[1]))
+	}
+	x.key('D', false)
+	x.frame(Input{})
+	if a.settings.Paint.ColoursSwapped || at(topLeft[0], topLeft[1]) != (color.RGBA{A: 255}) {
+		t.Errorf("D left the top left %v", at(topLeft[0], topLeft[1]))
+	}
+}

@@ -18,12 +18,11 @@ import (
 // types into a topic, a table's cell or a connector, opens a nested map or a smart object, plays a video, and on
 // the board adds a topic.
 
-// mindTool is what a click on the board adds.
+// mindTool is what the board's menu adds.
 type mindTool int
 
 const (
-	mtSelect mindTool = iota
-	mtTopic
+	mtTopic mindTool = iota
 	mtShape
 	mtText
 	mtTable
@@ -32,9 +31,6 @@ const (
 	mtNested
 	mtMap
 )
-
-// mindToolList are the tool bar's tools, in order.
-var mindToolList = []mindTool{mtSelect, mtMap, mtTopic, mtShape, mtText, mtTable, mtPicture, mtVideo, mtNested}
 
 // What a pointer gesture is doing.
 const (
@@ -321,8 +317,6 @@ func (a *App) mindCursor(md *mindDoc, r gfx.Rect, v mind.View, inBoard bool) {
 	case !inBoard:
 	case md.panning:
 		u.cursor = CursorMove
-	case md.tool == mtTopic || md.tool == mtShape || md.tool == mtText || md.tool == mtTable || md.tool == mtMap:
-		u.cursor = CursorCross
 	default:
 		if n := a.mindHandlesFor(md); n != nil {
 			for _, h := range a.mindHandles(md, n, v) {
@@ -378,14 +372,6 @@ func (a *App) mindPress(md *mindDoc, r gfx.Rect, v mind.View) {
 	md.act = act
 	if md.panning {
 		act.kind = actPan
-		return
-	}
-	switch md.tool {
-	case mtTopic, mtShape, mtText, mtTable, mtMap:
-		a.mindPlace(md, md.tool, p)
-		md.tool = mtSelect
-		md.act = nil
-		u.active = ""
 		return
 	}
 	if e := m.Edge(md.edge); e != nil {

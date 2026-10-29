@@ -21,6 +21,8 @@ type assetFilter struct {
 	what filterWhat
 	kind assets.Kind
 	name string // a category or tag
+	// folders lets the folders through as well, to go into, as the video editor's list of videos does.
+	folders bool
 }
 
 type filterWhat int
@@ -80,7 +82,7 @@ func (a *App) passes(p *filesPane, fe *files.Entry) bool {
 		return true
 	}
 	if e.Kind == assets.Folder {
-		return false // a filter shows files
+		return f.folders // a filter shows files
 	}
 	it := a.assetLibrary().Of(e.Path)
 	switch f.what {

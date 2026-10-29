@@ -139,11 +139,26 @@ func (a *App) openArt(d *paint.Doc, path string) {
 	a.linkSmart(a.art)
 }
 
+// newBoardSide is the side of the square artboard a new canvas starts with.
+const newBoardSide = 1024
+
 // newCanvas makes an empty canvas, with no size: it has no edge and grows with what is drawn on it, as Affinity
-// Designer's does. Its file is named now but written only with the first change, a moment after it as every change
-// is, so a canvas opened and closed again with nothing on it leaves no file behind.
+// Designer's does, and starts with a 1024×1024 artboard holding its first layer. Its file is named now but written
+// only with the first change, a moment after it as every change is, so a canvas opened and closed again with nothing
+// on it leaves no file behind.
 func (a *App) newCanvas() error {
-	d := paint.New(a.u.tf("Layer %d", 1))
+	d, err := paint.NewBoarded(a.u.tf("Layer %d", 1), a.u.tf("Artboard %d", 1), image.Rect(0, 0, newBoardSide, newBoardSide))
+	if err != nil {
+		return err
+	}
+	return a.openNewCanvas(d)
+}
+
+// newBareCanvas makes an empty canvas as newCanvas does, with no artboard.
+func (a *App) newBareCanvas() error { return a.openNewCanvas(paint.New(a.u.tf("Layer %d", 1))) }
+
+// openNewCanvas opens d, a new canvas, under a file named now.
+func (a *App) openNewCanvas(d *paint.Doc) error {
 	path, err := a.capturePath(a.u.t("Canvas %s"), paint.Ext, time.Now())
 	if err != nil {
 		return err

@@ -103,6 +103,8 @@ type filesSettings struct {
 	HideHidden bool `json:"hideHidden,omitempty"` // hidden files are left out of the lists
 	// Panes are the lists the file manager tab used last had, left to right, which a new one opens again.
 	Panes []savedPane `json:"panes,omitempty"`
+	// VideoDir is the folder the video editor's list of videos showed last, which it opens in again.
+	VideoDir string `json:"videoDir,omitempty"`
 }
 
 // savedPane is a list as it is kept between runs: its folder, and whether it shows pictures.
@@ -398,6 +400,9 @@ func (a *App) refreshPanes(dirs []string) {
 				a.readPane(p)
 			}
 		}
+	}
+	if p := a.videoList; p != nil && (dirs == nil || slices.ContainsFunc(dirs, func(dir string) bool { return files.SamePath(dir, p.dir) })) {
+		a.readPane(p)
 	}
 }
 

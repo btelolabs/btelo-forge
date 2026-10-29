@@ -43,6 +43,9 @@ type paintSettings struct {
 	Follow      bool     `json:"followStroke,omitempty"`
 	Color       string   `json:"color"`      // the foreground colour
 	Background  string   `json:"background"` // the background colour
+	// ColoursSwapped says the colours were swapped an odd number of times since they were made black and white:
+	// their swatches trade places, each colour staying where it is shown.
+	ColoursSwapped bool `json:"coloursSwapped,omitempty"`
 
 	// SameSize keeps the brush's size when another preset or picture tip is chosen; without it each brush has its own
 	// size, kept in Sizes by brushKey, at first the preset's or the tip's.
@@ -207,6 +210,7 @@ func (a *App) swapColors() {
 	fg, bg := a.brush.Color, a.backgroundColor()
 	a.brush.Color = bg
 	a.settings.Paint.Background = hexColor(fg)
+	a.settings.Paint.ColoursSwapped = !a.settings.Paint.ColoursSwapped
 	a.picker.hex = ""
 	a.saveBrush()
 }
@@ -214,6 +218,7 @@ func (a *App) swapColors() {
 func (a *App) resetColors() {
 	a.brush.Color = color.NRGBA{A: 255}
 	a.settings.Paint.Background = "#ffffff"
+	a.settings.Paint.ColoursSwapped = false
 	a.picker.hex = ""
 	a.saveBrush()
 }
@@ -812,7 +817,7 @@ type layerThumb struct {
 func (a *App) thumbFor(ad *artDoc, key int, of any, size image.Point, make func(dst *image.RGBA)) *image.RGBA {
 	t := a.thumbs[key]
 	stale := t == nil || t.of != of || t.img.Rect.Size() != size ||
-		ad.changed.After(t.at) && (ad.stroke == nil || time.Since(t.at) > 300*time.Millisecond)
+		ad.changed.After(t.at) && (ad.stroke == nil && ad.move == nil || time.Since(t.at) > 300*time.Millisecond)
 	if stale {
 		if t == nil || t.img.Rect.Size() != size {
 			t = &layerThumb{img: image.NewRGBA(image.Rectangle{Max: size})}

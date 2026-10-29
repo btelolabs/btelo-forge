@@ -210,13 +210,11 @@ func moveNode(n *Node, dx, dy int) {
 	case n.Vector != nil:
 		transformVector(n, Translate(float64(dx), float64(dy)))
 	case n.Pixels != nil:
-		n.Pixels = n.Pixels.Snapshot()
-		n.Pixels.Move(dx, dy)
+		n.Pixels = n.Pixels.Moved(dx, dy)
 		shiftText(n, dx, dy)
 	}
 	if n.Mask != nil {
-		n.Mask = n.Mask.Snapshot()
-		n.Mask.Move(dx, dy)
+		n.Mask = n.Mask.Moved(dx, dy)
 	}
 	if n.Clip != nil {
 		n.Clip = n.Clip.Transformed(Translate(float64(dx), float64(dy)))

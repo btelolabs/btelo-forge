@@ -207,7 +207,8 @@ func TestPictureDroppedOnAnEmptyTabOpensAsACanvas(t *testing.T) {
 	}
 }
 
-// A new canvas has no size: it opens at once, empty, on white paper, and grows with what is drawn on it.
+// A new canvas has no size: it opens at once, empty, on white paper, with a 1024×1024 artboard holding its one
+// layer, and grows with what is drawn on it.
 func TestNewCanvasHasNoSize(t *testing.T) {
 	x := newHarness(t)
 	a := x.a
@@ -217,6 +218,14 @@ func TestNewCanvasHasNoSize(t *testing.T) {
 	ad := a.art
 	if ad == nil || !ad.d.Frame.Empty() || !ad.d.Paper || len(ad.d.Layers()) != 1 {
 		t.Fatalf("a new canvas %+v", ad)
+	}
+	boards := ad.d.Boards()
+	if len(boards) != 1 || boards[0].Rect != image.Rect(0, 0, 1024, 1024) || ad.d.BoardOf(ad.d.Active) != boards[0].ID || ad.d.CanUndo() {
+		t.Fatalf("a new canvas's artboards %+v, its layer in %d", boards, ad.d.BoardOf(ad.d.Active))
+	}
+	// With the artboard taken away, keeping its layer, the layer grows with what is drawn on it.
+	if err := ad.d.DeleteBoard(boards[0].ID); err != nil {
+		t.Fatal(err)
 	}
 	if c := ad.look(-5000, 7000); c != (color.RGBA{255, 255, 255, 255}) {
 		t.Errorf("the paper is %v far out", c)

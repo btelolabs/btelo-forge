@@ -23,6 +23,7 @@ const (
 	tabMusic = iota
 	tabOverlays
 	tabSubtitles
+	tabSpeech
 	tabExport
 )
 
@@ -53,6 +54,7 @@ type App struct {
 	media           mediaCache
 	music           musicPanel
 	subtitles       subtitlePanel
+	speech          speechPanel
 	export          *exportJob
 	last            lastExport
 	known           map[string]library.Track
@@ -63,7 +65,7 @@ type App struct {
 	exportForm      exportForm
 	encoders        media.Encoders // nil until probed
 	tools           toolsState
-	panelScroll     [4]float32
+	panelScroll     [5]float32
 	rec             recordState
 	onAir           liveState   // the live stream
 	cam             cameraState // the camera on the screen
@@ -89,6 +91,7 @@ type App struct {
 	brushShape      brushOutline               // the brush's shape at the pointer, as last worked out
 	smartKeep       smartKeeper                // writes smart objects' shared layers to their folder
 	pickBackground  bool                       // the colour panel sets the background colour
+	fillStrokeSwap  bool                       // the fill and stroke were swapped: their swatches trade places
 	picker          colorPicker
 	menu            *popupMenu
 	dialog          artDialog     // the canvas editor's open dialog
@@ -100,11 +103,12 @@ type App struct {
 	layersScroll    float32
 	thumbs          map[int]*layerThumb // by layer id
 	over            screenState         // the windows over the screen
-	panelContent    [4]float32          // height of each panel's content at the last frame
+	panelContent    [5]float32          // height of each panel's content at the last frame
 	screen          gfx.Rect
 	services        *services
 	fm              fileManager             // what the file manager tabs share
 	fileThumbs      thumbCache              // small pictures of files, for the asset manager and file lists
+	videoList       *filesPane              // the video editor's list of folders and videos, made when first shown
 	preview         filePreview             // the file previewed in full
 	previewPlayer   *playback.Player        // plays the previewed video, apart from the editor's player
 	positions       map[string]playPosition // where the videos and sounds previewed were left, by positionKey
@@ -147,6 +151,7 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	a.music.init()
 	a.subtitles.config = transcribe.DefaultConfig()
 	a.subtitles.manager = transcribe.NewManager(filepath.Join(cacheDir, "whisper"))
+	a.speech.init(cacheDir, stateDir)
 	a.tools.config = media.DefaultToolsConfig()
 	a.onAir.platforms = capture.DefaultPlatforms()
 	a.loadConfigs()
@@ -298,7 +303,7 @@ func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 	if a.player.Playing() {
 		sooner(time.Second / 60)
 	}
-	if key, _ := a.audition.Playing(); key != "" || a.music.downloading() || a.subtitles.busy() {
+	if key, _ := a.audition.Playing(); key != "" || a.music.downloading() || a.subtitles.busy() || a.speech.busy() {
 		sooner(time.Second / 10)
 	}
 	if a.u.blinking && !a.u.inactive { // a caret only blinks in the window being typed in
@@ -401,6 +406,7 @@ func (a *App) Close() {
 		a.export.cancel()
 	}
 	a.subtitles.cancel()
+	a.speech.close()
 	for _, d := range a.docs {
 		d.save(a.saveDir)
 		if d.art != nil {

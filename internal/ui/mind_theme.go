@@ -55,8 +55,9 @@ func (a *App) mindThemePreview(th *mind.Theme, w, h int) *image.RGBA {
 	return img
 }
 
-// mindThemePanel is where the theme panel is, under the tool bar, or nothing while it is closed.
-func (a *App) mindThemePanel(md *mindDoc, tools gfx.Rect) gfx.Rect {
+// mindThemePanel is where the theme panel is, or nothing while it is closed: above the zoom bar of the board r,
+// whose button opens it, at the right, over the overview; kept on the board when the window is small.
+func (a *App) mindThemePanel(md *mindDoc, r, zoom gfx.Rect) gfx.Rect {
 	if !md.themes {
 		return gfx.Rect{}
 	}
@@ -64,7 +65,7 @@ func (a *App) mindThemePanel(md *mindDoc, tools gfx.Rect) gfx.Rect {
 	rows := (len(mind.Themes) + themeCols - 1) / themeCols
 	w := u.px(16) + float32(themeCols)*u.px(themeCardW+12)
 	h := u.px(16) + float32(rows)*u.px(themeCardH+34)
-	return gfx.Rect{X: tools.X + (tools.W-w)/2, Y: tools.Bottom() + u.px(8), W: w, H: h}
+	return gfx.Rect{X: max(zoom.Right()-w, r.X+u.px(8)), Y: max(zoom.Y-u.px(8)-h, r.Y+u.px(8)), W: w, H: h}
 }
 
 // drawMindThemes draws the theme panel in r: each theme's preview and name, the map's own ringed; a click on one

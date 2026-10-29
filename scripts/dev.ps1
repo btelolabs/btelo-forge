@@ -79,14 +79,15 @@ try {
         $shortcut.Description = '从源码编译并打开 Btelo Forge'
         $shortcut.WindowStyle = 7
         $shortcut.Save()
+        # Explorer keeps showing what it last saw of a shortcut changed from outside it (an old icon, or one
+        # deleted) until the desktop is refreshed, so tell the shell (SHCNF_PATHW | SHCNF_FLUSH).
+        Add-Type -Namespace BteloForge -Name Shell -MemberDefinition '[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern void SHChangeNotify(int eventId, uint flags, string item1, System.IntPtr item2);'
+        [BteloForge.Shell]::SHChangeNotify(0x2000, 0x1005, $link, [IntPtr]::Zero) # SHCNE_UPDATEITEM
         # The shortcut from before the app was renamed, which this one replaces.
         $oldLink = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Btelo Video Cut（开发版）.lnk'
         if (Test-Path -LiteralPath $oldLink) {
             Remove-Item -LiteralPath $oldLink -Force
-            # Explorer can keep showing a shortcut deleted from outside it until the desktop is refreshed, so tell
-            # the shell it is gone (SHCNE_DELETE, SHCNF_PATHW | SHCNF_FLUSH).
-            Add-Type -Namespace BteloForge -Name Shell -MemberDefinition '[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern void SHChangeNotify(int eventId, uint flags, string item1, System.IntPtr item2);'
-            [BteloForge.Shell]::SHChangeNotify(0x4, 0x1005, $oldLink, [IntPtr]::Zero)
+            [BteloForge.Shell]::SHChangeNotify(0x4, 0x1005, $oldLink, [IntPtr]::Zero) # SHCNE_DELETE
         }
         Write-Host "桌面快捷方式已创建：$link"
         return

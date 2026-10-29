@@ -210,7 +210,7 @@ func (a *App) drawPane(fd *filesDoc, i int, p *filesPane, r gfx.Rect, moved bool
 		if _, done := u.textBox(promptID, box, &pr.text, u.t("Type or paste a folder or file to go to"), false); done && fd.prompt == pr {
 			a.closePrompt(fd) // a click elsewhere
 		}
-	} else if a.drawPathBar(p, id, head) {
+	} else if a.drawPathBar(p, id, head, true) {
 		a.focusPane(fd, i)
 		a.openPrompt(fd, promptPath)
 	}
@@ -271,13 +271,16 @@ func (a *App) fileKeyHint(id string) string {
 	return ""
 }
 
-// drawPathBar draws the folder as its parts, each of which can be clicked to go there, and on the right what is
-// known of it: an analysis running or done, and the order. It reports a click on the bar's empty part, which turns
-// it into a box to type or paste a path in, as Explorer's address bar does.
-func (a *App) drawPathBar(p *filesPane, id string, r gfx.Rect) bool {
+// drawPathBar draws the folder as its parts, each of which can be clicked to go there. A file manager's list (manager)
+// shows on the right what is known of it, an analysis running or done and the order, and the bar reports a click on
+// its empty part, which turns it into a box to type or paste a path in, as Explorer's address bar does.
+func (a *App) drawPathBar(p *filesPane, id string, r gfx.Rect, manager bool) bool {
 	u := &a.u
 	f := u.face(13)
-	info := a.paneInfo(p)
+	info := ""
+	if manager {
+		info = a.paneInfo(p)
+	}
 	inf := u.face(11.5)
 	iw := min(inf.Measure(info)+u.px(16), r.W*0.4)
 	if info != "" {
@@ -354,7 +357,7 @@ func (a *App) drawPathBar(p *filesPane, id string, r gfx.Rect) bool {
 		}
 	}
 	empty := gfx.Rect{X: x + u.px(4), Y: r.Y, W: r.X + room - x - u.px(4), H: r.H}
-	if empty.W <= 0 {
+	if empty.W <= 0 || !manager {
 		return false
 	}
 	if u.hover(id+"/edit", empty) {

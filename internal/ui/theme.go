@@ -72,6 +72,7 @@ const (
 	icHide     = "\ue8f5"
 	icPaste    = "\ue14f"
 	icSubtitle = "\ue048"
+	icVoice    = "\ue91f"
 	icInfo     = "\ue88e"
 	icPanelOut = "\ueac9"
 	icPanelIn  = "\ueac3"

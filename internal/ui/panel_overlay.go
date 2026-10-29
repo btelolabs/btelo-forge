@@ -12,7 +12,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
-var panelTabs = msgs("Music", "Overlays", "Subtitles", "Export")
+var panelTabs = msgs("Music", "Overlays", "Subtitles", "Voice", "Export")
 
 // timeFields hold what the user is typing into the start and end boxes until it is committed.
 type timeFields struct {
@@ -42,6 +42,8 @@ func (a *App) drawPanel(r gfx.Rect) {
 		a.scrolled(body, a.drawOverlayPanel)
 	case tabSubtitles:
 		a.scrolled(body, a.drawSubtitlePanel)
+	case tabSpeech:
+		a.scrolled(body, a.drawSpeechPanel)
 	case tabExport:
 		a.drawExportTab(body)
 	}

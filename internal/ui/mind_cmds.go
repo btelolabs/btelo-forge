@@ -72,7 +72,7 @@ func (a *App) mindCommands() []mindCommand {
 		c("save", u.t("Save now"), func() { md.dirty = true; a.saveMind(md, false) }, key('S', "c")),
 		c("export", u.t("Export as a picture…"), func() { a.exportMindPicture(md) }, key('E', "cs")),
 		c("copy-outline", u.t("Copy as an outline"), func() { a.mindCopyOutline(md) }, key('C', "cs")),
-		c("escape", u.t("Stop: drop the choice and the tool"), func() { a.mindEscape(md) }, key(keyEscape, "")),
+		c("escape", u.t("Stop the video, or drop the choice"), func() { a.mindEscape(md) }, key(keyEscape, "")),
 	}
 }
 
@@ -128,56 +128,6 @@ func (a *App) mindKeys(md *mindDoc, r gfx.Rect) {
 		if n := md.m.Node(md.primary); n != nil && strings.TrimSpace(typed) != "" && len(md.sel) == 1 && n.Kind != mind.Table {
 			u.typed = nil
 			a.editMindText(md, n.ID, typed, false)
-		}
-	}
-}
-
-// mindToolLabel names a tool and gives its icon.
-func (a *App) mindToolLabel(t mindTool) (string, string) {
-	u := &a.u
-	switch t {
-	case mtMap:
-		return u.t("New mind map: click on the board"), icNewMap
-	case mtTopic:
-		return u.t("Topic: click on the board"), icTopic
-	case mtShape:
-		return u.t("Flowchart shape: click on the board"), icShapeTool
-	case mtText:
-		return u.t("Text: click on the board"), icTextTool
-	case mtTable:
-		return u.t("Table: click on the board"), icTable
-	case mtPicture:
-		return u.t("Add pictures, animations or canvases…"), icPicture
-	case mtVideo:
-		return u.t("Add videos…"), icVideoNode
-	case mtNested:
-		return u.t("Add a mind map inside this one…"), icMind
-	}
-	return u.t("Choose and move"), icSelect
-}
-
-// pickMindTool chooses a tool from the tool bar; the file tools ask for files at once, the shape tool for a shape.
-func (a *App) pickMindTool(md *mindDoc, t mindTool, at gfx.Rect) {
-	u := &a.u
-	a.commitMindText(md)
-	a.commitMindCell(md)
-	switch t {
-	case mtPicture, mtVideo, mtNested:
-		md.tool = mtSelect
-		a.mindChooseFiles(md, t)
-	case mtShape:
-		var items []menuItem
-		for _, s := range mindShapes {
-			items = append(items, menuItem{label: u.t(mindShapeNames[s]), checked: md.shape == s, run: func() {
-				md.tool, md.shape = mtShape, s
-			}})
-		}
-		a.openMenu("mind/shapes", at, items)
-	default:
-		if md.tool == t {
-			md.tool = mtSelect
-		} else {
-			md.tool = t
 		}
 	}
 }
@@ -601,11 +551,9 @@ func (a *App) mindZoomToSelection(md *mindDoc, r gfx.Rect) {
 	md.fitTo(b, a.mindFitArea(md, r, b))
 }
 
-// mindEscape drops the tool, the chosen connector and the choice, in that order.
+// mindEscape stops the video playing in place, else drops the choice.
 func (a *App) mindEscape(md *mindDoc) {
 	switch {
-	case md.tool != mtSelect:
-		md.tool = mtSelect
 	case md.video != 0:
 		md.video = 0
 		a.closeFilePreview()
@@ -720,7 +668,8 @@ func (a *App) mindPaste(md *mindDoc) {
 		choose(m.Insert(c.m, parent, -1, at))
 		return
 	}
-	if n := a.pastedNode(img, files); n != nil && n.IsSmart() {
+	if nc := a.pastedNode(img, files); nc != nil && nc.n.IsSmart() {
+		n := nc.n
 		id, err := a.mindAddCentred(md, mind.Node{Kind: mind.Smart, Ref: n.Smart.ID, Text: n.Name}, at)
 		choose([]mind.ID{id}, err)
 		return
@@ -1275,7 +1224,7 @@ type mindCellAt struct {
 	row, col int
 }
 
-// mindMoreMenu is the tool bar's menu: the whole map's commands.
+// mindMoreMenu is the zoom bar's menu: the whole map's commands.
 func (a *App) mindMoreMenu(md *mindDoc) []menuItem {
 	u := &a.u
 	key := a.mindKeyHint

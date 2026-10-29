@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/paint"
@@ -40,11 +39,19 @@ func (a *App) smartPath(id string) string { return filepath.Join(a.smartDir(), i
 // smartImage is where the picture of the shared layers of link id is kept, for the video editor.
 func (a *App) smartImage(id string) string { return filepath.Join(a.smartDir(), id+".png") }
 
-// smartKeeper writes shared layers to the smart objects folder away from the window, one write at a time, never an
-// older version over a newer one.
+// smartKeeper writes shared layers to the smart objects folder away from the window: for each link one write at a
+// time, and of the versions waiting meanwhile only the latest, so a run of quick changes is written once it ends
+// rather than once for each; never an older version over a newer one. It is used on the window's goroutine only.
 type smartKeeper struct {
-	sync.Mutex
-	written map[string]int64 // the version kept of each link
+	busy    map[string]bool          // the links being written
+	waiting map[string]smartKeepWork // the latest version of each link waiting for the write before it
+	newest  map[string]int64         // the latest version of each link given to be written
+}
+
+// smartKeepWork is a version of shared layers to keep, and whether its file is written as well as its picture.
+type smartKeepWork struct {
+	c    paint.SmartContent
+	file bool
 }
 
 // sourceTab is the canvas tab the smart object's own file of link id is open in, or nil.
@@ -78,21 +85,36 @@ func (a *App) syncSmart() {
 
 // keepSmart writes shared layers to the smart objects folder, the smart object's own file unless a canvas tab has
 // it open (that tab saves it) or file is false, and always its picture, which the video editor then takes again.
+// While the link is being written it waits, the latest version taking the place of any older one waiting.
 func (a *App) keepSmart(c paint.SmartContent, file bool) {
-	if a.sourceTab(c.ID) != nil {
-		file = false
-	}
-	dir, path, picPath := a.smartDir(), a.smartPath(c.ID), a.smartImage(c.ID)
 	k := &a.smartKeep
+	if k.busy == nil {
+		k.busy, k.waiting, k.newest = map[string]bool{}, map[string]smartKeepWork{}, map[string]int64{}
+	}
+	if c.Version < k.newest[c.ID] {
+		return // a newer one is kept already, or is being
+	}
+	if w, ok := k.waiting[c.ID]; ok {
+		file = file || w.file // the file waiting to be written is written with the newer layers
+		if w.c.Version > c.Version {
+			c = w.c
+		}
+	}
+	k.waiting[c.ID] = smartKeepWork{c: c, file: file}
+	if !k.busy[c.ID] {
+		a.writeSmart(c.ID)
+	}
+}
+
+// writeSmart writes the version of link id waiting, on another goroutine, and then the one waiting after it, if any.
+func (a *App) writeSmart(id string) {
+	k := &a.smartKeep
+	w := k.waiting[id]
+	delete(k.waiting, id)
+	k.busy[id], k.newest[id] = true, w.c.Version
+	c, file := w.c, w.file && a.sourceTab(id) == nil
+	dir, path, picPath := a.smartDir(), a.smartPath(id), a.smartImage(id)
 	a.background(func(context.Context) {
-		k.Lock()
-		defer k.Unlock()
-		if k.written == nil {
-			k.written = map[string]int64{}
-		}
-		if k.written[c.ID] > c.Version {
-			return // a newer one is kept already
-		}
 		err := os.MkdirAll(dir, 0o755)
 		if err == nil && file {
 			var buf bytes.Buffer
@@ -109,16 +131,17 @@ func (a *App) keepSmart(c paint.SmartContent, file bool) {
 			aspect = float64(pic.Rect.Dx()) / float64(pic.Rect.Dy())
 			err = writePNG(picPath, pic)
 		}
-		if err == nil {
-			k.written[c.ID] = c.Version
-		}
 		a.post(func() {
+			k.busy[id] = false
 			if err != nil {
-				a.toast(a.u.tf("Smart object %s could not be kept: %s", c.ID, a.describe(err)), true)
-				return
+				a.toast(a.u.tf("Smart object %s could not be kept: %s", id, a.describe(err)), true)
+			} else {
+				a.drawingsChanged([]string{picPath})
+				a.smartPictureChanged(id, aspect)
 			}
-			a.drawingsChanged([]string{picPath})
-			a.smartPictureChanged(c.ID, aspect)
+			if _, ok := k.waiting[id]; ok {
+				a.writeSmart(id)
+			}
 		})
 	})
 }

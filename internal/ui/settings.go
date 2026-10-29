@@ -42,6 +42,11 @@ type settings struct {
 	SubtitleModel    string `json:"subtitleModel"`
 	SubtitleLanguage string `json:"subtitleLanguage"`
 	SubtitleEngine   string `json:"subtitleEngineId"`
+
+	SpeechModel       string `json:"speechModel,omitempty"`
+	SpeechVoice       string `json:"speechVoice,omitempty"`       // a configured voice's id, or speechDescribed
+	SpeechDescription string `json:"speechDescription,omitempty"` // the voice described by the user
+	SpeechEngine      string `json:"speechEngine,omitempty"`
 }
 
 type exportRecord struct {

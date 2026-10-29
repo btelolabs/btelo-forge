@@ -51,6 +51,26 @@ func snapshotTree(n *Node) *Node {
 	return &c
 }
 
+// copyTree is a copy of a tree sharing its pixels, as snapshotTree's, that keeps the halved levels made so far: for
+// copies that are shown, as a smart object's copies are, so that drawing them small does not halve them again. The
+// history's snapshots leave the levels out, never drawn.
+func copyTree(n *Node) *Node {
+	c := *n
+	if n.Pixels != nil {
+		c.Pixels = n.Pixels.Moved(0, 0)
+	}
+	if n.Mask != nil {
+		c.Mask = n.Mask.Moved(0, 0)
+	}
+	if n.Children != nil {
+		c.Children = make([]*Node, len(n.Children))
+		for i, ch := range n.Children {
+			c.Children[i] = copyTree(ch)
+		}
+	}
+	return &c
+}
+
 // Mark is the state before a change, for Commit.
 type Mark struct{ s state }
 

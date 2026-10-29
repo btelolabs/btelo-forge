@@ -62,6 +62,7 @@ type place struct {
 	under  bool   // tasks are counted under it: it shows a ring of their progress rather than a box
 	rel    Vec    // the box's top-left from its parent's
 	sub    Rect   // the subtree's box from its own top-left
+	at     Vec    // the box's top-left on the board when it was last laid out: where its subtree's drawing is
 	dir    Layout // which way its children grow
 	depth  int    // below its root
 	branch int    // the main branch it is on
@@ -107,7 +108,7 @@ func (l *layoutState) region(r Rect) {
 		l.everything, l.regions = true, nil
 		return
 	}
-	l.regions = append(l.regions, r)
+	l.regions = append(l.regions, r.Grow(overdraw)) // what is drawn round it, its shadow, changes with it
 }
 
 // touch notes that n changed and must be measured again, and marks the way up to its root.
@@ -180,10 +181,12 @@ func (m *Map) Layout() {
 				continue // its tree was laid out already
 			}
 		}
+		// Where the tree was drawn: a free node dragged has its new place already, so the old one is what the layout
+		// last saw, not where it is now.
 		old := emptyRect
 		had := n.lay.measured
 		if had {
-			old = n.lay.sub.Add(Vec{n.X, n.Y})
+			old = n.lay.sub.Add(n.lay.at)
 		}
 		dir := n.Layout
 		if dir == LayoutMap {
@@ -208,6 +211,7 @@ func (m *Map) Layout() {
 // box's top-left at at on the board (for the areas that change); it does nothing to a subtree that did not change.
 func (m *Map) layNode(n *Node, depth, branch int, dir Layout, at Vec) {
 	p := &n.lay
+	p.at = at
 	moved := !p.measured || p.depth != depth || p.branch != branch || p.dir != dir
 	if !moved && !p.dirty && !p.path {
 		return

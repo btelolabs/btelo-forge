@@ -158,3 +158,49 @@ func TestMissingInstalledEngineSaysHowToInstall(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestUnzipKeepsFoldersUnderOneTopFolder(t *testing.T) {
+	write := func(t *testing.T, names ...string) string {
+		t.Helper()
+		var b bytes.Buffer
+		w := zip.NewWriter(&b)
+		for _, n := range names {
+			f, _ := w.CreateHeader(&zip.FileHeader{Name: n})
+			if !strings.HasSuffix(n, "/") && !strings.HasSuffix(n, `\`) {
+				f.Write([]byte(n))
+			}
+		}
+		w.Close()
+		p := filepath.Join(t.TempDir(), "a.zip")
+		os.WriteFile(p, b.Bytes(), 0o644)
+		return p
+	}
+	for _, c := range []struct {
+		names []string
+		want  map[string]string // file in the folder -> the archive name it came from
+	}{
+		{[]string{"Release/", "Release/cli.exe", "Release/ggml.dll"}, map[string]string{"cli.exe": "Release/cli.exe", "ggml.dll": "Release/ggml.dll"}},
+		{[]string{`pkg\include\`, `pkg\include\x.h`, `pkg\cli.exe`, `pkg\docs\README.md`, `pkg\README.md`}, map[string]string{"cli.exe": `pkg\cli.exe`, "include/x.h": `pkg\include\x.h`, "docs/README.md": `pkg\docs\README.md`, "README.md": `pkg\README.md`}},
+		{[]string{"cli.exe", "specs/a.json", "specs/sub/b.json"}, map[string]string{"cli.exe": "cli.exe", "specs/a.json": "specs/a.json", "specs/sub/b.json": "specs/sub/b.json"}},
+		{[]string{"one/a.exe", "two/b.dll"}, map[string]string{"one/a.exe": "one/a.exe", "two/b.dll": "two/b.dll"}},
+	} {
+		dir := t.TempDir()
+		if err := unzip(write(t, c.names...), dir); err != nil {
+			t.Fatal(err)
+		}
+		for file, from := range c.want {
+			if data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(file))); err != nil || string(data) != from {
+				t.Errorf("%v: %s = %q, %v", c.names, file, data, err)
+			}
+		}
+	}
+	for _, evil := range []string{"../evil.exe", `..\evil.exe`, "/abs/evil.exe", "C:/evil.exe", "a/../../evil.exe"} {
+		dir := t.TempDir()
+		if err := unzip(write(t, "ok.txt", evil), filepath.Join(dir, "in")); err == nil {
+			t.Errorf("%s was unpacked", evil)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "evil.exe")); err == nil {
+			t.Errorf("%s escaped the folder", evil)
+		}
+	}
+}

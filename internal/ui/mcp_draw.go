@@ -328,7 +328,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 	}
 	tool(s, a, "canvas_new", "Make a new drawing canvas in its own tab and return its state. With no size it is infinite: draw anywhere, export the content or artboards.", func(in newIn) (any, error) {
 		if in.Width == 0 && in.Height == 0 {
-			if err := a.newCanvas(); err != nil {
+			if err := a.newBareCanvas(); err != nil {
 				return nil, err
 			}
 			return a.canvasView(a.art), nil

@@ -16,14 +16,14 @@ func TestScreens(t *testing.T) {
 	x.a.services.mcpURL = "http://127.0.0.1:38471/mcp"
 	for _, lang := range []Language{English, Chinese} {
 		x.a.u.lang = lang
-		for tab, name := range []string{"music", "overlays", "subtitles", "export"} {
+		for tab, name := range []string{"music", "overlays", "subtitles", "voice-over", "export"} {
 			x.a.tab = tab
 			x.settle(10 * time.Second)
 			x.shot(string(lang) + "-panel-" + name)
-			if name == "export" {
+			if name == "export" || name == "voice-over" {
 				x.a.panelScroll[tab] = 1e6
 				x.frame(Input{})
-				x.shot(string(lang) + "-panel-export-end")
+				x.shot(string(lang) + "-panel-" + name + "-end")
 				x.a.panelScroll[tab] = 0
 			}
 		}

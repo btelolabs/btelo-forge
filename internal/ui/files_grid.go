@@ -702,8 +702,8 @@ func (a *App) drawGridCard(p *filesPane, k int, card gfx.Rect, active bool) {
 		nameCol = colDim
 	}
 	nameR := gfx.Rect{X: card.X + u.px(2), Y: pic.Bottom() + u.px(4), W: card.W - u.px(4), H: u.px(16)}
-	if pr := a.files.prompt; pr != nil && pr.kind == promptRename && cursor && active {
-		a.drawRenameBox(a.files, gfx.Rect{X: card.X, Y: pic.Bottom() + u.px(2), W: card.W, H: u.px(30)})
+	if fd := a.files; fd != nil && fd.prompt != nil && fd.prompt.kind == promptRename && cursor && active {
+		a.drawRenameBox(fd, gfx.Rect{X: card.X, Y: pic.Bottom() + u.px(2), W: card.W, H: u.px(30)})
 	} else {
 		u.label(u.face(12), nameR, fe.Name, nameCol, 0.5)
 	}

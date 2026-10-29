@@ -51,11 +51,7 @@ func (a *App) settingsExtensions(r gfx.Rect) {
 	}
 	_, custom := a.configText(k)
 	y += u.px(40)
-	about := u.t("Music sources are the websites the music panel searches. Add a site by describing its search address and how to read its answers; see the format guide.")
-	if k.id == "subtitle_models" {
-		about = u.t("Speech engines, models and languages for AI subtitles. Point to another whisper.cpp version or another ggml model; see the format guide.")
-	}
-	y = a.paragraph(r.X, y, r.W, about, 12, colDim) + u.px(4)
+	y = a.paragraph(r.X, y, r.W, u.t(k.about), 12, colDim) + u.px(4)
 	where := u.t("Using the built-in configuration")
 	if custom {
 		where = u.tf("Using your file: %s", a.configPath(k))

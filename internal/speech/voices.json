@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "defaultModel": "qwen3-design-q8_0",
+  "defaultVoice": "warm",
+  "engines": [
+    {
+      "id": "audiocpp-vulkan",
+      "api": "audio.cpp",
+      "name": {"en": "Graphics card (Vulkan)", "zh": "显卡（Vulkan）"},
+      "note": {"en": "audio.cpp · runs on NVIDIA, AMD and Intel graphics (82 MB download)", "zh": "audio.cpp · NVIDIA、AMD、Intel 显卡都能用（下载 82 MB）"},
+      "os": ["windows"],
+      "arch": ["amd64"],
+      "url": "https://github.com/0xShug0/audio.cpp/releases/download/v0.9.3/audio-v0.9.3-bin-windows-x64-vulkan.zip",
+      "size": 82301824,
+      "sha256": "d1741e16154f99ef96382a36d5e89ccf12fd4fda6ec7dcdcdbd122d82f525c11",
+      "executable": "audiocpp_server.exe",
+      "backend": "vulkan",
+      "arguments": ["--config", "{config}", "--no-ui"]
+    },
+    {
+      "id": "audiocpp-installed",
+      "api": "audio.cpp",
+      "name": "audio.cpp",
+      "note": {"en": "Uses audiocpp_server of audio.cpp for macOS (Metal)", "zh": "使用 macOS 版 audio.cpp 的 audiocpp_server（Metal 加速）"},
+      "os": ["darwin"],
+      "commands": ["audiocpp_server"],
+      "paths": ["/opt/homebrew/bin/audiocpp_server", "/usr/local/bin/audiocpp_server"],
+      "install": "the macOS (Metal) download of https://github.com/0xShug0/audio.cpp/releases, with audiocpp_server on the PATH",
+      "backend": "metal",
+      "arguments": ["--config", "{config}", "--no-ui"]
+    },
+    {
+      "id": "breeze-vulkan",
+      "api": "breeze-server",
+      "name": {"en": "Graphics card (Vulkan)", "zh": "显卡（Vulkan）"},
+      "note": {"en": "Breeze-TTS-2.cpp · runs on NVIDIA, AMD and Intel graphics (74 MB download)", "zh": "Breeze-TTS-2.cpp · NVIDIA、AMD、Intel 显卡都能用（下载 74 MB）"},
+      "os": ["windows"],
+      "arch": ["amd64"],
+      "url": "https://github.com/HoppouAI/Breeze-TTS-2.cpp/releases/download/v0.1.3/breeze-tts-2-v0.1.3-windows-x64-vulkan.zip",
+      "size": 73939562,
+      "sha256": "d31feee5380e0609dc44b537d22cbe4f3cf8e93495756f3a580d8b448db79f7f",
+      "executable": "breeze-server.exe",
+      "arguments": ["{model}", "--host", "127.0.0.1", "--port", "{port}", "--ws-port", "-1", "--voices-dir", "{voices}"]
+    },
+    {
+      "id": "breeze-installed",
+      "api": "breeze-server",
+      "name": "Breeze-TTS-2.cpp",
+      "note": {"en": "Uses breeze-server built from Breeze-TTS-2.cpp", "zh": "使用自行编译的 Breeze-TTS-2.cpp 的 breeze-server"},
+      "os": ["darwin"],
+      "commands": ["breeze-server"],
+      "paths": ["/opt/homebrew/bin/breeze-server", "/usr/local/bin/breeze-server"],
+      "install": "git clone --recursive https://github.com/HoppouAI/Breeze-TTS-2.cpp && cd Breeze-TTS-2.cpp && cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && cp build/breeze-server /usr/local/bin/",
+      "arguments": ["{model}", "--host", "127.0.0.1", "--port", "{port}", "--ws-port", "-1", "--voices-dir", "{voices}"]
+    }
+  ],
+  "models": [
+    {
+      "id": "qwen3-design-q8_0",
+      "api": "audio.cpp",
+      "family": "qwen3_tts",
+      "task": "vdes",
+      "commercial": true,
+      "series": {"en": "Qwen3-TTS · free for commercial use", "zh": "Qwen3-TTS · 可以商用"},
+      "name": "Q8_0",
+      "note": {"en": "recommended · 2.3 GB VRAM", "zh": "推荐 · 显存 2.3 GB"},
+      "license": {"en": "Qwen3-TTS is free for commercial use (Apache 2.0).", "zh": "Qwen3-TTS 可以免费商用（Apache 2.0 许可）。"},
+      "url": "https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/Qwen3-TTS-12Hz-1.7B-VoiceDesign-GGUF/qwen3-tts-12hz-1.7b-voicedesign-q8_0.gguf",
+      "size": 2817000064,
+      "sha256": "b86e03d1d2077bbaed157ab7a7fc646c3e309e69afa52c5e1c86b622b4715057"
+    },
+    {
+      "id": "qwen3-design-bf16",
+      "api": "audio.cpp",
+      "family": "qwen3_tts",
+      "task": "vdes",
+      "commercial": true,
+      "series": {"en": "Qwen3-TTS · free for commercial use", "zh": "Qwen3-TTS · 可以商用"},
+      "name": "BF16",
+      "note": {"en": "unquantized · 4 GB VRAM", "zh": "未量化原版 · 显存 4 GB"},
+      "license": {"en": "Qwen3-TTS is free for commercial use (Apache 2.0).", "zh": "Qwen3-TTS 可以免费商用（Apache 2.0 许可）。"},
+      "url": "https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/Qwen3-TTS-12Hz-1.7B-VoiceDesign-GGUF/qwen3-tts-12hz-1.7b-voicedesign-bf16.gguf",
+      "size": 4179100352,
+      "sha256": "f12c79e8c492f006b04f5ba823bebe512c9d46e13a7837081f1d34803b4bac0e"
+    },
+    {
+      "id": "breeze-q4_k-dd2",
+      "api": "breeze-server",
+      "series": {"en": "Breeze TTS 2 · non-commercial only", "zh": "Breeze TTS 2 · 仅限非商用"},
+      "name": "Q4_K-dd2",
+      "note": {"en": "fastest · short lines · 3 GB VRAM", "zh": "最快 · 只适合短句 · 显存 3 GB"},
+      "license": {"en": "Breeze TTS 2 may be used for research and non-commercial work only (BreezeBlue licence).", "zh": "Breeze TTS 2 只能用于研究和非商业用途（BreezeBlue 许可）。"},
+      "url": "https://huggingface.co/HoppouAI/Breeze-TTS-2.cpp/resolve/main/breeze-tts-2-q4_k-dd2.gguf",
+      "size": 2460266176,
+      "sha256": "6d675f8c1ce43bdd368489e9c9f52a725e9ede23e3bbf338ec5c9c31d8169cf0"
+    },
+    {
+      "id": "breeze-q4_k",
+      "api": "breeze-server",
+      "series": {"en": "Breeze TTS 2 · non-commercial only", "zh": "Breeze TTS 2 · 仅限非商用"},
+      "name": "Q4_K",
+      "note": {"en": "smallest · 3 GB VRAM", "zh": "最小 · 显存 3 GB"},
+      "license": {"en": "Breeze TTS 2 may be used for research and non-commercial work only (BreezeBlue licence).", "zh": "Breeze TTS 2 只能用于研究和非商业用途（BreezeBlue 许可）。"},
+      "url": "https://huggingface.co/HoppouAI/Breeze-TTS-2.cpp/resolve/main/breeze-tts-2-q4_k.gguf",
+      "size": 2538909376,
+      "sha256": "483418fbbb438f5f1c08dbe2b017e42db0f1d126765cd3f772d8622a30a4915c"
+    },
+    {
+      "id": "breeze-q6_k",
+      "api": "breeze-server",
+      "series": {"en": "Breeze TTS 2 · non-commercial only", "zh": "Breeze TTS 2 · 仅限非商用"},
+      "name": "Q6_K",
+      "note": {"en": "small · 3.5 GB VRAM", "zh": "较小 · 显存 3.5 GB"},
+      "license": {"en": "Breeze TTS 2 may be used for research and non-commercial work only (BreezeBlue licence).", "zh": "Breeze TTS 2 只能用于研究和非商业用途（BreezeBlue 许可）。"},
+      "url": "https://huggingface.co/HoppouAI/Breeze-TTS-2.cpp/resolve/main/breeze-tts-2-q6_k.gguf",
+      "size": 3069969664,
+      "sha256": "0eb51de6cbccd54b1c408198797254ac46b3cbd55ca1174c630eaac6d01064d3"
+    },
+    {
+      "id": "breeze-q8_0-dd4",
+      "api": "breeze-server",
+      "series": {"en": "Breeze TTS 2 · non-commercial only", "zh": "Breeze TTS 2 · 仅限非商用"},
+      "name": "Q8_0-dd4",
+      "note": {"en": "faster · short lines · 4 GB VRAM", "zh": "更快 · 只适合短句 · 显存 4 GB"},
+      "license": {"en": "Breeze TTS 2 may be used for research and non-commercial work only (BreezeBlue licence).", "zh": "Breeze TTS 2 只能用于研究和非商业用途（BreezeBlue 许可）。"},
+      "url": "https://huggingface.co/HoppouAI/Breeze-TTS-2.cpp/resolve/main/breeze-tts-2-q8_0-dd4.gguf",
+      "size": 3401072320,
+      "sha256": "5248f348388cb7fd904a8bde3e65383a0fbc562d2fe48d7c375cf17372d3751b"
+    },
+    {
+      "id": "breeze-q8_0",
+      "api": "breeze-server",
+      "series": {"en": "Breeze TTS 2 · non-commercial only", "zh": "Breeze TTS 2 · 仅限非商用"},
+      "name": "Q8_0",
+      "note": {"en": "4 GB VRAM", "zh": "显存 4 GB"},
+      "license": {"en": "Breeze TTS 2 may be used for research and non-commercial work only (BreezeBlue licence).", "zh": "Breeze TTS 2 只能用于研究和非商业用途（BreezeBlue 许可）。"},
+      "url": "https://huggingface.co/HoppouAI/Breeze-TTS-2.cpp/resolve/main/breeze-tts-2-q8_0.gguf",
+      "size": 3568844480,
+      "sha256": "a02bcc4b69b0601032727f8040c4942149b1b73aa0f69022fe5aaa6a8f0ef879"
+    },
+    {
+      "id": "breeze-f16",
+      "api": "breeze-server",
+      "series": {"en": "Breeze TTS 2 · non-commercial only", "zh": "Breeze TTS 2 · 仅限非商用"},
+      "name": "F16",
+      "note": {"en": "unquantized · 7 GB VRAM", "zh": "未量化原版 · 显存 7 GB"},
+      "license": {"en": "Breeze TTS 2 may be used for research and non-commercial work only (BreezeBlue licence).", "zh": "Breeze TTS 2 只能用于研究和非商业用途（BreezeBlue 许可）。"},
+      "url": "https://huggingface.co/HoppouAI/Breeze-TTS-2.cpp/resolve/main/breeze-tts-2-f16.gguf",
+      "size": 6279630784,
+      "sha256": "db740cd464d75f2635a891586f083c5b466fd63542bebd957fe7890324b04c35"
+    }
+  ],
+  "voices": [
+    {
+      "id": "warm",
+      "name": {"en": "Warm", "zh": "温柔女声"},
+      "instruction": "A warm, gentle young woman with a clear, calm delivery."
+    },
+    {
+      "id": "steady",
+      "name": {"en": "Steady", "zh": "沉稳男声"},
+      "instruction": "A calm middle-aged man with a deep, steady voice, narrating at an even pace."
+    },
+    {
+      "id": "lively",
+      "name": {"en": "Lively", "zh": "活泼女声"},
+      "instruction": "A cheerful, energetic young woman with a bright, lively delivery."
+    },
+    {
+      "id": "friendly",
+      "name": {"en": "Friendly", "zh": "阳光男声"},
+      "instruction": "A friendly young man with a relaxed, upbeat and natural delivery."
+    },
+    {
+      "id": "anchor",
+      "name": {"en": "News anchor", "zh": "新闻播报"},
+      "instruction": "A professional news anchor with a crisp, authoritative voice and a measured pace."
+    },
+    {
+      "id": "storyteller",
+      "name": {"en": "Storyteller", "zh": "讲故事"},
+      "instruction": "An expressive storyteller with a soft, warm voice and gentle, unhurried pacing."
+    }
+  ]
+}

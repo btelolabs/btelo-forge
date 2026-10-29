@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"bytes"
+	"fmt"
 	"image"
 	"image/color"
+	"slices"
 	"testing"
 	"time"
 
@@ -78,5 +81,52 @@ func TestMindMapFollowsACanvasItShows(t *testing.T) {
 		}
 		x.frame(Input{})
 		time.Sleep(15 * time.Millisecond)
+	}
+}
+
+// Dragging free nodes about leaves nothing of them behind: the board drawn from the tiles kept is the board drawn
+// afresh, pixel for pixel, the shadows too.
+func TestMindDragLeavesNoTrace(t *testing.T) {
+	x, md := newMindHarness(t)
+	m := md.m
+	var ids []mind.ID
+	for i, s := range []mind.Shape{mind.ShapeRounded, mind.ShapeRect, mind.ShapeCapsule} {
+		id, err := m.Add(mind.Node{Text: fmt.Sprintf("free %d", i), Shape: s, X: float64(-300 + i*260), Y: 260}, 0, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	m.Commit()
+	md.fit = true
+	x.settleMind()
+	for i, id := range ids {
+		fx, fy := x.nodeCentre(md, id)
+		x.mx, x.my = fx, fy
+		x.frame(Input{})
+		x.frame(Input{Down: true, Pointer: []Pointer{{X: fx, Y: fy, Down: true}}})
+		for step := 1; step <= 12; step++ {
+			x.mx, x.my = fx+float32(step*23), fy-float32(step*(9+i*4))
+			x.frame(Input{Down: true})
+		}
+		x.frame(Input{Pointer: []Pointer{{X: x.mx, Y: x.my}}})
+	}
+	md.selectOnly(0)
+	x.settleMind()
+	board := x.a.layout().body.Pixels()
+	kept := x.c.Img.SubImage(board).(*image.RGBA)
+	keptPix := slices.Clone(kept.Pix)
+	md.tiles.Clear()
+	x.settleMind()
+	fresh := x.c.Img.SubImage(board).(*image.RGBA)
+	if !bytes.Equal(keptPix, fresh.Pix) {
+		diff := 0
+		for i := range keptPix {
+			if keptPix[i] != fresh.Pix[i] {
+				diff++
+			}
+		}
+		x.shot("mind-drag-trace")
+		t.Fatalf("%d bytes of the board differ from the board drawn afresh", diff)
 	}
 }

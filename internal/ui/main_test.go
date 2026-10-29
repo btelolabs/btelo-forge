@@ -5,11 +5,17 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/btelolabs/btelo-forge/internal/speech/speechtest"
 )
 
 // TestMain runs the tests with the services on ports of the system's choosing, on this computer only: an app
 // running beside the tests keeps its own ports, and an AI connected to it never reaches a test's editor.
 func TestMain(m *testing.M) {
+	if speechtest.Enabled() { // started as the speech engine by a voice-over test
+		speechtest.Serve(os.Args[1:])
+		return
+	}
 	mcpPort, phonePort, phoneHost = 0, 0, "127.0.0.1"
 	os.Exit(m.Run())
 }

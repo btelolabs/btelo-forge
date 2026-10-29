@@ -38,8 +38,7 @@ func mindLaunchMap(t *testing.T, x *harness) (*mindDoc, mind.ID) {
 	return md, root
 }
 
-// Showing the whole board fits it in what the floating bars leave: no node is under the tool bar, the zoom bar or the
-// overview.
+// Showing the whole board fits it in what the floating bars leave: no node is under the zoom bar or the overview.
 func TestMindFitLeavesTheFloatingBarsClear(t *testing.T) {
 	x := newHarness(t)
 	md, _ := mindLaunchMap(t, x)
@@ -52,7 +51,7 @@ func TestMindFitLeavesTheFloatingBarsClear(t *testing.T) {
 	for _, n := range md.m.Visible() {
 		box := v.ScreenRect(md.m.Box(n))
 		for name, bar := range map[string]struct{ x, y, w, h float32 }{
-			"tool bar": {c.tools.X, c.tools.Y, c.tools.W, c.tools.H}, "zoom bar": {c.zoom.X, c.zoom.Y, c.zoom.W, c.zoom.H},
+			"zoom bar": {c.zoom.X, c.zoom.Y, c.zoom.W, c.zoom.H},
 			"overview": {c.overview.X, c.overview.Y, c.overview.W, c.overview.H},
 		} {
 			if bar.w > 0 && box.X < bar.x+bar.w && bar.x < box.X+box.W && box.Y < bar.y+bar.h && bar.y < box.Y+box.H {

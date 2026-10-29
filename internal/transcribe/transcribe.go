@@ -101,7 +101,7 @@ func (m *Manager) Prepare(ctx context.Context, e Engine, model Model, progress P
 			return "", "", &MissingEngine{Engine: e.Name.In("en"), Install: e.Install}
 		}
 		zipPath := cli + ".zip"
-		if err := m.download(ctx, e.URL, zipPath, e.Size, "", func(f float64) { progress("engine", f) }); err != nil {
+		if err := m.download(ctx, e.URL, zipPath, e.Size, e.SHA256, func(f float64) { progress("engine", f) }); err != nil {
 			return "", "", fmt.Errorf("downloading the speech engine: %w", err)
 		}
 		if err := unzip(zipPath, filepath.Dir(cli)); err != nil {
@@ -195,43 +195,74 @@ func (m *Manager) download(ctx context.Context, url, path string, size int64, ch
 	return os.Rename(tmp.Name(), path)
 }
 
-// unzip extracts the files of an archive into dir, flattening the archive's top folder.
+// unzip extracts an archive into dir, keeping its folders but dropping a top folder that holds everything, so the
+// program it carries lands in dir. Names may use either slash; one that would land outside dir fails the whole
+// archive.
 func unzip(archive, dir string) error {
 	r, err := zip.OpenReader(archive)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
+	names := make([]string, len(r.File))
+	top, shared := "", true // the folder every entry is in, while there is one
+	for i, f := range r.File {
+		name := path.Clean(strings.ReplaceAll(f.Name, `\`, "/"))
+		if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, ":") {
+			return fmt.Errorf("the archive has a file outside its folder: %s", f.Name)
+		}
+		names[i] = name
+		first, _, nested := strings.Cut(name, "/")
+		switch {
+		case !nested && !isDir(f), top != "" && first != top:
+			shared = false
+		default:
+			top = first
+		}
+	}
+	if !shared {
+		top = ""
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	for _, f := range r.File {
-		if f.FileInfo().IsDir() {
+	for i, f := range r.File {
+		name := names[i]
+		if top != "" {
+			name = strings.TrimPrefix(strings.TrimPrefix(name, top), "/")
+		}
+		if isDir(f) || name == "" || name == "." {
 			continue
 		}
-		name := filepath.Base(f.Name)
-		if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
-			continue
-		}
-		src, err := f.Open()
-		if err != nil {
+		dst := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
 		}
-		dst, err := os.Create(filepath.Join(dir, name))
-		if err != nil {
-			src.Close()
-			return err
-		}
-		_, err = io.Copy(dst, src)
-		src.Close()
-		if cerr := dst.Close(); err == nil {
-			err = cerr
-		}
-		if err != nil {
+		if err := extract(f, dst); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// isDir reports whether an entry is a folder, also when it is named with a backslash, as Windows tools may write.
+func isDir(f *zip.File) bool { return f.FileInfo().IsDir() || strings.HasSuffix(f.Name, `\`) }
+
+func extract(f *zip.File, dst string) error {
+	src, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, src)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // Line is one recognised caption.

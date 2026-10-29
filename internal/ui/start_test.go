@@ -95,10 +95,10 @@ func TestEditCardOpensTheEditorFirst(t *testing.T) {
 	if got := a.doc.title(a); got != a.u.t("Edit a video") {
 		t.Errorf("the tab is called %q", got)
 	}
-	// Add videos… opens the files chosen, in order, in this tab.
+	// Choose from files… opens the files chosen, in order, in this tab.
 	first, second := x.fixture(), clipFile(t, x.mediaDir(), "second.mp4", "testsrc2=size=640x360", "3")
 	x.h.chosen = []string{first, second}
-	x.click(a.emptyEditorLayout(a.layout()).add)
+	x.click(a.emptyEditorLayout(a.layout()).choose)
 	x.pump(time.Minute, func() bool { return a.p != nil && a.opening == "" && len(a.doc.queued) == 0 && len(a.p.Sources) == 2 })
 	if a.p == nil || len(a.p.Sources) != 2 || len(a.docs) != 1 {
 		t.Fatalf("the videos did not open here: %d tabs, project %v", len(a.docs), a.p)

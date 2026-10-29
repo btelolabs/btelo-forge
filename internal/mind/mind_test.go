@@ -229,6 +229,41 @@ func TestChangedListsTheEditedArea(t *testing.T) {
 	}
 }
 
+// A free node dragged, live, frame by frame, gives up the place it was drawn at as well as the new one: else the
+// tiles there go on showing it.
+func TestDraggedNodeLeavesItsOldPlace(t *testing.T) {
+	m := newMap()
+	id, _ := m.Add(Node{Text: "dragged", X: 100, Y: 100, Shape: ShapeRounded}, 0, -1)
+	root, _ := tree(t, m, LayoutMap, 2)
+	m.Changed()
+	for step := range 5 {
+		before := m.SubBox(m.Node(id))
+		m.Live(id, func(n *Node) { n.X, n.Y = 100+float64(step+1)*400, 100 })
+		regions, all := m.Changed()
+		if all {
+			continue
+		}
+		covered := false
+		for _, r := range regions {
+			covered = covered || r.Inside(before)
+		}
+		if !covered {
+			t.Fatalf("step %d: the old place %v is in no region %v", step, before, regions)
+		}
+	}
+	// So does a tree's root moved.
+	before := m.SubBox(m.Node(root))
+	m.Live(root, func(n *Node) { n.X += 1500 })
+	regions, _ := m.Changed()
+	covered := false
+	for _, r := range regions {
+		covered = covered || r.Inside(before)
+	}
+	if !covered {
+		t.Fatalf("the tree's old place %v is in no region %v", before, regions)
+	}
+}
+
 func TestTableFormulas(t *testing.T) {
 	g := &Grid{Rows: 3, Cols: 3, Cells: []string{
 		"1", "2", "=A1+B1*2",

@@ -6,7 +6,7 @@ import (
 
 func (a *App) addConfigTools(s *mcp.Server) {
 	type nameIn struct {
-		Name string `json:"name" jsonschema:"music_sources, subtitle_models, ffmpeg or streaming_platforms"`
+		Name string `json:"name" jsonschema:"music_sources, subtitle_models, speech_voices, ffmpeg or streaming_platforms"`
 	}
 	tool(s, a, "get_config", "Read an extension configuration as JSON: music_sources (the online music and sound-effect sites), subtitle_models (speech engines, models and languages), ffmpeg (which ffmpeg the app uses and where it downloads it) or streaming_platforms (the live-streaming services offered when adding a destination: their servers and where their stream keys are found). Returns the JSON in use, whether it is the user's own file, and a guide to the format.",
 		func(in nameIn) (any, error) {
@@ -18,7 +18,7 @@ func (a *App) addConfigTools(s *mcp.Server) {
 			return map[string]any{"name": k.id, "json": text, "custom": custom, "file": a.configPath(k), "guide": k.guide}, nil
 		})
 	type setIn struct {
-		Name string `json:"name" jsonschema:"music_sources, subtitle_models, ffmpeg or streaming_platforms"`
+		Name string `json:"name" jsonschema:"music_sources, subtitle_models, speech_voices, ffmpeg or streaming_platforms"`
 		JSON string `json:"json" jsonschema:"the complete new configuration; read it with get_config first and change what is needed"`
 	}
 	tool(s, a, "set_config", "Replace an extension configuration with new JSON. It is checked first: when it is invalid nothing changes and the error names the place. When it is valid it takes effect at once and is kept for the next start.",
@@ -33,7 +33,7 @@ func (a *App) addConfigTools(s *mcp.Server) {
 			a.extensions.forget(k.id)
 			return map[string]any{"saved": a.configPath(k), "summary": a.configSummary(k)}, nil
 		})
-	tool(s, a, "reset_config", "Go back to the built-in configuration (music_sources, subtitle_models, ffmpeg or streaming_platforms), removing the user's file.",
+	tool(s, a, "reset_config", "Go back to the built-in configuration (music_sources, subtitle_models, speech_voices, ffmpeg or streaming_platforms), removing the user's file.",
 		func(in nameIn) (any, error) {
 			k, err := findConfig(in.Name)
 			if err != nil {

@@ -93,6 +93,20 @@ func New(name string) *Doc {
 	return d
 }
 
+// NewBoarded is an empty canvas, as New's, holding one artboard over r called boardName with the layer called
+// layerName in it, chosen; the board is where a new drawing starts, and is not a step to undo.
+func NewBoarded(layerName, boardName string, r image.Rectangle) (*Doc, error) {
+	r, err := validBoard(r)
+	if err != nil {
+		return nil, err
+	}
+	d := New(layerName)
+	b := d.newBoard(r, boardName)
+	b.Children = d.Root.Children
+	d.Root.Children = []*Node{b}
+	return d, nil
+}
+
 // NewFramed is a w×h canvas framed at the origin, with one layer called name filled with bg (left empty when bg's
 // alpha is 0) and no paper, as a canvas drawn over a video frame or a screen is.
 func NewFramed(w, h int, name string, bg color.NRGBA) (*Doc, error) {

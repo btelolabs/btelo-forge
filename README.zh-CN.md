@@ -31,6 +31,7 @@ Btelo Forge 自己录制——AI 通过 MCP 操作软件，再由 Btelo Forge �
 - 导出预设从「高画质」到「极限压缩」，另有「指定大小」：两遍编码，压到你设定的文件大小以内。所有参数都可以单独调：分辨率、帧率、H.264 / H.265 / AV1、画质、编码速度、音频码率，有 NVIDIA 显卡时用显卡编码。
 - 配乐：一次搜索 Kevin MacLeod、Openverse、ccMixter、Internet Archive 和 Freesound 音效，只收录可商用的许可，导出时自动在旁边写好需要的署名。
 - 字幕：本机用 whisper.cpp 识别语音，六种模型，CPU 或 CUDA；字幕放在单独的轨道上，可以继续编辑。
+- 配音：用本机显卡（Vulkan）把文字或现有字幕变成语音；六种音色，也可以自己描述音色。默认用 audio.cpp 运行 Qwen3-TTS（Q8_0 或 BF16，可以免费商用）；也可以用 Breeze-TTS-2.cpp 运行 Breeze TTS 2（Q4_K 到 F16 六档，只能用于研究和非商业用途）。模型载入后会留着给下一句用，闲置三分钟自动卸载。
 - 预览和导出用同一套滤镜图，看到什么就导出什么。
 
 <table>
@@ -75,6 +76,7 @@ Btelo Forge 自己录制——AI 通过 MCP 操作软件，再由 Btelo Forge �
 
 - 思维导图和流程图同在一块无限画板上，像 XMind 加 Whimsical：导图里的主题可以连线，流程图的方框也能长出子树。树可以排成思维导图、逻辑图、组织结构图或大纲。
 - 画板上的一切都是节点：主题和流程图形状、自由文字、带公式的表格（=SUM(B2:B9)）、图片和 GIF 动图、原地播放的视频、来自画布的智能对象（画布上每次修改都会同步过来），以及嵌套在里面的其它脑图——脑图如果绕一圈嵌套回自己，会显示一个 ⚠️ 提示节点，不会出错。
+- 画板上方不放任何按钮：在画板上右键即可在该处添加主题、形状、文字、表格、图片或视频；右下角的缩放栏里还有主题和导图的其他命令。
 - 快捷键与 XMind 一致：Tab 添加子主题、Enter 添加同级主题、直接打字替换主题文字、方向键在主题间移动。把主题拖到另一个主题上就移过去，拖到空白处就变成自由节点；从方框四边的圆点拖出连线，拖到空白处会新建一个连好的方框。
 - 为几十万个节点设计：画板按瓦片在所有 CPU 核心上绘制，只画视野内的部分，并有整块画板的缩略图。文件很小：图片和视频只是引用，从不复制。
 - 连线会自动绕开两端之间的其它节点；拖动连线中间的手柄可以调整它的走向。
@@ -138,7 +140,7 @@ Btelo Forge 自己录制——AI 通过 MCP 操作软件，再由 Btelo Forge �
 | Windows ARM 版 | `btelo-forge-windows-arm64.zip` |
 | macOS 11 及以上，Apple 芯片与 Intel（实验性） | `btelo-forge-macos.zip` |
 
-不需要另外安装任何东西：软件使用自带的 ffmpeg，保证录屏、直播、导出在每台电脑上表现一致——首次运行时自动下载一份静态版本到软件自己的目录，只下载一次（可以在 设置 → 扩展 → ffmpeg 里改为允许使用电脑上已安装的版本）。macOS 版已签名并通过 Apple 公证。macOS 上的 AI 字幕使用 Homebrew 安装的 `whisper-cli`。
+不需要另外安装任何东西：软件使用自带的 ffmpeg，保证录屏、直播、导出在每台电脑上表现一致——首次运行时自动下载一份静态版本到软件自己的目录，只下载一次（可以在 设置 → 扩展 → ffmpeg 里改为允许使用电脑上已安装的版本）。macOS 版已签名并通过 Apple 公证。macOS 上的 AI 字幕使用 Homebrew 安装的 `whisper-cli`，配音使用放在 PATH 上的 macOS 版 [audio.cpp](https://github.com/0xShug0/audio.cpp/releases)（Breeze 则用自行编译的 [Breeze-TTS-2.cpp](https://github.com/HoppouAI/Breeze-TTS-2.cpp) 的 `breeze-server`）。
 
 Btelo Forge 原名 Btelo Video Cut，0.1.3 及更早的版本仍用旧名（`btelo-cut-*.zip`）。第一次运行 Btelo Forge 时，原来的设置、未完成的剪辑和已下载的内容会自动迁移过来。macOS 上软件换了新的身份标识，所以会重新请求录屏权限。
 

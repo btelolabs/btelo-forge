@@ -48,8 +48,20 @@ func (p *Project) AddMusic(path, title, credit string, total, t float64) int {
 	if rest := p.Duration() - t; rest >= MinLength {
 		length = math.Min(total, rest)
 	}
-	m := Music{ID: p.id(), Path: path, Title: title, Credit: credit, Start: t, Length: math.Max(length, MinLength), Total: total, Volume: 1, Fade: true}
-	k := slices.IndexFunc(p.Music, func(tr MusicTrack) bool { return free(taken(tr.Clips, -1, musicSpan), t, m.Length) })
+	return p.placeMusic(Music{Path: path, Title: title, Credit: credit, Start: t, Length: math.Max(length, MinLength), Total: total, Volume: 1, Fade: true})
+}
+
+// AddSpeech places a whole recording of speech of the given length at t, without fades, on the first music track
+// with room; unlike music it is never cut at the end of the video. It returns the clip's id.
+func (p *Project) AddSpeech(path, title string, total, t float64) int {
+	total = math.Max(total, MinLength)
+	return p.placeMusic(Music{Path: path, Title: title, Start: math.Max(t, 0), Length: total, Total: total, Volume: 1})
+}
+
+// placeMusic gives m an id and puts it on the first music track free where it plays, adding a track when none is.
+func (p *Project) placeMusic(m Music) int {
+	m.ID = p.id()
+	k := slices.IndexFunc(p.Music, func(tr MusicTrack) bool { return free(taken(tr.Clips, -1, musicSpan), m.Start, m.Length) })
 	if k < 0 {
 		p.Music = append(p.Music, MusicTrack{Volume: 1})
 		k = len(p.Music) - 1

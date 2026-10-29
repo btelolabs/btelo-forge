@@ -39,6 +39,10 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
   only licences that allow commercial use, with the credits they ask for written next to each export.
 - Subtitles from speech recognised on your own machine with whisper.cpp: six models, CPU or CUDA, on a track of
   their own, ready to edit.
+- Voice-overs from text, or read straight from the subtitles, on your own graphics card (Vulkan): six voices or one
+  you describe. By default Qwen3-TTS (Q8_0 or BF16, free for commercial use) runs on audio.cpp; Breeze TTS 2 (six
+  sizes from Q4_K to F16, research and non-commercial use only) runs on Breeze-TTS-2.cpp. The model stays loaded for
+  the next line and is unloaded after three idle minutes.
 - Preview and export share one filter graph, so the export is what you saw.
 
 <table>
@@ -99,6 +103,8 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
 - Everything on the board is a node: topics and flowchart shapes, free text, tables with formulas (=SUM(B2:B9)),
   pictures and animated GIFs, videos that play where they are, smart objects from your canvases, which follow every
   change you draw, and other mind maps shown inside — a map that ends up inside itself shows a warning instead.
+- Nothing sits over the board: right-click it to add a topic, shape, text, table, picture or video there; the zoom bar
+  at the bottom right also holds the themes and the map's other commands.
 - Keys as in XMind: Tab adds a child, Enter a sibling, typing replaces a topic's words, arrows move between topics.
   Drag a topic onto another to move it there, or out onto the board to free it; drag from the dots at a box's sides
   to draw a connector, or onto empty board for a new connected box.
@@ -186,7 +192,8 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
 There is nothing else to install. The app uses its own ffmpeg, so that recording, streaming and exporting work the
 same on every computer: a static build is downloaded once into the app's own folder (Settings → Extensions → ffmpeg
 can allow the one installed on the computer instead). The macOS app is signed and notarised by Apple. On macOS, AI subtitles use `whisper-cli` from
-Homebrew.
+Homebrew, and voice-overs the macOS download of [audio.cpp](https://github.com/0xShug0/audio.cpp/releases) (or, for
+Breeze, a `breeze-server` built from [Breeze-TTS-2.cpp](https://github.com/HoppouAI/Breeze-TTS-2.cpp)) on the PATH.
 
 Btelo Forge was called Btelo Video Cut; releases up to 0.1.3 carry that name (`btelo-cut-*.zip`). Its settings,
 unfinished edits and downloads move over the first time Btelo Forge runs. On macOS the app has a new identity, so it

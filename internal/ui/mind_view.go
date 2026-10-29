@@ -12,8 +12,9 @@ import (
 
 // The map tab: the board fills it, drawn from tiles (mind.Tiles), with what moves under the pointer — the chosen
 // nodes' outlines, handles, a connector being drawn, words being typed, animations and a video playing — drawn over
-// it every frame. A tool bar floats at the top, a style bar over the chosen node, and the zoom and an overview of
-// the whole board at the bottom right.
+// it every frame. Nothing sits over the top of the board: a style bar floats over the chosen node, and at the bottom
+// right the zoom bar, with the map's theme and its other commands, under an overview of the whole board. What a
+// tool bar would add is on the board's right-click menu.
 
 // Zoom limits.
 const (
@@ -26,11 +27,11 @@ const mindTileBudget = 40 * time.Millisecond
 
 // mindChrome is where the tab's floating bars are, which the board leaves alone.
 type mindChrome struct {
-	tools, style, zoom, overview, status, themes gfx.Rect
+	style, zoom, overview, status, themes gfx.Rect
 }
 
 func (c mindChrome) holds(x, y float32) bool {
-	for _, r := range []gfx.Rect{c.tools, c.style, c.zoom, c.overview, c.themes} {
+	for _, r := range []gfx.Rect{c.style, c.zoom, c.overview, c.themes} {
 		if r.W > 0 && r.Contains(x, y) {
 			return true
 		}
@@ -61,13 +62,12 @@ func fitZoom(b mind.Rect, area gfx.Rect) float64 {
 	return math.Min(math.Max(z, mindMinZoom), 1)
 }
 
-// mindFitArea is the part of the board r, relative to its top-left, that showing b whole fits it in: below the tool
-// bar, and clear of the zoom bar, the overview and the status line, beside them or above them, whichever shows b
-// the larger.
+// mindFitArea is the part of the board r, relative to its top-left, that showing b whole fits it in: clear of the
+// zoom bar, the overview and the status line, beside them or above them, whichever shows b the larger.
 func (a *App) mindFitArea(md *mindDoc, r gfx.Rect, b mind.Rect) gfx.Rect {
 	u := &a.u
 	c := a.mindChromeRects(md, r)
-	top := c.tools.Bottom() + u.px(8) - r.Y
+	top := u.px(8)
 	corner := c.zoom // its top-left, with the overview's
 	if c.overview.W > 0 {
 		corner.X, corner.Y = min(corner.X, c.overview.X), min(corner.Y, c.overview.Y)
@@ -129,11 +129,12 @@ func (a *App) drawMind(r gfx.Rect) {
 	u.c.Pop()
 
 	ch = a.mindChromeRects(md, r) // the style bar follows the selection as it moves
-	a.drawMindTools(md, ch.tools)
-	a.drawMindThemes(md, a.mindThemePanel(md, ch.tools))
 	a.drawMindStyle(md, ch.style)
 	a.drawMindZoom(md, r, ch.zoom)
-	a.drawMindOverview(md, r, ch.overview)
+	if ch.themes.W == 0 {
+		a.drawMindOverview(md, r, ch.overview) // the theme panel opens over it, hiding it whole
+	}
+	a.drawMindThemes(md, ch.themes)
 	a.drawMindStatus(md, ch.status)
 	a.pumpMindPictures()
 }
@@ -357,15 +358,13 @@ func (a *App) drawMindDrag(md *mindDoc, v mind.View) {
 func (a *App) mindChromeRects(md *mindDoc, r gfx.Rect) mindChrome {
 	u := &a.u
 	var c mindChrome
-	tw := u.px(36)*float32(len(mindToolList)) + u.px(36)*4 + u.px(12)
-	c.tools = gfx.Rect{X: r.X + (r.W-tw)/2, Y: r.Y + u.px(12), W: tw, H: u.px(44)}
-	c.themes = a.mindThemePanel(md, c.tools)
-	zw := u.px(36*5 + 56 + 12)
+	zw := u.px(36*7 + 56 + 12 + 6)
 	c.zoom = gfx.Rect{X: r.Right() - zw - u.px(14), Y: r.Bottom() - u.px(54), W: zw, H: u.px(40)}
 	if !md.minimap {
 		ow := min(u.px(220), r.W*0.3)
 		c.overview = gfx.Rect{X: r.Right() - ow - u.px(14), Y: c.zoom.Y - u.px(8) - ow*0.66, W: ow, H: ow * 0.66}
 	}
+	c.themes = a.mindThemePanel(md, r, c.zoom)
 	c.status = gfx.Rect{X: r.X + u.px(14), Y: r.Bottom() - u.px(34), W: max(r.W-zw-u.px(48), 0), H: u.px(22)}
 	if items := a.mindStyleItems(md); len(items) > 0 && md.text == nil && md.cell == nil && (md.act == nil || !md.act.moved) {
 		w := u.px(8)
@@ -381,7 +380,7 @@ func (a *App) mindChromeRects(md *mindDoc, r gfx.Rect) mindChrome {
 			off := u.px(44) * float32(step)
 			for _, y := range []float32{anchor.Y - u.px(52) - off, anchor.Bottom() + u.px(12) + off} {
 				sr := gfx.Rect{X: x, Y: y, W: w, H: u.px(40)}
-				if sr.Y < c.tools.Bottom()+u.px(6) || sr.Bottom() > c.status.Y-u.px(4) {
+				if sr.Y < r.Y+u.px(6) || sr.Bottom() > c.status.Y-u.px(4) {
 					continue
 				}
 				if n := a.mindCovered(md, r, sr); hidden < 0 || n < hidden {
@@ -390,7 +389,7 @@ func (a *App) mindChromeRects(md *mindDoc, r gfx.Rect) mindChrome {
 			}
 		}
 		if hidden < 0 { // no room anywhere: over the top of the board
-			best = gfx.Rect{X: x, Y: c.tools.Bottom() + u.px(6), W: w, H: u.px(40)}
+			best = gfx.Rect{X: x, Y: r.Y + u.px(6), W: w, H: u.px(40)}
 		}
 		c.style = best
 	}
@@ -411,40 +410,6 @@ func (a *App) mindCovered(md *mindDoc, r, sr gfx.Rect) int {
 	return n
 }
 
-// drawMindTools draws the tool bar: what a click on the board adds, and undo and redo.
-func (a *App) drawMindTools(md *mindDoc, r gfx.Rect) {
-	u := &a.u
-	floatPanel(u, r)
-	x := r.X + u.px(6)
-	for _, t := range mindToolList {
-		b := gfx.Rect{X: x, Y: r.Y + u.px(4), W: u.px(36), H: u.px(36)}
-		label, glyph := a.mindToolLabel(t)
-		on := md.tool == t
-		if u.iconButton(fmt.Sprintf("mind/tool/%d", t), b, glyph, label, on, true) {
-			a.pickMindTool(md, t, b)
-		}
-		x += u.px(36)
-	}
-	x += u.px(6)
-	u.c.Fill(gfx.Rect{X: x - u.px(3), Y: r.Y + u.px(10), W: max(1, u.px(1)), H: r.H - u.px(20)}, colBorder)
-	undo := gfx.Rect{X: x, Y: r.Y + u.px(4), W: u.px(36), H: u.px(36)}
-	if u.iconButton("mind/undo", undo, icUndo, withKey(u.t("Undo"), a.mindKeyHint("mind.undo")), false, md.m.CanUndo()) {
-		a.mindUndo(md)
-	}
-	redo := gfx.Rect{X: undo.Right(), Y: undo.Y, W: undo.W, H: undo.H}
-	if u.iconButton("mind/redo", redo, icRestore, withKey(u.t("Redo"), a.mindKeyHint("mind.redo")), false, md.m.CanRedo()) {
-		a.mindRedo(md)
-	}
-	theme := gfx.Rect{X: redo.Right(), Y: undo.Y, W: undo.W, H: undo.H}
-	if u.iconButton("mind/themes", theme, icTheme, u.t("Theme"), md.themes, true) {
-		md.themes = !md.themes
-	}
-	more := gfx.Rect{X: theme.Right(), Y: undo.Y, W: undo.W, H: undo.H}
-	if u.iconButton("mind/more", more, icMore, u.t("More"), a.menuOpen("mind/more"), true) {
-		a.openMenu("mind/more", more, a.mindMoreMenu(md))
-	}
-}
-
 // floatPanel draws the background of a floating bar.
 func floatPanel(u *ctx, r gfx.Rect) {
 	u.c.RoundRect(r.Inset(-u.px(1)), u.px(10), gfx.Alpha(colBlack, 0.35))
@@ -452,7 +417,8 @@ func floatPanel(u *ctx, r gfx.Rect) {
 	u.c.RoundOutline(r, u.px(9), max(1, u.px(1)), colBorderHi)
 }
 
-// drawMindZoom draws the zoom bar: out, the zoom (a click fits the board), in, fit the choice, and the overview.
+// drawMindZoom draws the zoom bar: out, the zoom (a click fits the board), in, fit the choice, the overview, and after
+// a rule the map's theme and its other commands.
 func (a *App) drawMindZoom(md *mindDoc, board, r gfx.Rect) {
 	u := &a.u
 	floatPanel(u, r)
@@ -489,6 +455,15 @@ func (a *App) drawMindZoom(md *mindDoc, board, r gfx.Rect) {
 	}
 	if btn("mind/overview", icMinimap, u.t("Show or hide the overview"), !md.minimap) {
 		md.minimap = !md.minimap
+	}
+	x += u.px(6)
+	u.c.Fill(gfx.Rect{X: x - u.px(3), Y: r.Y + u.px(10), W: max(1, u.px(1)), H: r.H - u.px(20)}, colBorder)
+	if btn("mind/themes", icTheme, u.t("Theme"), md.themes) {
+		md.themes = !md.themes
+	}
+	more := gfx.Rect{X: x, Y: y, W: u.px(36), H: u.px(36)}
+	if btn("mind/more", icMore, u.t("More"), a.menuOpen("mind/more")) {
+		a.openMenu("mind/more", more, a.mindMoreMenu(md))
 	}
 }
 

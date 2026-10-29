@@ -208,7 +208,7 @@ func (d *Doc) smartNodes() []*Node {
 func canonical(n *Node) []*Node {
 	out := make([]*Node, len(n.Children))
 	for i, c := range n.Children {
-		cc := snapshotTree(c)
+		cc := copyTree(c)
 		moveNode(cc, -n.Smart.Offset.X, -n.Smart.Offset.Y)
 		out[i] = cc
 	}
@@ -368,9 +368,9 @@ func (d *Doc) placed(layers []*Node, off image.Point) []*Node {
 	return out
 }
 
-// renumbered is a copy of a tree sharing its pixels, with ids new to the picture.
+// renumbered is a copy of a tree sharing its pixels and their levels, with ids new to the picture.
 func (d *Doc) renumbered(n *Node) *Node {
-	c := snapshotTree(n)
+	c := copyTree(n)
 	var walk func(x *Node)
 	walk = func(x *Node) {
 		x.ID = d.newID()
@@ -528,29 +528,45 @@ func (d *Doc) ApplySmart(c SmartContent) bool {
 
 // ---- Copying layers between pictures
 
-// CopyNode is a frozen copy of the node id with its layers, for pasting into this picture or another.
-func (d *Doc) CopyNode(id int) (*Node, error) {
+// CopyNode is a frozen copy of the node id with its layers, for pasting into this picture or another, and the area
+// of the artboard it is in, empty when it is in none or is a board itself.
+func (d *Doc) CopyNode(id int) (*Node, image.Rectangle, error) {
 	n := d.Node(id)
 	if n == nil {
-		return nil, ErrNoLayer
+		return nil, image.Rectangle{}, ErrNoLayer
 	}
-	return snapshotTree(n), nil
+	var from image.Rectangle
+	if b, ok := d.Board(d.BoardOf(id)); ok && !n.IsBoard() {
+		from = b.Rect
+	}
+	return snapshotTree(n), from, nil
 }
 
-// PasteNode puts a copy of n, from CopyNode, above the chosen node with ids new to the picture, where it was on the
-// canvas, and chooses it, as one step; an artboard goes to the top level. A smart object keeps its link, so it
+// PasteNode puts a copy of n, from CopyNode, above the chosen node with ids new to the picture, and chooses it, as
+// one step; an artboard goes to the top level. from is the area of the artboard n was copied from, empty when none:
+// pasted while another artboard, or something in one, is chosen, n goes into that board at the place it had in its
+// own, as Photoshop pastes between artboards; else where it was on the canvas. A smart object keeps its link, so it
 // changes with its copies here and elsewhere.
-func (d *Doc) PasteNode(n *Node) *Node {
+func (d *Doc) PasteNode(n *Node, from image.Rectangle) *Node {
 	m := d.Mark()
 	c := d.renumbered(n)
 	if d.Root.IsSmart() {
 		unboard(c) // a smart object's layers hold no artboards: they become groups
 	}
-	if c.IsBoard() || d.boardsInside(c) {
+	switch {
+	case c.IsBoard() || d.boardsInside(c):
 		d.Root.Children = slices.Insert(d.Root.Children, 0, c)
 		d.Active = c.ID
-	} else {
-		d.insertAbove(c)
+	default:
+		if to, ok := d.Board(d.BoardOf(d.Active)); ok && !from.Empty() {
+			moveNode(c, to.Rect.Min.X-from.Min.X, to.Rect.Min.Y-from.Min.Y)
+		}
+		if b := d.Node(d.Active); b != nil && b.IsBoard() {
+			b.Children = slices.Insert(b.Children, 0, c) // into the chosen board, open or not
+			d.Active = c.ID
+		} else {
+			d.insertAbove(c)
+		}
 	}
 	d.EditMask = false
 	d.Commit("Paste", m)

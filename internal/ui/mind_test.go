@@ -673,12 +673,27 @@ func TestMindThemes(t *testing.T) {
 	if len(mindThemeNames) != len(mind.Themes) {
 		t.Fatalf("%d theme names for %d themes", len(mindThemeNames), len(mind.Themes))
 	}
-	// The tool bar's button opens the panel; a click on a card puts the map in that theme.
-	md.themes = true
+	// The zoom bar's button opens the panel, its last button the map's menu; a click on a card puts the map in a
+	// theme.
 	md.fit = true
 	x.settleMind()
+	zoom := x.a.mindChromeRects(md, x.a.layout().body).zoom
+	u := &x.a.u
+	button := func(i int) gfx.Rect {
+		return gfx.Rect{X: zoom.X + u.px(6+36*5+56+6+36*float32(i)), Y: zoom.Y + u.px(2), W: u.px(36), H: u.px(36)}
+	}
+	x.click(button(1))
+	if !x.a.menuOpen("mind/more") {
+		t.Fatal("the zoom bar's More did not open the map's menu")
+	}
+	x.press(keyEscape, "")
+	x.click(button(0))
+	if !md.themes {
+		t.Fatal("the zoom bar's Theme did not open the theme panel")
+	}
+	x.settleMind()
 	x.shot("mind-theme-panel")
-	panel := x.a.mindThemePanel(md, x.a.mindChromeRects(md, x.a.layout().body).tools)
+	panel := x.a.mindChromeRects(md, x.a.layout().body).themes
 	for i, th := range mind.Themes {
 		u := &x.a.u
 		col, row := i%themeCols, i/themeCols

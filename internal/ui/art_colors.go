@@ -115,6 +115,7 @@ func (a *App) swapFillAndStroke(ad *artDoc, n *paint.Node) {
 	if next.Stroke.Paint.Kind != paint.PaintNone && next.Stroke.Width <= 0 {
 		next.Stroke.Width = max(a.settings.Paint.ShapeWidth, 1)
 	}
+	a.fillStrokeSwap = !a.fillStrokeSwap
 	a.artRun(ad, func() error { ad.d.SetVector(n.ID, next, "Swap fill and stroke"); return nil })
 }
 
@@ -201,11 +202,20 @@ func drawPaintSwatch(u *ctx, r gfx.Rect, p paint.VectorPaint, stroke bool) {
 func (a *App) drawColourSwatches(r gfx.Rect) {
 	u := &a.u
 	side := u.px(26)
-	fg := gfx.Rect{X: r.X + u.px(1), Y: r.Y + u.px(1), W: side, H: side}
-	bg := gfx.Rect{X: r.X + u.px(16), Y: r.Y + u.px(13), W: side, H: side}
 	swap := gfx.Rect{X: r.Right() - u.px(15), Y: r.Y - u.px(2), W: u.px(15), H: u.px(15)}
+	// Swapping two colours swaps the swatches' places too, so each colour stays where it was and the one now in
+	// front is the other: the swap reads as the two trading places in depth, not as their colours moving.
+	places := func(swapped bool) (fg, bg gfx.Rect) {
+		fg = gfx.Rect{X: r.X + u.px(1), Y: r.Y + u.px(1), W: side, H: side}
+		bg = gfx.Rect{X: r.X + u.px(16), Y: r.Y + u.px(13), W: side, H: side}
+		if swapped {
+			fg, bg = bg, fg
+		}
+		return fg, bg
+	}
 	if ad, n := a.paintedVector(); n != nil {
 		v := n.Vector
+		fg, bg := places(a.fillStrokeSwap)
 		a.drawSwatchPair([]colourSwatch{
 			{"art/stroke", bg, true, u.t("Stroke: click to colour the stroke (X switches)"), func(r gfx.Rect) { drawPaintSwatch(u, r, v.Stroke.Paint, true) }},
 			{"art/fill", fg, false, u.t("Fill: click to colour the fill (X switches)"), func(r gfx.Rect) { drawPaintSwatch(u, r, v.Fill, false) }},
@@ -215,6 +225,7 @@ func (a *App) drawColourSwatches(r gfx.Rect) {
 		}
 		return
 	}
+	fg, bg := places(a.settings.Paint.ColoursSwapped)
 	a.drawSwatchPair([]colourSwatch{
 		{"art/bg", bg, true, u.t("Background colour: click to choose it"), func(r gfx.Rect) { drawColourSwatch(u, r, a.backgroundColor()) }},
 		{"art/fg", fg, false, u.t("Foreground colour: click to choose it"), func(r gfx.Rect) { drawColourSwatch(u, r, a.brush.Color) }},
