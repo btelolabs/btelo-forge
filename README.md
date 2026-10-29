@@ -136,11 +136,12 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
 - Records a screen with the computer's sound and a microphone, the way OBS Studio does: Desktop Duplication hands
   frames straight to the graphics card's encoder (NVIDIA NVENC, AMD AMF or Media Foundation), so recording a
   3440×1440 screen at 60 fps takes about 3% of one processor core.
-- The whole screen or a region; pause and resume; hotkeys that work from any program (Ctrl+Shift+F9 starts and
+- The whole screen or a region; pause and resume; hotkeys that work from any program (Ctrl+Shift+4 starts and
   stops). The editor's own window is recorded too, so its use can be shown; it can also keep itself out of the
   picture. The recording toolbar never appears in it.
 - Recordings open in a tab, ready to cut.
-- Screenshots of a screen or a dragged region, and drawing on the screen itself, with or without recording.
+- Screenshots of a screen or a dragged region, onto the clipboard (Ctrl+Shift+3), into the pictures folder or
+  saved with their path copied, and drawing on the screen itself, with or without recording.
 
 ## Live streaming (Windows)
 

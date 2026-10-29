@@ -152,8 +152,8 @@ func (a *App) startCards() []startCard {
 			action: u.t("Record…"), enabled: a.recorder() != nil && !a.recording() && a.export == nil, hint: recordHint,
 			run: a.openRecorder,
 			extra: &startExtra{id: "empty/screenshot", glyph: icCamera,
-				hint:    withKey(u.t("Take a screenshot of the screen chosen for recording"), a.hotkeyLabel(hotkeyScreenshot)),
-				enabled: a.recorder() != nil && !a.rec.shooting && a.over.pick == nil, run: a.screenshotRegion}},
+				hint:    withKey(u.t("Take a screenshot of the screen chosen for recording"), a.hotkeyLabel(hotkeyScreenshotFile)),
+				enabled: a.recorder() != nil && !a.rec.shooting && a.over.pick == nil, run: func() { a.screenshotRegion(shotFile) }}},
 		a.liveCard(),
 	}
 }

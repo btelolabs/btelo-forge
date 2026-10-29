@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"image/color"
 	"math"
 	"path/filepath"
@@ -42,6 +41,7 @@ type speechJob struct {
 	stage    string
 	fraction float64
 	lines    int
+	stopping bool
 }
 
 // speechLine is a piece of speech to make and where it goes on the timeline.
@@ -62,8 +62,26 @@ func (s *speechPanel) busy() bool { return s.job != nil }
 
 func (s *speechPanel) cancel() {
 	if s.job != nil {
+		s.job.stopping = true
 		s.job.stop()
 	}
+}
+
+// speechStage says what the job is doing and how far it has got; how long loading the model takes is not known.
+func (a *App) speechStage(j *speechJob) (string, float64) {
+	u := &a.u
+	switch j.stage {
+	case "engine":
+		return u.t("Downloading the voice-over engine"), j.fraction
+	case "model":
+		return u.t("Downloading the model"), j.fraction
+	case "load":
+		return u.t("Loading the model into memory"), -1
+	}
+	if j.lines > 1 {
+		return u.tf("Speaking %d of %d", min(int(j.fraction*float64(j.lines))+1, j.lines), j.lines), j.fraction
+	}
+	return u.t("Speaking"), j.fraction
 }
 
 // close ends the job and the engine, giving its memory back.
@@ -191,35 +209,10 @@ func (a *App) drawSpeechPanel(r gfx.Rect) float32 {
 		y += u.px(40)
 	}
 	y += u.px(6)
-	if job := s.job; job != nil {
-		var stage string
-		switch job.stage {
-		case "engine":
-			stage = u.t("Downloading the voice-over engine")
-		case "model":
-			stage = u.t("Downloading the model")
-		case "load":
-			stage = u.t("Loading the model into memory")
-		default:
-			if job.lines > 1 {
-				stage = u.tf("Speaking %d of %d", min(int(job.fraction*float64(job.lines))+1, job.lines), job.lines)
-			} else {
-				stage = u.t("Speaking")
-			}
-		}
-		if job.stage != "load" {
-			stage = fmt.Sprintf("%s · %d%%", stage, int(job.fraction*100))
-		}
-		u.label(u.face(12.5), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(20)}, stage, colText, 0)
-		y += u.px(26)
-		bar := gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(8)}
-		u.c.Fill(bar, colSurface)
-		u.c.Fill(gfx.Rect{X: bar.X, Y: bar.Y, W: max(bar.W*float32(job.fraction), bar.H), H: bar.H}, colAccent)
-		y += u.px(18)
-		if u.button("speech/cancel", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(36)}, "", u.t("Cancel"), plain, true) {
-			s.cancel()
-		}
-		y += u.px(50)
+	if s.job != nil {
+		// Its progress shows in the corner of the window (drawTasks), whichever page is in front.
+		u.button("speech/go", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(40)}, icVoice, u.t("Generating speech…"), primary, false)
+		y += u.px(54)
 	} else {
 		text := strings.TrimSpace(s.text)
 		if u.button("speech/go", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(40)}, icVoice, u.t("Generate speech"), primary, text != "") {

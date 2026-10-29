@@ -37,14 +37,24 @@ func TestHotkeyNames(t *testing.T) {
 			t.Errorf("%s usable %v, want %v", c.key, !c.usable, c.usable)
 		}
 	}
-	// The defaults differ from each other and stay usable.
+	// The defaults number the actions in order, differ from each other and stay usable; the screenshots saved as
+	// files and pausing have none.
 	d := defaultHotkeys()
 	seen := map[Hotkey]bool{}
-	for _, k := range d.list() {
+	for i, k := range d.list() {
+		if i == hotkeyScreenshotFile || i == hotkeyScreenshotPath || i == hotkeyPause {
+			if k.Key != 0 {
+				t.Errorf("default %s for %q, want none", k, hotkeyNames[i])
+			}
+			continue
+		}
 		if !k.usable() || seen[*k] {
 			t.Errorf("default %s", k)
 		}
 		seen[*k] = true
+	}
+	if d.Window.String() != "Ctrl+Shift+1" || d.Screenshot.String() != "Ctrl+Shift+3" || d.Record.String() != "Ctrl+Shift+4" {
+		t.Errorf("defaults %+v", d)
 	}
 }
 
@@ -54,8 +64,12 @@ func TestHotkeysAreRegisteredAndChosenByPressing(t *testing.T) {
 	if a.recorder() == nil {
 		t.Skip("hotkeys are not offered here")
 	}
-	if len(h.hotkeys) != hotkeyCount || h.hotkeys[hotkeyRecord].String() != "Ctrl+Shift+F9" {
+	if len(h.hotkeys) != hotkeyCount || h.hotkeys[hotkeyRecord].String() != "Ctrl+Shift+4" {
 		t.Fatalf("registered at start: %v", h.hotkeys)
+	}
+	// The Hotkeys page opens on the system-wide hotkeys, its first tab.
+	if got := a.keyDomainTabs(rectAt(0, 0, 800, 34)); got != domainRecording {
+		t.Errorf("the Hotkeys page opens on domain %d", got)
 	}
 	a.settingsOpen, a.settingsPage, a.keysDomain = true, settingsHotkeysPage, domainRecording
 	x.frame(Input{})
@@ -72,8 +86,8 @@ func TestHotkeysAreRegisteredAndChosenByPressing(t *testing.T) {
 	if a.hotkeys.capturing != hotkeyScreenshot || !strings.Contains(a.hotkeys.refused, "P") {
 		t.Fatalf("a plain key was taken: capturing %d, refused %q", a.hotkeys.capturing, a.hotkeys.refused)
 	}
-	x.frame(Input{Keys: []Key{{Code: 0x78, Ctrl: true, Shift: true}}})
-	if a.hotkeys.capturing != hotkeyScreenshot || !strings.Contains(a.hotkeys.refused, "Ctrl+Shift+F9") {
+	x.frame(Input{Keys: []Key{{Code: '4', Ctrl: true, Shift: true}}})
+	if a.hotkeys.capturing != hotkeyScreenshot || !strings.Contains(a.hotkeys.refused, "Ctrl+Shift+4") {
 		t.Fatalf("a hotkey of another action was taken: refused %q", a.hotkeys.refused)
 	}
 	x.frame(Input{Keys: []Key{{Code: 'P', Ctrl: true, Alt: true}}})
@@ -109,7 +123,7 @@ func TestScreenshotByHotkey(t *testing.T) {
 	a, h := x.a, x.h
 	x.open(x.fixture())
 	a.settings.Record.HideWindow = true
-	a.Tick(Input{Hotkeys: []int{hotkeyScreenshot}})
+	a.Tick(Input{Hotkeys: []int{hotkeyScreenshotFile}})
 	if !a.rec.shooting || !h.excluded {
 		t.Fatalf("shooting %v, window left out %v", a.rec.shooting, h.excluded)
 	}
@@ -154,6 +168,42 @@ func TestScreenshotByHotkey(t *testing.T) {
 	}
 }
 
+func TestScreenshotOntoTheClipboard(t *testing.T) {
+	x := recordingHarness(t)
+	a, h := x.a, x.h
+	tmp := t.TempDir()
+	t.Setenv("TMP", tmp)
+	t.Setenv("TEMP", tmp)
+	t.Setenv("TMPDIR", tmp)
+	a.Tick(Input{Hotkeys: []int{hotkeyScreenshot}})
+	x.pump(time.Minute, func() bool { return !a.rec.shooting })
+	d, _ := a.chosenDisplay()
+	if h.clipImage == nil || h.clipImage.Bounds().Dx() != d.Width || h.clipImage.Bounds().Dy() != d.Height {
+		t.Fatalf("clipboard picture %v; toasts %+v", h.clipImage, a.toasts)
+	}
+	// It is only on the clipboard: no file is saved, and the one ffmpeg wrote is gone.
+	if shots, _ := filepath.Glob(filepath.Join(a.settings.ExportDir, "Screenshot *.png")); len(shots) != 0 {
+		t.Errorf("saved %v", shots)
+	}
+	if left, _ := os.ReadDir(tmp); len(left) != 0 {
+		t.Errorf("left in the temporary folder: %v", left)
+	}
+}
+
+func TestScreenshotWithItsPathCopied(t *testing.T) {
+	x := recordingHarness(t)
+	a, h := x.a, x.h
+	a.Tick(Input{Hotkeys: []int{hotkeyScreenshotPath}})
+	x.pump(time.Minute, func() bool { return !a.rec.shooting })
+	shots, _ := filepath.Glob(filepath.Join(a.settings.ExportDir, "Screenshot *.png"))
+	if len(shots) != 1 || h.clip != shots[0] {
+		t.Fatalf("screenshots %v, clipboard %q; toasts %+v", shots, h.clip, a.toasts)
+	}
+	if h.clipImage != nil {
+		t.Error("the picture went onto the clipboard instead of its path")
+	}
+}
+
 func TestPauseHotkeyWhileRecording(t *testing.T) {
 	x := recordingHarness(t)
 	a := x.a
@@ -188,7 +238,7 @@ func TestWindowHotkeyHidesAndBringsBack(t *testing.T) {
 	if a.recorder() == nil {
 		t.Skip("hotkeys are not offered here")
 	}
-	if got := h.hotkeys[hotkeyWindow].String(); got != "Ctrl+Shift+F8" {
+	if got := h.hotkeys[hotkeyWindow].String(); got != "Ctrl+Shift+1" {
 		t.Fatalf("registered %q for the window", got)
 	}
 	a.Tick(Input{Hotkeys: []int{hotkeyWindow}})

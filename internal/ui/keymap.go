@@ -14,7 +14,7 @@ import (
 // editing, drawing, and recording (the system-wide hotkeys in hotkeys.go). Each command has a stable id, under
 // which the keys the user chose are kept; a command the user has not changed keeps its defaults.
 
-// The domains shortcuts belong to, in the order Settings shows them.
+// The domains shortcuts belong to. Settings shows the system-wide hotkeys first, then these in order.
 const (
 	domainGeneral = iota
 	domainVideo
@@ -568,11 +568,11 @@ func (a *App) keyDomainTabs(r gfx.Rect) int {
 	u := &a.u
 	var names []string
 	var domains []int
-	for d, name := range domainNames {
-		if d == domainRecording && a.recorder() == nil {
-			continue // nothing records here
-		}
-		names, domains = append(names, u.t(name)), append(domains, d)
+	if a.recorder() != nil { // nothing records here otherwise
+		names, domains = append(names, u.t(domainNames[domainRecording])), append(domains, domainRecording)
+	}
+	for d := domainGeneral; d < domainRecording; d++ {
+		names, domains = append(names, u.t(domainNames[d])), append(domains, d)
 	}
 	at := max(slices.Index(domains, a.keysDomain), 0)
 	if pick := u.tabs("settings/keys/domain", r, names, at); pick != at {

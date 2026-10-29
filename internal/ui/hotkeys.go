@@ -15,41 +15,44 @@ type Hotkey struct {
 	Key   uint16 `json:"key"`
 }
 
-// The actions that have a hotkey, in the order the window registers them.
+// The actions that have a hotkey, in the order Settings shows them and the window registers them.
 const (
-	hotkeyRecord = iota // start or stop recording
+	hotkeyWindow         = iota // hide the window, or bring it back and in front
+	hotkeyDraw                  // draw on the screen, or give the mouse back while keeping the drawing
+	hotkeyScreenshot            // take a screenshot onto the clipboard
+	hotkeyScreenshotFile        // take a screenshot into the pictures folder
+	hotkeyScreenshotPath        // take a screenshot into the pictures folder and copy its path
+	hotkeyRecord                // start or stop recording
 	hotkeyPause
-	hotkeyScreenshot
-	hotkeyDraw   // draw on the screen, or give the mouse back while keeping the drawing
-	hotkeyWindow // hide the window, or bring it back and in front
 	hotkeyCount
 )
 
-var hotkeyNames = msgs("Start or stop recording", "Pause or resume recording", "Take a screenshot", "Draw on the screen", "Show or hide this window")
+var hotkeyNames = msgs("Show or hide this window", "Draw on the screen", "Take a screenshot onto the clipboard",
+	"Take a screenshot into the pictures folder", "Take a screenshot and copy its path", "Start or stop recording", "Pause or resume recording")
 
-// hotkeySettings are the hotkeys the user chose, kept between runs.
+// hotkeySettings are the hotkeys the user chose, kept between runs. The clipboard screenshot keeps the name the one
+// screenshot hotkey had, so the combination chosen for it carries over.
 type hotkeySettings struct {
-	Record     Hotkey `json:"record"`
-	Pause      Hotkey `json:"pause"`
-	Screenshot Hotkey `json:"screenshot"`
-	Draw       Hotkey `json:"draw"`
-	Window     Hotkey `json:"window"`
+	Window         Hotkey `json:"window"`
+	Draw           Hotkey `json:"draw"`
+	Screenshot     Hotkey `json:"screenshot"`
+	ScreenshotFile Hotkey `json:"screenshotFile"`
+	ScreenshotPath Hotkey `json:"screenshotPath"`
+	Record         Hotkey `json:"record"`
+	Pause          Hotkey `json:"pause"`
 }
 
-// defaultHotkeys avoid the combinations other programs often take, such as Ctrl+Alt+R and NVIDIA's Alt+F9.
+// defaultHotkeys number the actions in the order Settings shows them, Ctrl+Shift with the digit, avoiding the
+// combinations other programs often take, such as Ctrl+Alt+R and NVIDIA's Alt+F9. The screenshots saved as files
+// and pausing have none: most people want one kind of screenshot at hand, and pausing has its button on the
+// recording toolbar.
 func defaultHotkeys() hotkeySettings {
-	const f8, f9, f10, f11, f12 = 0x77, 0x78, 0x79, 0x7a, 0x7b
-	return hotkeySettings{
-		Record:     Hotkey{Ctrl: true, Shift: true, Key: f9},
-		Pause:      Hotkey{Ctrl: true, Shift: true, Key: f10},
-		Screenshot: Hotkey{Ctrl: true, Shift: true, Key: f12},
-		Draw:       Hotkey{Ctrl: true, Shift: true, Key: f11},
-		Window:     Hotkey{Ctrl: true, Shift: true, Key: f8},
-	}
+	digit := func(d uint16) Hotkey { return Hotkey{Ctrl: true, Shift: true, Key: '0' + d} }
+	return hotkeySettings{Window: digit(1), Draw: digit(2), Screenshot: digit(3), Record: digit(4)}
 }
 
 func (h *hotkeySettings) list() [hotkeyCount]*Hotkey {
-	return [hotkeyCount]*Hotkey{&h.Record, &h.Pause, &h.Screenshot, &h.Draw, &h.Window}
+	return [hotkeyCount]*Hotkey{&h.Window, &h.Draw, &h.Screenshot, &h.ScreenshotFile, &h.ScreenshotPath, &h.Record, &h.Pause}
 }
 
 // hotkeyState is what registering the hotkeys found, and the one being chosen in Settings.
@@ -163,9 +166,9 @@ func (a *App) handleHotkeys(pressed []int) {
 			if r.rec != nil && !r.stopping && !r.busy {
 				a.pauseRecording(!r.rec.Status().Paused, nil)
 			}
-		case hotkeyScreenshot:
+		case hotkeyScreenshot, hotkeyScreenshotFile, hotkeyScreenshotPath:
 			if a.over.pick == nil {
-				a.screenshotRegion()
+				a.screenshotRegion(shotTargets[action-hotkeyScreenshot])
 			}
 		case hotkeyDraw:
 			a.toggleScreenDraw()

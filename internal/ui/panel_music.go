@@ -2,9 +2,13 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/library"
@@ -23,7 +27,7 @@ type musicPanel struct {
 	asked    string // query the remote search last ran with; set when typing ends
 	genre    int
 	scroll   float32
-	adding   map[string]bool
+	adding   map[string]*musicAdd // by track key
 	catalogs map[string][]library.Track
 	loading  map[string]bool
 	failed   string
@@ -43,7 +47,7 @@ type musicPanel struct {
 }
 
 func (m *musicPanel) init() {
-	m.source, m.adding, m.catalogs, m.loading = srcAll, map[string]bool{}, map[string][]library.Track{}, map[string]bool{}
+	m.source, m.adding, m.catalogs, m.loading = srcAll, map[string]*musicAdd{}, map[string][]library.Track{}, map[string]bool{}
 }
 
 // reset forgets everything that came from the sources, after the configuration changed.
@@ -51,6 +55,28 @@ func (m *musicPanel) reset() {
 	clear(m.catalogs)
 	m.failed, m.partial, m.results, m.search, m.page, m.pages, m.genre, m.scroll = "", "", nil, "", 0, 0, 0, 0
 	m.shown.tracks = nil
+}
+
+// musicAdd is a track being downloaded to be added to the edit of doc.
+type musicAdd struct {
+	track    library.Track
+	doc      *doc
+	started  time.Time
+	stop     context.CancelFunc
+	stopping bool
+}
+
+// cancel gives up adding the track; what was downloaded is kept for next time.
+func (m *musicAdd) cancel() {
+	m.stopping = true
+	m.stop()
+}
+
+// addingInOrder lists the tracks being added, the earliest first.
+func (m *musicPanel) addingInOrder() []*musicAdd {
+	list := slices.Collect(maps.Values(m.adding))
+	slices.SortFunc(list, func(x, y *musicAdd) int { return x.started.Compare(y.started) })
+	return list
 }
 
 func (m *musicPanel) downloading() bool { return len(m.adding) > 0 || m.busy || len(m.loading) > 0 }
@@ -450,7 +476,7 @@ func (a *App) drawTrackRow(r gfx.Rect, t library.Track) {
 		textW -= u.px(15)
 	}
 	u.label(u.face(11), gfx.Rect{X: textX, Y: r.Y + u.px(29), W: textW, H: u.px(18)}, info, infoCol, 0)
-	adding := a.music.adding[key]
+	_, adding := a.music.adding[key]
 	label := u.t("Add")
 	if adding {
 		label = "…"
@@ -498,16 +524,24 @@ func (a *App) addTrack(t library.Track) {
 		return
 	}
 	key := t.Key()
-	a.music.adding[key] = true
-	a.background(func(ctx context.Context) {
+	if _, ok := a.music.adding[key]; ok {
+		return
+	}
+	ctx, stop := context.WithCancel(a.life)
+	add := &musicAdd{track: t, doc: a.doc, started: time.Now(), stop: stop}
+	a.music.adding[key] = add
+	a.background(func(context.Context) {
 		path, err := a.lib.Download(ctx, t)
 		a.post(func() {
+			stop()
 			delete(a.music.adding, key)
-			if err != nil {
+			switch {
+			case errors.Is(err, context.Canceled):
+			case err != nil:
 				a.toast(t.Title+" "+err.Error(), true)
-				return
+			default:
+				a.placeTrackIn(add.doc, t, path)
 			}
-			a.placeTrack(t, path)
 		})
 	})
 }

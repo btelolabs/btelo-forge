@@ -383,20 +383,29 @@ func (a *App) importAudio(paths []string, place bool) {
 }
 
 // placeTrack puts a downloaded or local sound on the timeline at the playhead and selects it.
-func (a *App) placeTrack(t library.Track, path string) {
-	if a.p == nil {
-		return
+func (a *App) placeTrack(t library.Track, path string) { a.placeTrackIn(a.doc, t, path) }
+
+// placeTrackIn adds t at the playhead of the edit d; when d is not in front it is added to that edit's history.
+func (a *App) placeTrackIn(d *doc, t library.Track, path string) {
+	if d == nil || d.p == nil || !slices.Contains(a.docs, d) {
+		return // the tab was closed meanwhile
 	}
 	total := t.Duration
 	if total <= 0 {
-		total = a.p.Duration()
+		total = d.p.Duration()
 	}
-	a.change(func() {
-		a.sel = selection{kind: selMusic, id: a.p.AddMusic(path, t.Title, t.Credit, total, a.playhead)}
-	})
-	a.showPanel(tabMusic)
+	if d == a.doc {
+		a.change(func() {
+			a.sel = selection{kind: selMusic, id: a.p.AddMusic(path, t.Title, t.Credit, total, a.playhead)}
+		})
+		a.showPanel(tabMusic)
+	} else {
+		before := d.p.Clone()
+		d.p.AddMusic(path, t.Title, t.Credit, total, d.playhead)
+		d.hist.Commit(before)
+		d.dirty = true
+	}
 	if t.Duration <= 0 {
-		d := a.doc
 		a.background(func(ctx context.Context) {
 			if info, err := media.Probe(ctx, path); err == nil {
 				a.post(func() { a.fixMusicLength(d, path, info.Duration) })

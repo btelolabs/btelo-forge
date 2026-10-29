@@ -184,11 +184,11 @@ func (a *App) addRecordTools(s *mcp.Server) {
 			return result(v, nil)
 		})
 
-	mcp.AddTool(s, &mcp.Tool{Name: "take_screenshot", Description: "Save a PNG of the screen chosen for recording (see recording_status) into the folder recordings go to; returns the file, which add_image can put on the edit."},
+	mcp.AddTool(s, &mcp.Tool{Name: "take_screenshot", Description: "Save a PNG of the screen chosen for recording (see recording_status) into the folder screenshots go to (the export folder chosen in Settings, or else the pictures folder); returns the file, which add_image can put on the edit."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in none) (*mcp.CallToolResult, any, error) {
 			done := make(chan pathResult, 1)
 			if _, err := call(a, func() (any, error) {
-				a.takeScreenshot(image.Rectangle{}, func(path string, err error) { done <- pathResult{path, err} })
+				a.takeScreenshot(image.Rectangle{}, shotFile, func(path string, err error) { done <- pathResult{path, err} })
 				return nil, nil
 			}); err != nil {
 				return errorResult(err), nil, nil

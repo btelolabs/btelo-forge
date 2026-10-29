@@ -28,14 +28,24 @@ type subtitleJob struct {
 	doc      *doc
 	stage    string
 	fraction float64
+	stopping bool
 }
 
 func (s *subtitlePanel) busy() bool { return s.job != nil }
 
 func (s *subtitlePanel) cancel() {
 	if s.job != nil {
+		s.job.stopping = true
 		s.job.stop()
 	}
+}
+
+// subtitleStage says what the job is doing and how far it has got.
+func (a *App) subtitleStage(j *subtitleJob) (string, float64) {
+	u := &a.u
+	stage := map[string]string{"engine": u.t("Downloading the speech engine"), "model": u.t("Downloading the model"),
+		"audio": u.t("Preparing the sound"), "transcribe": u.t("Recognising speech")}[j.stage]
+	return stage, j.fraction
 }
 
 func (a *App) subtitleModel() transcribe.Model {
@@ -71,27 +81,16 @@ func (a *App) drawSubtitlePanel(r gfx.Rect) float32 {
 		y += f.Height() * 1.3
 	}
 	y += u.px(10)
-	if job := s.job; job != nil {
-		stage := map[string]string{"engine": u.t("Downloading the speech engine"), "model": u.t("Downloading the model"),
-			"audio": u.t("Preparing the sound"), "transcribe": u.t("Recognising speech")}[job.stage]
-		u.label(u.face(12.5), gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(20)}, fmt.Sprintf("%s · %d%%", stage, int(job.fraction*100)), colText, 0)
-		y += u.px(26)
-		bar := gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(8)}
-		u.c.Fill(bar, colSurface)
-		u.c.Fill(gfx.Rect{X: bar.X, Y: bar.Y, W: max(bar.W*float32(job.fraction), bar.H), H: bar.H}, colAccent)
-		y += u.px(18)
-		if u.button("sub/cancel", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(36)}, "", u.t("Cancel"), plain, true) {
-			s.cancel()
+	// While it runs, its progress shows in the corner of the window (drawTasks), whichever page is in front.
+	goBox := gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(40)}
+	if s.job != nil {
+		u.button("sub/go", goBox, icSubtitle, u.t("Generating subtitles…"), primary, false)
+	} else if u.button("sub/go", goBox, icSubtitle, u.t("Generate subtitles"), primary, true) {
+		if err := a.generateSubtitles(); err != nil {
+			a.toast(a.describe(err), true)
 		}
-		y += u.px(50)
-	} else {
-		if u.button("sub/go", gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(40)}, icSubtitle, u.t("Generate subtitles"), primary, true) {
-			if err := a.generateSubtitles(); err != nil {
-				a.toast(a.describe(err), true)
-			}
-		}
-		y += u.px(52)
 	}
+	y += u.px(52)
 	if s.lastErr != "" {
 		for _, l := range f.Wrap(s.lastErr, r.W) {
 			u.c.Text(f, r.X, y, l, colDangerText)

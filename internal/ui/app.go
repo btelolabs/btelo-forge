@@ -159,6 +159,7 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	a.newTab()
 	a.applyServices()
 	a.hotkeys.capturing = -1
+	a.keysDomain = domainRecording // the Hotkeys page opens on its first tab, the system-wide hotkeys
 	a.applyHotkeys()
 	a.refreshFileTypes()
 	return a
@@ -200,6 +201,8 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	a.syncPlayback()
 	a.preToasts()
 	u.blocked = a.export != nil || a.settingsOpen || a.rec.open || a.cam.open || a.menu != nil || a.dialog.kind != dialogNone || a.adjust != nil || a.style != nil
+	held := u.blocked
+	a.preTasks()
 
 	a.reservedKeys()
 	l := a.layout()
@@ -245,6 +248,7 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 		a.bodyBefore = nil
 	}
 	u.blocked = false
+	a.drawTasks(!held)
 	a.drawExportModal()
 	if a.export == nil {
 		a.drawSettings()

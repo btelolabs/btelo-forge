@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/capture"
+	"github.com/btelolabs/btelo-forge/internal/files"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/mind"
 )
@@ -223,7 +225,12 @@ func (a *App) capturePath(format, ext string, at time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return a.freePath(filepath.Join(dir, fmt.Sprintf(format, at.Format("2006-01-02 15.04.05"))+ext)), nil
+	return a.datedPath(dir, format, ext, at), nil
+}
+
+// datedPath is a free name in dir for a file made at a time, format putting the time in its name.
+func (a *App) datedPath(dir, format, ext string, at time.Time) string {
+	return a.freePath(filepath.Join(dir, fmt.Sprintf(format, at.Format("2006-01-02 15.04.05"))+ext))
 }
 
 // freePath is path, or path with " (2)", " (3)"… before its extension, the first that no file has and no open
@@ -601,16 +608,29 @@ func (a *App) drawRecordControl(end, y, h float32) float32 {
 	return pill.X
 }
 
-// screenshotRegion lets the user pick a region of the chosen screen, or click for all of it, and saves it.
-func (a *App) screenshotRegion() {
+// shotTarget is where a screenshot goes.
+type shotTarget int
+
+const (
+	shotClipboard shotTarget = iota // onto the clipboard, as a picture, and nowhere else
+	shotFile                        // into the pictures folder
+	shotPath                        // into the pictures folder, with its path on the clipboard
+)
+
+// shotTargets are the targets of the screenshot hotkeys, from hotkeyScreenshot on.
+var shotTargets = [...]shotTarget{shotClipboard, shotFile, shotPath}
+
+// screenshotRegion lets the user pick a region of the chosen screen, or click for all of it, and sends it to the
+// target.
+func (a *App) screenshotRegion(to shotTarget) {
 	d, ok := a.chosenDisplay()
 	if !ok || a.rec.shooting {
-		a.takeScreenshot(image.Rectangle{}, nil) // says why it cannot
+		a.takeScreenshot(image.Rectangle{}, to, nil) // says why it cannot
 		return
 	}
 	a.pickRegion(d, func(region image.Rectangle, ok bool) {
 		if ok {
-			a.takeScreenshot(region, nil)
+			a.takeScreenshot(region, to, nil)
 		}
 	})
 }
@@ -623,9 +643,21 @@ func withKey(hint, key string) string {
 	return hint + " (" + key + ")"
 }
 
-// takeScreenshot saves the chosen screen as a PNG in the folder recordings go to, leaving this window out when the
-// recording settings say so; done, when not nil, hears the file.
-func (a *App) takeScreenshot(region image.Rectangle, done func(path string, err error)) {
+// screenshotDir is the folder screenshots are saved in: the export folder the user chose, or else a folder of the
+// app's own in the pictures folder.
+func (a *App) screenshotDir() (string, error) {
+	if a.settings.ExportDir != "" {
+		return a.settings.ExportDir, nil
+	}
+	if dir := files.Pictures(); dir != "" {
+		return filepath.Join(dir, ProductName), nil
+	}
+	return a.uploadDir()
+}
+
+// takeScreenshot takes a PNG of the chosen screen, leaving this window out when the recording settings say so, and
+// sends it to the target; done, when not nil, hears the file, "" for one only on the clipboard.
+func (a *App) takeScreenshot(region image.Rectangle, to shotTarget, done func(path string, err error)) {
 	r := &a.rec
 	report := func(path string, err error) {
 		if err != nil {
@@ -657,7 +689,21 @@ func (a *App) takeScreenshot(region image.Rectangle, done func(path string, err 
 		report("", errors.New(a.u.t("No screen to record was found")))
 		return
 	}
-	path, err := a.capturePath(a.u.t("Screenshot %s"), ".png", time.Now())
+	cb, pictures := a.host.(imageClipboard)
+	if to == shotClipboard && !pictures {
+		report("", errors.New(a.u.t("Pictures cannot be put on the clipboard on this system")))
+		return
+	}
+	var path string
+	var err error
+	if to == shotClipboard {
+		path, err = tempShotPath()
+	} else {
+		var dir string
+		if dir, err = a.screenshotDir(); err == nil {
+			path = a.datedPath(dir, a.u.t("Screenshot %s"), ".png", time.Now())
+		}
+	}
 	if err != nil {
 		report("", err)
 		return
@@ -670,23 +716,64 @@ func (a *App) takeScreenshot(region image.Rectangle, done func(path string, err 
 	r.shooting = true
 	a.background(func(ctx context.Context) {
 		err := capture.Screenshot(ctx, d, region, s.Cursor, path)
+		var img image.Image
+		if err == nil && to == shotClipboard {
+			img, err = readPNG(path)
+			os.Remove(path)
+		}
 		a.post(func() {
 			r.shooting = false
 			if hide {
 				host.ExcludeFromCapture(false)
 			}
+			if err == nil && img != nil {
+				err = cb.SetClipboardImage(img)
+			}
+			if err == nil && to == shotPath {
+				err = a.host.SetClipboard(path)
+			}
 			if err != nil {
 				report("", err)
+				return
+			}
+			if to == shotClipboard {
+				b := img.Bounds()
+				a.toast(a.u.tf("Copied a screenshot of %d × %d", b.Dx(), b.Dy()), false)
+				report("", nil)
 				return
 			}
 			actions := []toastAction{{a.u.t("Edit"), func() { a.openImageAsArt(path) }}, {a.u.t("Show in folder"), func() { a.host.Reveal(path) }}}
 			if a.p != nil {
 				actions = append([]toastAction{{a.u.t("Add to the edit"), func() { a.addImage(path) }}}, actions...)
 			}
-			a.toastActions(a.u.tf("Saved the screenshot %s", filepath.Base(path)), false, actions)
+			msg := a.u.tf("Saved the screenshot %s", filepath.Base(path))
+			if to == shotPath {
+				msg = a.u.tf("Saved the screenshot %s and copied its path", filepath.Base(path))
+			}
+			a.toastActions(msg, false, actions)
 			report(path, nil)
 		})
 	})
+}
+
+// tempShotPath is a free name in the temporary folder for a screenshot that goes only onto the clipboard.
+func tempShotPath() (string, error) {
+	f, err := os.CreateTemp("", "forge-screenshot-*.png")
+	if err != nil {
+		return "", err
+	}
+	f.Close()
+	return f.Name(), nil
+}
+
+// readPNG decodes the PNG at path.
+func readPNG(path string) (image.Image, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return png.Decode(f)
 }
 
 // drawRecorder is the dialog that sets up a recording. It is as tall as its content, which scrolls when the

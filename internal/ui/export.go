@@ -18,7 +18,6 @@ type exportJob struct {
 	cancel   context.CancelFunc
 	out      string
 	progress float64
-	started  time.Time
 	measured time.Time // when the progress began to be measured, for the time left
 	stopping bool
 }
@@ -73,7 +72,7 @@ func (a *App) startExport() (string, error) {
 	}
 	ctx, cancel := context.WithCancel(a.life)
 	now := time.Now()
-	job := &exportJob{cancel: cancel, out: out, started: now, measured: now}
+	job := &exportJob{cancel: cancel, out: out, measured: now}
 	a.export = job
 	a.background(func(_ context.Context) {
 		err := a.encode(ctx, snapshot, out, func(f float64) {
@@ -152,18 +151,12 @@ func (a *App) drawExportModal() {
 	u.label(u.bold(16), gfx.Rect{X: in.X, Y: in.Y, W: in.W, H: u.px(24)}, u.t("Exporting…"), colText, 0)
 	u.label(u.face(12), gfx.Rect{X: in.X, Y: in.Y + u.px(28), W: in.W, H: u.px(20)}, filepath.Base(job.out), colDim, 0)
 	bar := gfx.Rect{X: in.X, Y: in.Y + u.px(66), W: in.W, H: u.px(10)}
-	u.c.Fill(bar, colSurface)
+	// The first pass of a GIF cannot tell how far it is (render.Analysing): a block sweeps the bar while it runs.
+	u.progressBar(bar, job.progress)
 	var status string
 	if job.progress == render.Analysing {
-		// The first pass of a GIF cannot tell how far it is: a block sweeps the bar while it runs.
-		const period = 1.6
-		phase := math.Mod(time.Since(job.started).Seconds(), period) / period
-		w := bar.W / 4
-		x := bar.X - w + (bar.W+w)*float32(phase)
-		u.c.Fill(gfx.Rect{X: max(x, bar.X), Y: bar.Y, W: min(x+w, bar.Right()) - max(x, bar.X), H: bar.H}, colAccent)
 		status = u.t("Choosing the colours…")
 	} else {
-		u.c.Fill(gfx.Rect{X: bar.X, Y: bar.Y, W: max(bar.W*float32(job.progress), bar.H), H: bar.H}, colAccent)
 		status = fmt.Sprintf("%d%%", int(job.progress*100))
 		if el := time.Since(job.measured).Seconds(); job.progress > 0.02 {
 			status += u.tf(" · about %s left", shortClock(math.Max(el/job.progress-el, 0)))

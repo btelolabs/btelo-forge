@@ -90,7 +90,7 @@ func TestPickingARegion(t *testing.T) {
 func TestScreenshotOfARegion(t *testing.T) {
 	x := overlayHarness(t)
 	a, h := x.a, x.h
-	a.Tick(Input{Hotkeys: []int{hotkeyScreenshot}})
+	a.Tick(Input{Hotkeys: []int{hotkeyScreenshotFile}})
 	open := h.open()
 	if len(open) == 0 {
 		t.Fatal("the screenshot hotkey did not open the picker")

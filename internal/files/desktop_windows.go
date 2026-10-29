@@ -11,3 +11,12 @@ func Desktop() string {
 	}
 	return dir
 }
+
+// Pictures is the user's pictures folder, wherever Windows keeps it, or "" when Windows does not say.
+func Pictures() string {
+	dir, err := windows.KnownFolderPath(windows.FOLDERID_Pictures, 0)
+	if err != nil {
+		return ""
+	}
+	return dir
+}
