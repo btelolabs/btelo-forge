@@ -14,8 +14,8 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Install ffmpeg
@@ -38,7 +38,7 @@ jobs:
             cp LICENSE NOTICE README.md README.zh-CN.md THIRD_PARTY_NOTICES.md "$dir/"
             (cd "dist/$arch" && 7z a -tzip "../btelo-forge-windows-$arch.zip" "Btelo Forge" > /dev/null)
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/*.zip
@@ -46,8 +46,8 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: go vet ./...
@@ -124,7 +124,7 @@ jobs:
         run: |
           cp LICENSE NOTICE README.md README.zh-CN.md THIRD_PARTY_NOTICES.md "dist/Btelo Forge/"
           (cd dist && ditto -c -k --sequesterRsrc --keepParent "Btelo Forge" btelo-forge-macos.zip)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: dist/btelo-forge-macos.zip
@@ -136,11 +136,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*.zip
           generate_release_notes: true
