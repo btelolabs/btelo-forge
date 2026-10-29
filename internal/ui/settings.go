@@ -38,6 +38,7 @@ type settings struct {
 	FileTypes   []string            `json:"fileTypes,omitempty"` // the groups of file types opened from Explorer (fileTypeGroups)
 	Paint       paintSettings       `json:"paint"`
 	Files       filesSettings       `json:"files"`
+	Updates     updateSettings      `json:"updates"`
 
 	SubtitleModel    string `json:"subtitleModel"`
 	SubtitleLanguage string `json:"subtitleLanguage"`
@@ -59,7 +60,7 @@ const maxExportRecords = 200
 func (a *App) settingsPath() string { return filepath.Join(a.stateDir, "settings.json") }
 
 func defaultSettings() settings {
-	return settings{Language: English, Export: project.Export{Quality: project.Balanced}, MCP: true, Record: defaultRecordSettings(), Live: defaultLiveSettings(), Camera: defaultCameraSettings(), Hotkeys: defaultHotkeys(), Paint: defaultPaintSettings()}
+	return settings{Language: English, Export: project.Export{Quality: project.Balanced}, MCP: true, Record: defaultRecordSettings(), Live: defaultLiveSettings(), Camera: defaultCameraSettings(), Hotkeys: defaultHotkeys(), Paint: defaultPaintSettings(), Updates: updateSettings{Daily: true}}
 }
 
 func (a *App) loadSettings() {

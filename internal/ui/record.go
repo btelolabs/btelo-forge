@@ -497,6 +497,7 @@ func (a *App) Tick(in Input) time.Duration {
 	a.drainJobs()
 	a.recordTick(in)
 	a.screenTick()
+	a.updateTick()
 	if a.recording() || a.streaming() || a.cameraSettling() || a.over.bar != nil || a.over.pick != nil {
 		return 250 * time.Millisecond
 	}

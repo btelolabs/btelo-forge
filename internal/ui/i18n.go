@@ -13,6 +13,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/project"
 	"github.com/btelolabs/btelo-forge/internal/render"
 	"github.com/btelolabs/btelo-forge/internal/transcribe"
+	"github.com/btelolabs/btelo-forge/internal/update"
 )
 
 // Language is an interface language; the source strings are English.
@@ -156,6 +157,14 @@ var knownErrors = []struct {
 	{paint.ErrSmartBoard, "An artboard cannot be a smart object, nor be in one"},
 	{paint.ErrNotSmart, "The chosen layer is not a smart object"},
 	{capture.ErrUnsupported, "Screen recording is not supported on this system"},
+	{update.ErrNoDownload, "The new version has no download for this system"},
+	{update.ErrNoChecksum, "The new version gives no checksum to check its download against, so it is not installed"},
+	{update.ErrChecksum, "The download is not the file the release published; nothing was changed"},
+	{update.ErrNotThisApp, "The download does not hold the app; nothing was changed"},
+	{update.ErrUnsupported, "This copy does not run from where a release installs the app; download the new version from its page"},
+	{update.ErrTranslocated, "macOS runs this copy from its download folder; move Btelo Forge to Applications, open it from there and try again"},
+	{update.ErrReadOnly, "The app's folder cannot be written to; download the new version from its page, or move the app to a folder you can change"},
+	{errDevBuild, "This is a development build, which does not update itself"},
 	{capture.ErrNoEncoder, "Neither the graphics card nor ffmpeg's own encoder could record this screen"},
 	{capture.ErrNoDisplay, "No screen that can be recorded is attached to this computer"},
 	{capture.ErrNoGrabber, "This ffmpeg cannot grab the screen (it was built without ddagrab); choose a full ffmpeg build in Settings → Extensions"},

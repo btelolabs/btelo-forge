@@ -46,6 +46,9 @@ func (a *App) tasks() []task {
 		out = append(out, task{id: "music/" + m.track.Key(), glyph: icMusic, title: a.taskTitle(a.u.tf("Adding %s", m.track.Title), m.doc),
 			status: status, fraction: fraction, stopping: m.stopping, cancel: m.cancel, open: a.openPanelOf(m.doc, tabMusic)})
 	}
+	if t, ok := a.updateTask(); ok {
+		out = append(out, t)
+	}
 	return out
 }
 

@@ -196,6 +196,11 @@ can allow the one installed on the computer instead). The macOS app is signed an
 Homebrew, and voice-overs the macOS download of [audio.cpp](https://github.com/0xShug0/audio.cpp/releases) (or, for
 Breeze, a `breeze-server` built from [Breeze-TTS-2.cpp](https://github.com/HoppouAI/Breeze-TTS-2.cpp)) on the PATH.
 
+The app keeps itself up to date: once a day, or from Settings → About, it asks GitHub for the newest release and
+offers it. Agreed to, the release is downloaded, checked against the checksum GitHub publishes with it, put in place of
+the installed copy, and the app restarts as the new version once recording, streaming, exporting and other work have
+ended. On macOS this needs the app in a folder you can change, such as Applications.
+
 Btelo Forge was called Btelo Video Cut; releases up to 0.1.3 carry that name (`btelo-cut-*.zip`). Its settings,
 unfinished edits and downloads move over the first time Btelo Forge runs. On macOS the app has a new identity, so it
 asks again for permission to record the screen.

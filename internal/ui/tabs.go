@@ -15,8 +15,20 @@ func (a *App) drawTabs(r gfx.Rect) {
 	// Every button in the strip is the same size and sits on the tabs' own centre line.
 	top := r.Y + u.px(6)
 	gear := gfx.Rect{X: r.Right() - u.px(40), Y: top + (r.H-top-u.px(30))/2, W: u.px(32), H: u.px(30)}
-	if u.iconButton("tabs/settings", gear, icSettings, u.t("Settings"), a.settingsOpen, a.export == nil) {
+	// A newer version to install, or one installed to start, marks the button, which then opens About.
+	waiting := a.updateWaiting()
+	hint := u.t("Settings")
+	if waiting {
+		hint = u.t("Settings: a new version is ready")
+	}
+	if u.iconButton("tabs/settings", gear, icSettings, hint, a.settingsOpen, a.export == nil) {
 		a.settingsOpen = true
+		if waiting {
+			a.settingsPage = settingsAboutPage
+		}
+	}
+	if waiting {
+		u.c.Circle(gear.Right()-u.px(6), gear.Y+u.px(6), u.px(3.5), colAccent)
 	}
 	end := a.drawLiveControl(a.drawRecordControl(gear.X, gear.Y, gear.H), gear.Y, gear.H)
 	if a.p != nil {

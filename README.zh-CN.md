@@ -142,6 +142,8 @@ Btelo Forge 自己录制——AI 通过 MCP 操作软件，再由 Btelo Forge �
 
 不需要另外安装任何东西：软件使用自带的 ffmpeg，保证录屏、直播、导出在每台电脑上表现一致——首次运行时自动下载一份静态版本到软件自己的目录，只下载一次（可以在 设置 → 扩展 → ffmpeg 里改为允许使用电脑上已安装的版本）。macOS 版已签名并通过 Apple 公证。macOS 上的 AI 字幕使用 Homebrew 安装的 `whisper-cli`，配音使用放在 PATH 上的 macOS 版 [audio.cpp](https://github.com/0xShug0/audio.cpp/releases)（Breeze 则用自行编译的 [Breeze-TTS-2.cpp](https://github.com/HoppouAI/Breeze-TTS-2.cpp) 的 `breeze-server`）。
 
+软件会自动更新：每天检查一次（也可以在 设置 → 关于 里手动检查）GitHub 上的最新版本，发现新版会提示你。确认后自动下载，用 GitHub 随版本发布的校验值核对无误后替换当前安装，并在录屏、直播、导出等工作结束后重启成新版本。macOS 上需要把软件放在可写的文件夹里（例如“应用程序”）。
+
 Btelo Forge 原名 Btelo Video Cut，0.1.3 及更早的版本仍用旧名（`btelo-cut-*.zip`）。第一次运行 Btelo Forge 时，原来的设置、未完成的剪辑和已下载的内容会自动迁移过来。macOS 上软件换了新的身份标识，所以会重新请求录屏权限。
 
 ## 构建

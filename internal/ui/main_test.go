@@ -17,6 +17,7 @@ func TestMain(m *testing.M) {
 		return
 	}
 	mcpPort, phonePort, phoneHost = 0, 0, "127.0.0.1"
+	releasesURL = "" // no test asks GitHub; those about updates serve their own releases
 	os.Exit(m.Run())
 }
 

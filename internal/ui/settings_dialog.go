@@ -300,6 +300,7 @@ func (a *App) settingsAbout(r gfx.Rect) {
 	u.label(u.bold(16), rectAt(mark.Right()+u.px(14), y+u.px(8), r.W, u.px(24)), a.Title(), colText, 0)
 	u.label(u.face(12), rectAt(mark.Right()+u.px(14), y+u.px(36), r.W, u.px(20)), u.tf("Version %s", Version), colDim, 0)
 	y += u.px(84)
+	y = a.settingsUpdates(r, y)
 	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Source code"))
 	y += u.px(26)
 	link := rectAt(r.X, y, r.W, u.px(22))

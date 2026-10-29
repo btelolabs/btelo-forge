@@ -4,15 +4,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/ui"
+	"github.com/btelolabs/btelo-forge/internal/update"
 )
 
 // version is set by the release build.
@@ -66,6 +69,14 @@ func run(background bool, capture string, deadline time.Duration, files []string
 	if interactive && forwardFiles(files) {
 		return nil
 	}
+	if interactive {
+		// What an update left beside the program: the copy it replaced goes once that has ended.
+		if exe, err := os.Executable(); err == nil {
+			if t, err := update.TargetFor(runtime.GOOS, exe); err == nil {
+				go update.CleanupSoon(context.Background(), t.Dir)
+			}
+		}
+	}
 	w, err := openWindow(ui.ProductName, 1440, 900, background)
 	if err != nil {
 		return err
@@ -105,7 +116,7 @@ func run(background bool, capture string, deadline time.Duration, files []string
 	})
 	started := time.Now()
 	settled := time.Time{}
-	for w.Poll() {
+	for w.Poll() && !app.Quitting() {
 		if err := draw(w.Input()); err != nil {
 			return err
 		}
@@ -134,6 +145,11 @@ func run(background bool, capture string, deadline time.Duration, files []string
 			timeout = next
 		}
 		w.Wait(timeout)
+	}
+	// An update installed: the app closes as it always does, everything saved, then the new version starts.
+	if app.Quitting() {
+		app.Close()
+		return app.Relaunch()
 	}
 	return nil
 }

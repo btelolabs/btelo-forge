@@ -117,6 +117,7 @@ type App struct {
 	mindPics        *mindPics               // the pictures the mind maps show, read in the background
 	mindClip        *mindClipboard          // nodes copied from a mind map
 	mindThemeShots  map[string]*image.RGBA  // the theme panel's previews, by theme and size
+	upd             updateState             // the newest release and the update under way
 }
 
 // New builds the editor; cacheDir holds downloads and models, stateDir remembers settings and unfinished edits.
@@ -146,6 +147,7 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 		}
 	}
 	host.SetTitle(a.Title())
+	a.updateStarted()
 	a.player = playback.New(host.Wake)
 	a.audition = playback.NewAudition(host.Wake)
 	a.music.init()
@@ -190,6 +192,7 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	a.openFromSystem(in.Opened)
 	a.recordTick(in)
 	a.screenTick()
+	a.updateTick()
 	u := &a.u
 	u.c, u.s = c, scale*a.windowZoom()
 	u.begin(in)
@@ -330,6 +333,12 @@ func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 		}
 	}
 	sooner(a.mindWait())
+	if a.upd.job != nil {
+		sooner(time.Second / 10) // the update's progress
+	}
+	if _, wait := a.updateDue(); wait > 0 {
+		sooner(wait) // the daily check, in a window left alone for days
+	}
 	if a.art != nil && a.art.layerDrag != nil {
 		sooner(time.Second / 60) // a drag in the layers panel scrolls past the list's ends
 	}
