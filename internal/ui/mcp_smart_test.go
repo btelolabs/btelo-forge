@@ -43,17 +43,22 @@ func TestMCPSharesASmartObjectAcrossTools(t *testing.T) {
 	if res := s.call("add_smart_object", map[string]any{"link_id": "NOSUCHID9"}); !res.IsError {
 		t.Error("a smart object that does not exist was put on the video")
 	}
-	colourOf := func() color.RGBA {
+	// The picture is replaced away from the window as the layers change; while Windows replaces it, it cannot be
+	// opened, so a picture that cannot be read is one not there yet.
+	var colour color.RGBA
+	read := func() bool {
 		img, err := loadImage(o.Image)
 		if err != nil {
-			t.Fatal(err)
+			return false
 		}
 		b := img.Bounds()
 		r, g, bl, _ := img.At(b.Dx()/2, b.Dy()/2).RGBA()
-		return color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8), 255}
+		colour = color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8), 255}
+		return true
 	}
-	if c := colourOf(); c.R < 200 || c.B > 60 {
-		t.Fatalf("the video's picture of the smart object is %v, want red", c)
+	x.pump(10*time.Second, read)
+	if colour.R < 200 || colour.B > 60 {
+		t.Fatalf("the video's picture of the smart object is %v, want red", colour)
 	}
 
 	s.ok("mind_new", map[string]any{"title": "Smart"}, nil)
@@ -62,7 +67,7 @@ func TestMCPSharesASmartObjectAcrossTools(t *testing.T) {
 	// The layer inside the smart object turns blue on its canvas, and the video's picture follows.
 	s.ok("switch_tab", map[string]any{"index": video + 1}, nil)
 	s.ok("canvas_set_vector", map[string]any{"id": shape.ID, "fill": "#2040e0"}, nil)
-	x.pump(10*time.Second, func() bool { c := colourOf(); return c.B > 200 && c.R < 60 })
+	x.pump(10*time.Second, func() bool { return read() && colour.B > 200 && colour.R < 60 })
 
 	if capture.Supported() {
 		s.ok("show_stream", nil, nil)
