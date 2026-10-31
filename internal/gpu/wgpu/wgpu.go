@@ -14,14 +14,12 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/gpu"
 )
 
-// backends are tried in order, the fastest and best tested on each system first. On Windows that is Vulkan: on
-// DirectX 12 the library rejects shaders that Vulkan runs.
+// backends are tried in order, the fastest and best tested on each system first. Windows has Vulkan alone: the library's
+// DirectX 12 side rejects the shaders, so a computer without Vulkan has no card to offer.
 func backends() []gputypes.Backends {
 	switch runtime.GOOS {
 	case "darwin":
 		return []gputypes.Backends{gputypes.BackendsMetal}
-	case "windows":
-		return []gputypes.Backends{gputypes.BackendsVulkan, gputypes.BackendsDX12}
 	}
 	return []gputypes.Backends{gputypes.BackendsVulkan}
 }

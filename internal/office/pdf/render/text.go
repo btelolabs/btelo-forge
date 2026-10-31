@@ -188,11 +188,11 @@ func (r *ctx) endText() {
 }
 
 func (r *ctx) drawType3(f *pdfFont, g *glyph, trm pdf.Matrix) {
-	if r.depth >= maxFormDepth || g.name == "" || r.noDraw {
+	if r.depth >= maxFormDepth || g.name == "" || r.noDraw || !r.op() {
 		return
 	}
 	s, _ := r.doc.Resolve(f.charProcs[pdf.Name(g.name)]).(*pdf.Stream)
-	if s == nil {
+	if s == nil || r.inGlyph[s] { // a glyph drawn from within itself grows by its length at every level
 		return
 	}
 	body, err := r.doc.Decode(s)
@@ -203,6 +203,11 @@ func (r *ctx) drawType3(f *pdfFont, g *glyph, trm pdf.Matrix) {
 	if res == nil {
 		res = r.res
 	}
+	if r.inGlyph == nil {
+		r.inGlyph = map[*pdf.Stream]bool{}
+	}
+	r.inGlyph[s] = true
+	defer delete(r.inGlyph, s)
 	r.depth++
 	r.save()
 	saveUn, savePath := r.uncolored, r.path

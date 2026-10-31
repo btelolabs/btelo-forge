@@ -41,7 +41,8 @@ func TestBuiltInConfigIsValid(t *testing.T) {
 	if m, _ := c.Model("qwen3-4b"); m.ContextOf() != 8192 {
 		t.Fatal("context")
 	}
-	if _, ok := c.Engine(c.Models[0], ""); !ok {
+	m, _ := c.Model("qwen3-4b")
+	if _, ok := c.Engine(m, ""); !ok {
 		t.Fatal("no engine runs on this computer")
 	}
 }

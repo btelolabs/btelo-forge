@@ -312,7 +312,8 @@ struct GroundOut {
 @vertex
 fn vs_ground(@builtin(vertex_index) i: u32) -> GroundOut {
   let corners = array<vec2<f32>, 6>(vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0));
-  let c = corners[i];
+  // A variable, as the library's Metal side writes a bounds-checked value inside a larger expression wrongly.
+  var c = corners[i];
   let reach = frame.grid.y;
   let world = vec3<f32>(frame.eye.x + c.x * reach, frame.options.w, frame.eye.z + c.y * reach);
   var o: GroundOut;
@@ -400,7 +401,9 @@ fn strip(index: u32, start: vec3<f32>, end: vec3<f32>, width: f32) -> LineOut {
   let side = select(-1.0, 1.0, index >= 2u && index != 3u);
   let reach = (LINE_RIM + 1.0) * width;
   let p = select(a, b, far_end);
-  let shift = beside * side * reach + along * select(-0.5, 0.5, far_end) * width;
+  // A variable, as the library's Metal side leaves the brackets off a select inside a larger expression.
+  var end = select(-0.5, 0.5, far_end);
+  let shift = beside * side * reach + along * end * width;
   o.position = vec4<f32>(p.xy + shift * frame.pixel.xy * p.w, p.zw);
   o.across = side * (LINE_RIM + 1.0);
   o.color = vec4<f32>(1.0, 1.0, 1.0, smoothstep(0.5, 2.0, pixels) * mix(LINE_FAINT, 1.0, smoothstep(LINE_SHORT, LINE_FULL, pixels)));

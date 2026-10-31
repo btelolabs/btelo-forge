@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -598,6 +599,9 @@ func TestEngineArgumentsGiveEachPartWhereItsRoleStands(t *testing.T) {
 }
 
 func TestTheBackendChosenForOneKindOfModelHoldsForAnother(t *testing.T) {
+	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
+		t.Skip("the built-in list has more than one backend on 64-bit Windows alone")
+	}
 	c := DefaultConfig()
 	llm, _ := c.Model("qwen3-4b")
 	img, _ := c.Model("sd15")

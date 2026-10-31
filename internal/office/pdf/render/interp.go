@@ -60,22 +60,23 @@ type gstate struct {
 
 // ctx interprets one content stream tree.
 type ctx struct {
-	c      context.Context
-	doc    *pdf.Doc
-	cache  *Cache
-	opts   Options
-	ra     raster
-	ops    int
-	err    error
-	layer  *layer
-	gs     *gstate
-	stack  []*gstate
-	res    pdf.Dict
-	base   pdf.Matrix // the page's matrix, or the form's for patterns inside it
-	depth  int
-	hidden int
-	mc     []bool
-	noDraw bool
+	c       context.Context
+	doc     *pdf.Doc
+	cache   *Cache
+	opts    Options
+	ra      raster
+	ops     int
+	err     error
+	layer   *layer
+	gs      *gstate
+	stack   []*gstate
+	res     pdf.Dict
+	base    pdf.Matrix // the page's matrix, or the form's for patterns inside it
+	depth   int
+	inGlyph map[*pdf.Stream]bool // Type 3 glyphs being drawn
+	hidden  int
+	mc      []bool
+	noDraw  bool
 	// Text out.
 	tm, tlm  pdf.Matrix
 	textClip *poly
