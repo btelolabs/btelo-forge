@@ -319,7 +319,7 @@ func (a *App) updateHeldBy() string {
 		return u.t("Exporting")
 	}
 	for _, t := range a.tasks() {
-		if t.id != "update" {
+		if t.id != "update" && !t.running { // a model waiting in memory is not work under way
 			return t.title
 		}
 	}

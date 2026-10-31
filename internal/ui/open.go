@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/btelolabs/btelo-forge/internal/assets"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/library"
 	"github.com/btelolabs/btelo-forge/internal/media"
@@ -28,42 +29,45 @@ func isImage(path string) bool {
 }
 
 func (a *App) chooseVideo() {
-	var patterns []string
-	for _, e := range videoExtensions {
-		patterns = append(patterns, "*"+e)
-	}
-	files := a.host.OpenFiles(a.u.t("Choose a video to edit"), [][2]string{{a.u.t("Videos"), strings.Join(patterns, ";")}, {a.u.t("All files"), "*.*"}}, true)
-	for _, f := range files {
-		a.openVideo(f, false)
-	}
+	a.pickFiles(pickRequest{key: "video", title: a.u.t("Choose a video to edit"), kinds: a.u.t("Videos"), exts: videoExtensions, multiple: true}, func(paths []string) {
+		for _, f := range paths {
+			a.openVideo(f, false)
+		}
+	})
 }
 
 // chooseAnyFile opens whatever is chosen as dropping it would: a video to edit, a picture or canvas to draw on, a
-// mind map.
+// mind map, an Office document.
 func (a *App) chooseAnyFile() {
-	var patterns []string
-	for _, e := range slices.Concat(videoExtensions, imageExtensions, []string{paint.Ext, mind.Ext}) {
-		patterns = append(patterns, "*"+e)
-	}
-	files := a.host.OpenFiles(a.u.t("Open a file"), [][2]string{{a.u.t("Videos, pictures, canvases and mind maps"), strings.Join(patterns, ";")}, {a.u.t("All files"), "*.*"}}, true)
-	a.openFiles(files, func() bool { return false })
+	exts := slices.Concat(videoExtensions, imageExtensions, []string{paint.Ext, mind.Ext}, officeExtensions(), modelExtensions)
+	a.pickFiles(pickRequest{key: "any", title: a.u.t("Open a file"), kinds: a.u.t("Videos, pictures, canvases, mind maps, documents and 3D files"), exts: exts, multiple: true}, func(paths []string) {
+		a.openFiles(paths, func() bool { return false })
+	})
 }
 
 func (a *App) chooseImage() {
-	var patterns []string
-	for _, e := range imageExtensions {
-		patterns = append(patterns, "*"+e)
-	}
-	for _, f := range a.host.OpenFiles(a.u.t("Choose an image"), [][2]string{{a.u.t("Images"), strings.Join(patterns, ";")}}, true) {
-		a.addImage(f)
-	}
+	a.pickFiles(pickRequest{key: "image", title: a.u.t("Choose an image"), kinds: a.u.t("Images"), exts: imageExtensions, multiple: true}, func(paths []string) {
+		for _, f := range paths {
+			a.addImage(f)
+		}
+	})
 }
 
 // handleDrops sorts dropped files: sounds become music, images overlays, anything else is opened as video.
 // In a mind map tab what is dropped goes on the board where it is let go.
 func (a *App) handleDrops(paths []string) {
+	if a.filePicker != nil {
+		a.pickDropped(paths)
+		return
+	}
+	if a.aiTab && aiTakesFiles(a.aiChoice()) && a.aiDropped(paths) {
+		return
+	}
 	if md := a.board; md != nil && len(paths) > 0 {
 		a.mindAddFiles(md, paths, a.mindPointerOr(md))
+		return
+	}
+	if od := a.office; od != nil && len(paths) > 0 && od.ed.dropped(paths) {
 		return
 	}
 	a.openFiles(paths, a.dropUpper)
@@ -82,10 +86,16 @@ func (a *App) openFiles(paths []string, upper func() bool) {
 			a.openCanvasFile(p)
 		case strings.EqualFold(filepath.Ext(p), mind.Ext):
 			a.openMindFile(p)
+		case isModelFile(p):
+			a.openModelFile(p)
+		case assets.KindOf(p) == assets.Office:
+			a.openOfficeFile(p)
 		case isEditFile(p):
 			a.openEditFile(p)
 		case library.IsAudio(p):
 			audio = append(audio, p)
+		case isPSD(p):
+			a.openPSD(p)
 		case isImage(p) && a.p == nil && a.art == nil:
 			a.openImageAsArt(p)
 		case isImage(p) && a.art != nil:
@@ -122,7 +132,7 @@ func (a *App) dropUpper() bool {
 
 // occupied reports whether the tab holds something, so what is opened next needs a tab of its own.
 func (a *App) occupied() bool {
-	return a.p != nil || a.art != nil || a.opening != "" || a.files != nil || a.board != nil || a.liveTab || a.editing
+	return a.p != nil || a.art != nil || a.opening != "" || a.files != nil || a.board != nil || a.office != nil || a.liveTab || a.keyboardTab || a.mailTab || a.aiTab || a.model != nil || a.editing
 }
 
 // openVideo probes path in the background. An empty tab opens it, restoring an unfinished edit of the same file;
@@ -208,7 +218,7 @@ func (a *App) load(d *doc, src project.Source) {
 		a.media.start(a, s)
 	}
 	d.shown.stale = true
-	if restored {
+	if restored && !d.pinned { // a pinned tab is expected to come back as it was
 		a.toast(a.u.t("Restored your unfinished edit of this video"), false)
 	}
 }

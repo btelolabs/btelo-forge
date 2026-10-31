@@ -53,10 +53,11 @@ func (a *App) chosenBrush(size float64) {
 }
 
 // drawSameSize is the options bar's switch giving every brush the same size, at x; it returns where it ends.
-func (a *App) drawSameSize(x float32, r gfx.Rect) float32 {
+func (a *App) drawSameSize(x float32, r *gfx.Rect) float32 {
 	u := &a.u
 	p := &a.settings.Paint
 	label := u.t("Same size for all brushes")
+	a.optRow(&x, r, checkboxWidth(u, label))
 	box := gfx.Rect{X: x, Y: r.Y, W: checkboxWidth(u, label), H: r.H}
 	if on := u.checkbox("art/samesize", box, label, p.SameSize); on != p.SameSize {
 		p.SameSize = on

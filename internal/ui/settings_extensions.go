@@ -34,16 +34,19 @@ func (a *App) settingsExtensions(r gfx.Rect) {
 	if e.text == nil {
 		e.text, e.saved, e.err, e.view = map[string]string{}, map[string]string{}, map[string]string{}, map[string]*codeView{}
 	}
-	titles := make([]string, len(configKinds))
-	for i, k := range configKinds {
-		titles[i] = u.t(k.title)
+	var kinds []configKind
+	var titles []string
+	for _, k := range configKinds {
+		if !k.ownPage {
+			kinds, titles = append(kinds, k), append(titles, u.t(k.title))
+		}
 	}
 	y := r.Y
 	if pick := u.chips("settings/ext/tab", rectAt(r.X, y, min(r.W, u.px(320)), u.px(30)), titles, e.tab, true); pick != e.tab {
 		e.tab = pick
 		u.focus = ""
 	}
-	k := configKinds[e.tab]
+	k := kinds[e.tab]
 	if _, ok := e.text[k.id]; !ok {
 		text, _ := a.configText(k)
 		e.text[k.id], e.saved[k.id] = text, text

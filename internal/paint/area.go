@@ -131,6 +131,9 @@ func contentReach(n *Node) (image.Rectangle, bool) {
 		}
 		r = r.Union(cr)
 	}
+	if e := n.Filters.reach(); e > 0 && !r.Empty() {
+		r = r.Inset(-e)
+	}
 	return r, true
 }
 

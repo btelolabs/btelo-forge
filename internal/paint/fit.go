@@ -205,9 +205,13 @@ func fitOne(pts []Pt, u []float64, t0, t1 Pt) [4]Pt {
 	if math.Abs(det) > 1e-12 {
 		l0, l1 = (x0*c11-x1*c01)/det, (c00*x1-c01*x0)/det
 	}
-	seg := p0.Dist(p3)
-	if l0 < seg*1e-6 || l1 < seg*1e-6 {
-		// A degenerate fit: the usual third of the chord along each tangent.
+	seg, run := p0.Dist(p3), 0.0
+	for i := 1; i < len(pts); i++ {
+		run += pts[i].Dist(pts[i-1])
+	}
+	if l0 < seg*1e-6 || l1 < seg*1e-6 || l0 > run || l1 > run {
+		// A degenerate fit, nearly singular when the points double back: its handles would throw the curve far from
+		// points it still passes at their parameters. The usual third of the chord along each tangent.
 		l0, l1 = seg/3, seg/3
 	}
 	return [4]Pt{p0, p0.Add(t0.Mul(l0)), p3.Add(t1.Mul(l1)), p3}

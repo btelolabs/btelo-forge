@@ -60,6 +60,8 @@ var (
 	immReleaseContext       = imm32.NewProc("ImmReleaseContext")
 	immSetCompositionWindow = imm32.NewProc("ImmSetCompositionWindow")
 	immSetCandidateWindow   = imm32.NewProc("ImmSetCandidateWindow")
+	immSetCompositionFont   = imm32.NewProc("ImmSetCompositionFontW")
+	immGetCompositionFont   = imm32.NewProc("ImmGetCompositionFontW")
 	shell32                 = syscall.NewLazyDLL("shell32.dll")
 	dragAcceptFiles         = shell32.NewProc("DragAcceptFiles")
 	dragQueryFile           = shell32.NewProc("DragQueryFileW")
@@ -230,13 +232,49 @@ func associateIME(hwnd uintptr, on bool) error {
 	return nil
 }
 
-// TextInput turns text entry on or off; while on the IME is attached and its windows sit at the caret (client pixels).
+// logFont is the system's LOGFONTW.
+type logFont struct {
+	Height, Width, Escapement, Orientation, Weight int32
+	Italic, Underline, StrikeOut, CharSet          byte
+	OutPrecision, ClipPrecision, Quality, Pitch    byte
+	Face                                           [32]uint16
+}
+
+// imeDefaultFace is what words being composed are shown in when no typeface is asked for.
+const imeDefaultFace = "Microsoft YaHei"
+
+// TextInputFont sets the size in pixels and the typeface of the words being composed, as the place being typed in
+// shows them; a size of zero goes by the height given to TextInput.
+func (w *Window) TextInputFont(px float32, family string) { w.imePx, w.imeFace = px, family }
+
+// imeFontOf is the font of words being composed in a line of the given height.
+func (w *Window) imeFontOf(height float32) logFont {
+	px, family := w.imePx, w.imeFace
+	if px <= 0 {
+		px = height * 0.75 // a line is about a third taller than its font
+	}
+	if family == "" {
+		family = imeDefaultFace
+	}
+	const defaultCharset = 1
+	f := logFont{Height: -int32(math.Round(float64(max(px, 1)))), CharSet: defaultCharset}
+	name, err := syscall.UTF16FromString(family)
+	if err != nil || len(name) > len(f.Face) {
+		name, _ = syscall.UTF16FromString(imeDefaultFace)
+	}
+	copy(f.Face[:], name)
+	return f
+}
+
+// TextInput turns text entry on or off; while on the IME is attached, its windows sit at the caret (client pixels),
+// and it shows the words being composed at the size of the words around them, not in its own small font.
 func (w *Window) TextInput(on bool, x, y, height float32) {
 	if on != w.typing {
 		if associateIME(w.Handle, on) != nil {
 			return
 		}
 		w.typing, w.high = on, 0
+		w.imeShown = logFont{}
 	}
 	if !on {
 		return
@@ -253,6 +291,12 @@ func (w *Window) TextInput(on bool, x, y, height float32) {
 		Pos   point
 		Area  rect
 	}{Style: 0x0002, Pos: point{cx, cy}}
+	// Set before the place: the input method sizes its window by the font. Only when it changes, as it redraws.
+	if f := w.imeFontOf(height); f != w.imeShown {
+		if r, _, _ := immSetCompositionFont.Call(ctx, uintptr(unsafe.Pointer(&f))); r != 0 {
+			w.imeShown = f
+		}
+	}
 	immSetCompositionWindow.Call(ctx, uintptr(unsafe.Pointer(&comp)))
 	cand := struct {
 		Index, Style uint32

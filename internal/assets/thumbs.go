@@ -33,6 +33,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/media"
 	"github.com/btelolabs/btelo-forge/internal/paint"
 	"github.com/btelolabs/btelo-forge/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/thumb"
 )
 
 // Info is what reading a file found out about it, kept with its small picture.
@@ -49,7 +50,7 @@ type Info struct {
 }
 
 // Box is the largest a small picture is: big enough for the largest grid at twice the screen's density.
-var Box = image.Pt(512, 512)
+var Box = image.Pt(thumb.Box, thumb.Box)
 
 // PeakBins is how many loudness values a sound's card shows.
 const PeakBins = 96
@@ -191,8 +192,14 @@ func shrink(img image.Image) *image.RGBA {
 	return out
 }
 
-// make reads e and makes its picture and info: a mind map through Maps, anything else with make1.
+// make reads e and makes its picture and info: from the picture a file of the app's ends with, or else a mind map
+// through Maps and anything else with make1.
 func (t *Thumbs) make(ctx context.Context, e Entry) (*image.RGBA, Info, error) {
+	if e.Kind == Canvas || e.Kind == Edit || e.Kind == MindMap {
+		if img, m, err := thumb.Read(e.Path); err == nil {
+			return img, Info{W: m.W, H: m.H, Duration: m.Duration}, nil
+		}
+	}
 	if e.Kind != MindMap {
 		return make1(ctx, e)
 	}
@@ -349,15 +356,7 @@ func canvasOf(path string) (*image.RGBA, Info, error) {
 	if ext.Empty() {
 		return nil, info, nil // nothing drawn yet
 	}
-	// Composed at the detail level nearest the picture's size, so a huge canvas costs no more than a small one.
-	l := 0
-	for max(ext.Dx(), ext.Dy())>>l > max(Box.X, Box.Y) {
-		l++
-	}
-	r := image.Rect(ext.Min.X>>l, ext.Min.Y>>l, (ext.Max.X+(1<<l)-1)>>l, (ext.Max.Y+(1<<l)-1)>>l)
-	dst := image.NewRGBA(r)
-	d.Render(dst, r, l)
-	return shrink(dst), info, nil
+	return shrink(d.Reduced(max(Box.X, Box.Y))), info, nil
 }
 
 func editOf(ctx context.Context, path string) (*image.RGBA, Info, error) {

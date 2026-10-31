@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -12,6 +13,9 @@ import (
 
 const (
 	icClone        = "\ue982"
+	icSpot         = "\ue39e"
+	icHeal         = "\ue3f3"
+	icPatch        = "\ue3c2"
 	icGradient     = "\ue3e9"
 	icMaskGradient = "\ue3db"
 	icShapes       = "\ue574"
@@ -186,7 +190,11 @@ func (a *App) beginClone(ad *artDoc, cx, cy float64) {
 		return
 	}
 	if !ad.cloneSet {
-		a.toast(u.t("Alt+click where to clone from first"), false)
+		message := u.t("Alt+click where to clone from first")
+		if a.artTool == toolHeal {
+			message = u.t("Alt+click where to heal from first")
+		}
+		a.toast(message, false)
 		u.active = ""
 		return
 	}
@@ -194,7 +202,11 @@ func (a *App) beginClone(ad *artDoc, cx, cy float64) {
 		ad.cloneOffset = image.Pt(int(math.Round(ad.cloneFrom[0]-cx)), int(math.Round(ad.cloneFrom[1]-cy)))
 		ad.cloneAligned = true
 	}
-	s, changed, err := ad.d.BeginClone(a.brush, ad.cloneOffset.X, ad.cloneOffset.Y, p.CloneAllLayers, cx, cy)
+	begin := ad.d.BeginClone
+	if a.artTool == toolHeal {
+		begin = ad.d.BeginHeal
+	}
+	s, changed, err := begin(a.brush, ad.cloneOffset.X, ad.cloneOffset.Y, p.CloneAllLayers, cx, cy)
 	if err != nil {
 		a.artFailed(ad, err)
 		u.active = ""
@@ -202,6 +214,56 @@ func (a *App) beginClone(ad *artDoc, cx, cy float64) {
 	}
 	ad.stroke = s
 	ad.touched(changed)
+}
+
+// beginSpot starts a Spot Healing Brush stroke at the pointer, which needs no source.
+func (a *App) beginSpot(ad *artDoc, cx, cy float64) {
+	s, changed, err := ad.d.BeginSpotHeal(a.brush, a.settings.Paint.CloneAllLayers, cx, cy)
+	if err != nil {
+		a.artFailed(ad, err)
+		a.u.active = ""
+		return
+	}
+	ad.stroke = s
+	ad.touched(changed)
+}
+
+// finishPatch ends the Patch tool's drag at (cx, cy): the selection takes what the drag went to.
+func (a *App) finishPatch(ad *artDoc, cx, cy float64) {
+	ad.patching = false
+	dx, dy := int(math.Round(cx-ad.patchFrom[0])), int(math.Round(cy-ad.patchFrom[1]))
+	if dx == 0 && dy == 0 {
+		return
+	}
+	a.artRun(ad, func() error { return ad.d.PatchSelection(dx, dy, a.settings.Paint.CloneAllLayers) })
+	ad.changedAll()
+}
+
+// contentFill works Content-Aware Fill out on another goroutine, so a large selection does not stop the window, and
+// lays it on the layer when it is ready.
+func (a *App) contentFill(ad *artDoc) {
+	if ad.filling {
+		return
+	}
+	f, err := ad.d.PrepareContentFill(a.settings.Paint.CloneAllLayers)
+	if err != nil {
+		a.artFailed(ad, err)
+		return
+	}
+	ad.filling = true
+	a.background(func(context.Context) {
+		err := f.Compute()
+		a.post(func() {
+			ad.filling = false
+			if err == nil {
+				_, err = f.Apply()
+			}
+			if err != nil {
+				a.artFailed(ad, err)
+			}
+			ad.changedAll()
+		})
+	})
 }
 
 // drawFillOverlay shows the gradient's line or the shape being dragged, and where the clone stamp takes from.
@@ -232,7 +294,16 @@ func (a *App) drawFillOverlay(ad *artDoc, vp gfx.Rect) {
 		drawAnts(u, box)
 		return
 	}
-	if a.artTool != toolClone || !ad.cloneSet {
+	if ad.patching {
+		// Where the selection would take its pixels from.
+		b := ad.d.SelectionBounds()
+		dx, dy := ad.cursor[0]-ad.patchFrom[0], ad.cursor[1]-ad.patchFrom[1]
+		x0, y0 := ad.toScreen(vp, [2]float64{float64(b.Min.X) + dx, float64(b.Min.Y) + dy})
+		x1, y1 := ad.toScreen(vp, [2]float64{float64(b.Max.X) + dx, float64(b.Max.Y) + dy})
+		drawAnts(u, gfx.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0})
+		return
+	}
+	if a.artTool != toolClone && a.artTool != toolHeal || !ad.cloneSet {
 		return
 	}
 	// The source: where it was set, or under the brush's distance while painting and once aligned.
@@ -257,13 +328,16 @@ func (a *App) drawBucketOptions(r gfx.Rect) {
 	p := &a.settings.Paint
 	x, done := a.labelledSlider("art/fill/opacity", r.X, r.Y, r.H, u.t("Opacity"), &p.FillOpacity, 0.01, 1, percent)
 	tol := float64(p.FillTolerance)
+	a.optRow(&x, &r, u.px(190))
 	x, done2 := a.labelledSlider("art/fill/tolerance", x, r.Y, r.H, u.t("Tolerance"), &tol, 0, 255, func(v float64) string { return fmt.Sprintf("%.0f", v) })
 	p.FillTolerance = int(math.Round(tol))
 	done = done || done2
+	a.optRow(&x, &r, u.px(116))
 	if on := u.checkbox("art/fill/contiguous", gfx.Rect{X: x, Y: r.Y, W: u.px(110), H: r.H}, u.t("Contiguous"), p.FillContiguous); on != p.FillContiguous {
 		p.FillContiguous, done = on, true
 	}
 	x += u.px(116)
+	a.optRow(&x, &r, u.px(176))
 	if on := u.checkbox("art/fill/all", gfx.Rect{X: x, Y: r.Y, W: u.px(170), H: r.H}, u.t("Sample all layers"), p.FillAllLayers); on != p.FillAllLayers {
 		p.FillAllLayers, done = on, true
 	}
@@ -283,6 +357,7 @@ func (a *App) drawGradientOptions(r gfx.Rect) {
 	})
 	x += u.px(210)
 	for i := range paint.GradientKinds {
+		a.optRow(&x, &r, u.px(32))
 		b := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
 		id := fmt.Sprintf("art/gradient/kind/%d", i)
 		bg := colSurface
@@ -302,11 +377,14 @@ func (a *App) drawGradientOptions(r gfx.Rect) {
 		x += u.px(32)
 	}
 	x += u.px(10)
+	a.optRow(&x, &r, u.px(190))
 	x, done := a.labelledSlider("art/gradient/opacity", x, r.Y, r.H, u.t("Opacity"), &p.GradientOpacity, 0.01, 1, percent)
+	a.optRow(&x, &r, u.px(96))
 	if on := u.checkbox("art/gradient/reverse", gfx.Rect{X: x, Y: r.Y, W: u.px(90), H: r.H}, u.t("Reverse"), p.GradientReverse); on != p.GradientReverse {
 		p.GradientReverse, done = on, true
 	}
 	x += u.px(96)
+	a.optRow(&x, &r, u.px(96))
 	if on := u.checkbox("art/gradient/dither", gfx.Rect{X: x, Y: r.Y, W: u.px(90), H: r.H}, u.t("Dither"), p.GradientDither); on != p.GradientDither {
 		p.GradientDither, done = on, true
 	}
@@ -345,8 +423,7 @@ func (a *App) drawMaskGradientOptions(r gfx.Rect) {
 		a.saveSettings()
 	}
 	x += u.px(100)
-	u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H},
-		u.t("Drag across the layer to fade it out: its mask goes from white, showing it, to black, hiding it"), colDim, 0)
+	a.optHint(x, r, u.t("Drag across the layer to fade it out: its mask goes from white, showing it, to black, hiding it"))
 }
 
 // drawGradientIcon draws a small picture of a gradient shape, black to white.
@@ -373,10 +450,13 @@ func (a *App) drawCloneOptions(r gfx.Rect) {
 	p := &a.settings.Paint
 	x := r.X
 	done := false
-	if on := u.checkbox("art/clone/aligned", gfx.Rect{X: x, Y: r.Y, W: u.px(96), H: r.H}, u.t("Aligned"), p.CloneAligned); on != p.CloneAligned {
-		p.CloneAligned, done = on, true
+	if a.artTool != toolSpot {
+		if on := u.checkbox("art/clone/aligned", gfx.Rect{X: x, Y: r.Y, W: u.px(96), H: r.H}, u.t("Aligned"), p.CloneAligned); on != p.CloneAligned {
+			p.CloneAligned, done = on, true
+		}
+		x += u.px(100)
+		a.optRow(&x, &r, u.px(176))
 	}
-	x += u.px(100)
 	if on := u.checkbox("art/clone/all", gfx.Rect{X: x, Y: r.Y, W: u.px(170), H: r.H}, u.t("Sample all layers"), p.CloneAllLayers); on != p.CloneAllLayers {
 		p.CloneAllLayers, done = on, true
 	}
@@ -384,6 +464,7 @@ func (a *App) drawCloneOptions(r gfx.Rect) {
 	if done {
 		a.saveSettings()
 	}
+	a.optRow(&x, &r, r.W)
 	a.drawBrushOptions(gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H})
 }
 
@@ -395,20 +476,23 @@ func (a *App) drawShapeOptions(ad *artDoc, r gfx.Rect) {
 	x := r.X
 	done := false
 	for i, glyph := range shapeGlyphs {
+		a.optRow(&x, &r, u.px(32))
 		if u.iconButton(fmt.Sprintf("art/shape/%d", i), gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}, glyph, u.t(shapeNames[i]), p.ShapeKind == i, true) {
 			p.ShapeKind, done = i, true
 		}
 		x += u.px(32)
 	}
 	x += u.px(12)
-	x = a.drawCombineButtons(ad, x, r)
+	x = a.drawCombineButtons(ad, x, &r)
 	kind := a.shapeKind()
 	line := kind == shapeLine
 	if !line {
+		a.optRow(&x, &r, u.px(74))
 		if on := u.checkbox("art/shape/fill", gfx.Rect{X: x, Y: r.Y, W: u.px(70), H: r.H}, u.t("Fill"), p.ShapeFill); on != p.ShapeFill {
 			p.ShapeFill, done = on, true
 		}
 		x += u.px(74)
+		a.optRow(&x, &r, u.px(84))
 		if on := u.checkbox("art/shape/stroke", gfx.Rect{X: x, Y: r.Y, W: u.px(80), H: r.H}, u.t("Stroke"), p.ShapeStroke); on != p.ShapeStroke {
 			p.ShapeStroke, done = on, true
 		}
@@ -420,9 +504,13 @@ func (a *App) drawShapeOptions(ad *artDoc, r gfx.Rect) {
 	}
 	px := func(v float64) string { return fmt.Sprintf("%.0f px", v) }
 	var d bool
+	a.optRow(&x, &r, u.px(190))
 	x, d = a.labelledSlider("art/shape/width", x, r.Y, r.H, label, &p.ShapeWidth, 1, 100, px)
 	p.ShapeWidth = math.Round(p.ShapeWidth)
 	done = done || d
+	if kind == shapeRect || kind == shapePolygon || kind == shapeStar {
+		a.optRow(&x, &r, u.px(190))
+	}
 	switch {
 	case kind == shapeRect && x+u.px(190) < r.Right():
 		_, d = a.labelledSlider("art/shape/radius", x, r.Y, r.H, u.t("Corners"), &p.ShapeRadius, 0, 200, px)
@@ -433,6 +521,9 @@ func (a *App) drawShapeOptions(ad *artDoc, r gfx.Rect) {
 		x, d = a.labelledSlider("art/shape/sides", x, r.Y, r.H, u.t("Points"), &sides, 3, 32, func(v float64) string { return fmt.Sprintf("%.0f", v) })
 		p.ShapeSides = int(math.Round(sides))
 		done = done || d
+		if kind == shapeStar {
+			a.optRow(&x, &r, u.px(190))
+		}
 		if kind == shapeStar && x+u.px(190) < r.Right() {
 			_, d = a.labelledSlider("art/shape/inner", x, r.Y, r.H, u.t("Inner radius"), &p.ShapeInner, 0.05, 1, percent)
 			done = done || d

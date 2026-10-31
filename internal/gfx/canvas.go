@@ -36,7 +36,32 @@ type Canvas struct {
 	Img   *image.RGBA
 	clip  image.Rectangle
 	clips []image.Rectangle
+	rec   Recorder // when set, drawing goes here and Img stays empty
 }
+
+// Recorder takes a canvas's drawing as shapes rather than pixels, for printing. Coordinates are the canvas's pixels;
+// colours are the canvas's: straight, not premultiplied.
+type Recorder interface {
+	Push(r Rect)
+	PushRound(r Rect, radius float32)
+	Pop()
+	Fill(r Rect, col color.RGBA)
+	RoundRect(r Rect, radius float32, col color.RGBA)
+	RoundOutline(r Rect, radius, w float32, col color.RGBA)
+	Line(x0, y0, x1, y1, w float32, col color.RGBA)
+	Polygon(contours [][][2]float32, col color.RGBA)
+	Text(fc *Face, x, y float32, s string, col color.RGBA) float32
+	TextTurned(fc *Face, x, y float32, s string, col color.RGBA, angle float64) float32
+	Image(src image.Image, dst Rect)
+}
+
+// NewRecorder is a canvas of w × h pixels that sends what is drawn on it to rec.
+func NewRecorder(w, h int, rec Recorder) *Canvas {
+	return &Canvas{Img: &image.RGBA{}, clip: image.Rect(0, 0, w, h), rec: rec}
+}
+
+// Recorder is what the canvas is recorded by, nil for one that draws pixels. Code that works on Img itself asks.
+func (c *Canvas) Recorder() Recorder { return c.rec }
 
 // NewCanvas allocates a w×h canvas.
 func NewCanvas(w, h int) *Canvas {
@@ -62,12 +87,26 @@ func Wrap(img *image.RGBA) *Canvas { return &Canvas{Img: img, clip: img.Rect} }
 func (c *Canvas) Push(r Rect) {
 	c.clips = append(c.clips, c.clip)
 	c.clip = c.clip.Intersect(r.Pixels())
+	if c.rec != nil {
+		c.rec.Push(r)
+	}
+}
+
+// PushRound narrows the clip to a rounded rectangle on a recording canvas, and to its box on one of pixels.
+func (c *Canvas) PushRound(r Rect, radius float32) {
+	c.clips = append(c.clips, c.clip)
+	c.clip = c.clip.Intersect(r.Pixels())
+	if c.rec != nil {
+		c.rec.PushRound(r, radius)
+	}
 }
 
 // ResetClip drops every clip pushed, drawing on the whole canvas again, as after a frame that stopped part way.
 func (c *Canvas) ResetClip() {
-	c.clips = c.clips[:0]
-	c.clip = c.Img.Rect
+	if c.rec == nil {
+		c.clips = c.clips[:0]
+		c.clip = c.Img.Rect
+	}
 }
 
 // Clip is the rectangle drawing is limited to now.
@@ -77,12 +116,19 @@ func (c *Canvas) Clip() image.Rectangle { return c.clip }
 func (c *Canvas) Pop() {
 	c.clip = c.clips[len(c.clips)-1]
 	c.clips = c.clips[:len(c.clips)-1]
+	if c.rec != nil {
+		c.rec.Pop()
+	}
 }
 
 // Clear fills the whole canvas, ignoring the clip.
 // ClearTo fills the whole canvas with col exactly, transparency included (col is premultiplied), for windows whose
 // pixels may be see-through.
 func (c *Canvas) ClearTo(col color.RGBA) {
+	if c.rec != nil {
+		c.rec.Fill(c.bounds(), col)
+		return
+	}
 	p := c.Img.Pix
 	if len(p) == 0 {
 		return
@@ -95,6 +141,11 @@ func (c *Canvas) ClearTo(col color.RGBA) {
 
 // Clear fills the whole canvas with col, opaque.
 func (c *Canvas) Clear(col color.RGBA) {
+	if c.rec != nil {
+		col.A = 255
+		c.rec.Fill(c.bounds(), col)
+		return
+	}
 	p := c.Img.Pix
 	if len(p) == 0 {
 		return
@@ -103,6 +154,11 @@ func (c *Canvas) Clear(col color.RGBA) {
 	for k := 4; k < len(p); k *= 2 {
 		copy(p[k:], p[:k])
 	}
+}
+
+// bounds is what the clip allows, as a rectangle.
+func (c *Canvas) bounds() Rect {
+	return Rect{float32(c.clip.Min.X), float32(c.clip.Min.Y), float32(c.clip.Dx()), float32(c.clip.Dy())}
 }
 
 // blend mixes col into pixel offset i with coverage cov in [0, 1].
@@ -125,6 +181,10 @@ func (c *Canvas) blend(i int, col color.RGBA, cov float32) {
 
 // Fill blends col over r.
 func (c *Canvas) Fill(r Rect, col color.RGBA) {
+	if c.rec != nil {
+		c.rec.Fill(r, col)
+		return
+	}
 	b := r.Pixels().Intersect(c.clip)
 	if b.Empty() || col.A == 0 {
 		return
@@ -164,6 +224,14 @@ func (c *Canvas) RoundOutline(r Rect, radius, w float32, col color.RGBA) {
 // roundShape fills (width < 0) or strokes a rounded rectangle from its signed distance. Only the corners and the
 // left and right edges are evaluated per pixel: across the middle of each row the distance depends on y alone.
 func (c *Canvas) roundShape(r Rect, radius, width float32, col color.RGBA) {
+	if c.rec != nil {
+		if width < 0 {
+			c.rec.RoundRect(r, radius, col)
+		} else {
+			c.rec.RoundOutline(r, radius, width, col)
+		}
+		return
+	}
 	radius = min(radius, r.W/2, r.H/2)
 	b := image.Rect(int(math.Floor(float64(r.X))), int(math.Floor(float64(r.Y))), int(math.Ceil(float64(r.X+r.W))), int(math.Ceil(float64(r.Y+r.H)))).Intersect(c.clip)
 	if b.Empty() || col.A == 0 {
@@ -245,6 +313,10 @@ func (c *Canvas) Circle(x, y, radius float32, col color.RGBA) {
 
 // Line draws a straight anti-aliased line of width w.
 func (c *Canvas) Line(x0, y0, x1, y1, w float32, col color.RGBA) {
+	if c.rec != nil {
+		c.rec.Line(x0, y0, x1, y1, w, col)
+		return
+	}
 	minX, maxX := min(x0, x1)-w, max(x0, x1)+w
 	minY, maxY := min(y0, y1)-w, max(y0, y1)+w
 	b := image.Rect(int(minX), int(minY), int(maxX)+1, int(maxY)+1).Intersect(c.clip)
@@ -269,6 +341,10 @@ func (c *Canvas) Line(x0, y0, x1, y1, w float32, col color.RGBA) {
 
 // Triangle fills the triangle (a, b, c) with 4×4 supersampled edges.
 func (c *Canvas) Triangle(ax, ay, bx, by, cx, cy float32, col color.RGBA) {
+	if c.rec != nil {
+		c.rec.Polygon([][][2]float32{{{ax, ay}, {bx, by}, {cx, cy}}}, col)
+		return
+	}
 	box := image.Rect(int(min(ax, bx, cx)), int(min(ay, by, cy)), int(max(ax, bx, cx))+1, int(max(ay, by, cy))+1).Intersect(c.clip)
 	edge := func(x0, y0, x1, y1, px, py float32) float32 { return (x1-x0)*(py-y0) - (y1-y0)*(px-x0) }
 	area := edge(ax, ay, bx, by, cx, cy)
@@ -306,6 +382,12 @@ type Wedge struct {
 // angle and distance are worked out once and every wedge is tested against them, so a pie of many wedges costs
 // little more than a disc.
 func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
+	if c.rec != nil {
+		for _, w := range wedges {
+			c.rec.Polygon([][][2]float32{wedgePoints(cx, cy, w, gap)}, w.Col)
+		}
+		return
+	}
 	var reach float32
 	for _, w := range wedges {
 		reach = max(reach, w.Radius)
@@ -356,8 +438,31 @@ func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 	}
 }
 
+// wedgePoints is the outline of a wedge, its edges moved in by half the gap.
+func wedgePoints(cx, cy float32, w Wedge, gap float32) [][2]float32 {
+	span := float64(w.To - w.From)
+	at := func(a float64, r float32) [2]float32 {
+		s, co := math.Sincos(a)
+		return [2]float32{cx + r*float32(s), cy - r*float32(co)}
+	}
+	n := max(int(span*40), 4)
+	pts := make([][2]float32, 0, n+2)
+	if span < 2*math.Pi-1e-4 {
+		tip := float32(float64(gap/2) / max(math.Sin(span/2), 1e-3))
+		pts = append(pts, at(float64(w.From)+span/2, min(tip, w.Radius)))
+	}
+	for i := 0; i <= n; i++ {
+		pts = append(pts, at(float64(w.From)+span*float64(i)/float64(n), w.Radius))
+	}
+	return pts
+}
+
 // Image draws src scaled into dst with bilinear filtering.
 func (c *Canvas) Image(src image.Image, dst Rect) {
+	if c.rec != nil {
+		c.rec.Image(src, dst)
+		return
+	}
 	r := dst.Pixels()
 	clipped := r.Intersect(c.clip)
 	if clipped.Empty() {
@@ -373,6 +478,10 @@ func (c *Canvas) Image(src image.Image, dst Rect) {
 
 // Blit copies src with its top-left at (x, y) without scaling; opaque sources replace what is underneath.
 func (c *Canvas) Blit(src *image.RGBA, x, y int, opaque bool) {
+	if c.rec != nil {
+		c.rec.Image(src, Rect{float32(x), float32(y), float32(src.Rect.Dx()), float32(src.Rect.Dy())})
+		return
+	}
 	r := image.Rect(x, y, x+src.Rect.Dx(), y+src.Rect.Dy())
 	clipped := r.Intersect(c.clip)
 	if clipped.Empty() {

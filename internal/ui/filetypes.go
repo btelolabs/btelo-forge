@@ -7,22 +7,24 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/assets"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/library"
+	"github.com/btelolabs/btelo-forge/internal/mind"
 	"github.com/btelolabs/btelo-forge/internal/paint"
 	"github.com/btelolabs/btelo-forge/internal/project"
 )
 
 // The kinds of file the app can be set to open from Explorer, chosen in Settings → File types. Windows keeps the
 // choice of a common type's default program to the user, so turning a kind on makes the app one of its programs
-// (in "Open with" and in Settings → Default apps) and the page opens Windows' own choice; the app's canvases and
-// edits, which no other program opens, it opens by default at once.
+// (in "Open with" and in Settings → Default apps) and the page opens Windows' own choice; the app's canvases, edits
+// and mind maps, which no other program opens, it opens by default at once, and Explorer shows their pictures.
 
 // FileType is a kind of file the app declares it opens: its ProgID, the name the system shows, its extensions,
-// and whether it is the app's own format.
+// whether it is the app's own format, and whether its files end with a small picture for the system to show.
 type FileType struct {
-	ProgID string
-	Name   string
-	Exts   []string
-	Own    bool
+	ProgID  string
+	Name    string
+	Exts    []string
+	Own     bool
+	Preview bool
 }
 
 // fileTypesHost is what a window that can declare file associations offers.
@@ -44,9 +46,10 @@ type fileTypeGroup struct {
 // fileTypeGroups are the kinds of file offered, the app's own first.
 func fileTypeGroups() []fileTypeGroup {
 	return []fileTypeGroup{
-		{"own", "Btelo Forge canvases and edits", []FileType{
-			{ProgID: "BteloForge.Canvas", Name: ProductName + " canvas", Exts: []string{paint.Ext}, Own: true},
-			{ProgID: "BteloForge.Edit", Name: ProductName + " edit", Exts: []string{project.EditExt}, Own: true},
+		{"own", "Btelo Forge canvases, edits and mind maps", []FileType{
+			{ProgID: "BteloForge.Canvas", Name: ProductName + " canvas", Exts: []string{paint.Ext}, Own: true, Preview: true},
+			{ProgID: "BteloForge.Edit", Name: ProductName + " edit", Exts: []string{project.EditExt}, Own: true, Preview: true},
+			{ProgID: "BteloForge.Mind", Name: ProductName + " mind map", Exts: []string{mind.Ext}, Own: true, Preview: true},
 		}},
 		{"video", "Videos", []FileType{{ProgID: "BteloForge.Video", Name: "Video", Exts: assets.VideoExtensions}}},
 		{"picture", "Pictures", []FileType{{ProgID: "BteloForge.Picture", Name: "Picture", Exts: []string{".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}}}},
@@ -56,7 +59,7 @@ func fileTypeGroups() []fileTypeGroup {
 	}
 }
 
-var fileTypeGroupNames = msgs("Btelo Forge canvases and edits", "Videos", "Pictures", "GIF animations", "Sounds", "Markdown and text")
+var fileTypeGroupNames = msgs("Btelo Forge canvases, edits and mind maps", "Videos", "Pictures", "GIF animations", "Sounds", "Markdown and text")
 
 // fileTypes is the window's file associations, or nil where it has none.
 func (a *App) fileTypes() fileTypesHost {

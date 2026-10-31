@@ -20,6 +20,10 @@ type task struct {
 	stopping bool    // cancelled, and ending
 	cancel   func()
 	open     func() // shows the page the work was started from; nil when there is none any more
+	// running marks a program that stays until it is stopped, a model in memory: its bar is full and still, and its
+	// button says cancelHint, which stops it.
+	running    bool
+	cancelHint string
 }
 
 // tasks lists the work running in the background, oldest kind first.
@@ -46,10 +50,11 @@ func (a *App) tasks() []task {
 		out = append(out, task{id: "music/" + m.track.Key(), glyph: icMusic, title: a.taskTitle(a.u.tf("Adding %s", m.track.Title), m.doc),
 			status: status, fraction: fraction, stopping: m.stopping, cancel: m.cancel, open: a.openPanelOf(m.doc, tabMusic)})
 	}
+	out = append(out, a.aiTasks()...)
 	if t, ok := a.updateTask(); ok {
 		out = append(out, t)
 	}
-	return out
+	return append(out, a.printTasks()...)
 }
 
 // taskTitle names work done for an edit, adding the edit's tab when another tab is in front.
@@ -73,45 +78,36 @@ func (a *App) openPanelOf(d *doc, tab int) func() {
 	}
 }
 
-// taskBoxes places n task cards in the window's bottom right corner, the first at the bottom, and the cancel
-// button on each.
-func (a *App) taskBoxes(n int) (cards, cancels []gfx.Rect) {
-	u := &a.u
-	margin, h := u.px(16), u.px(64)
-	w := min(u.px(320), a.screen.W-2*margin)
-	y := a.screen.H - margin
-	for range n {
-		y -= h
-		r := gfx.Rect{X: a.screen.W - margin - w, Y: y, W: w, H: h}
-		cards = append(cards, r)
-		cancels = append(cancels, gfx.Rect{X: r.Right() - u.px(34), Y: r.Y + u.px(6), W: u.px(28), H: u.px(28)})
-		y -= u.px(8)
-	}
-	return cards, cancels
-}
-
-// preTasks lets the task cards take a mouse press before the widgets drawn under them see it; it does nothing
-// while a dialog or menu holds the window.
+// preTasks lets the task cards and the orb take a mouse press before the widgets drawn under them see it; it does
+// nothing while a dialog or menu holds the window.
 func (a *App) preTasks() {
 	u := &a.u
 	if u.blocked || !u.pressed {
 		return
 	}
-	tasks := a.tasks()
-	cards, cancels := a.taskBoxes(len(tasks))
-	for i, t := range tasks {
-		if u.press("task/cancel/"+t.id, cancels[i]) || u.press("task/open/"+t.id, cards[i]) {
+	l := a.layoutTasks()
+	if u.press("task/orb", l.orb) {
+		return
+	}
+	for i, t := range l.tasks {
+		if u.press("task/cancel/"+t.id, l.cancels[i]) || u.press("task/open/"+t.id, l.cards[i]) {
 			return
 		}
 	}
 }
 
-// drawTasks draws a card for each piece of work running in the background; live is false while a dialog or menu
-// holds the window, and the cards then only show.
+// drawTasks draws a card for each piece of work running in the background, and the orb for the models in memory; live
+// is false while a dialog or menu holds the window, and they then only show.
 func (a *App) drawTasks(live bool) {
 	u := &a.u
-	tasks := a.tasks()
-	cards, cancels := a.taskBoxes(len(tasks))
+	held := u.blocked
+	u.blocked = !live
+	l := a.layoutTasks()
+	u.blocked = held
+	if l.orb.W > 0 {
+		a.drawOrb(l.orb)
+	}
+	tasks, cards, cancels := l.tasks, l.cards, l.cancels
 	for i, t := range tasks {
 		r, x := cards[i], cancels[i]
 		openID, cancelID := "task/open/"+t.id, "task/cancel/"+t.id
@@ -138,9 +134,9 @@ func (a *App) drawTasks(live bool) {
 		if t.stopping {
 			status = u.t("Cancelling…")
 		}
-		line := gfx.Rect{X: textX, Y: r.Y + u.px(30), W: r.Right() - u.px(12) - textX, H: u.px(16)}
+		line := gfx.Rect{X: textX, Y: r.Y + u.px(26), W: r.Right() - u.px(12) - textX, H: u.px(16)}
 		percent := ""
-		if t.fraction >= 0 && !t.stopping {
+		if t.fraction >= 0 && !t.stopping && !t.running {
 			percent = fmt.Sprintf("%d%%", int(t.fraction*100))
 			line.W -= u.face(11.5).Measure("100%") + u.px(8)
 		}
@@ -148,7 +144,9 @@ func (a *App) drawTasks(live bool) {
 		if percent != "" {
 			u.label(u.face(11.5), gfx.Rect{X: line.Right(), Y: line.Y, W: r.Right() - u.px(12) - line.Right(), H: line.H}, percent, colDim, 1)
 		}
-		u.progressBar(gfx.Rect{X: textX, Y: r.Bottom() - u.px(12), W: r.Right() - u.px(12) - textX, H: u.px(4)}, t.fraction)
+		if !t.running {
+			u.progressBar(gfx.Rect{X: textX, Y: r.Bottom() - u.px(12), W: r.Right() - u.px(12) - textX, H: u.px(4)}, t.fraction)
+		}
 		fg := colDim
 		if hotX {
 			u.c.Fill(x, colSelected)
@@ -158,9 +156,13 @@ func (a *App) drawTasks(live bool) {
 		if t.stopping {
 			fg = colFaint
 		}
-		u.icon(icClose, x, 14, fg)
+		glyph, hint := icClose, u.t("Cancel")
+		if t.running {
+			glyph, hint = icStop, t.cancelHint
+		}
+		u.icon(glyph, x, 14, fg)
 		if live && !t.stopping {
-			u.hint(cancelID, u.t("Cancel"), x)
+			u.hint(cancelID, hint, x)
 			if t.open != nil && !hotX {
 				u.hint(openID, u.t("Go to its panel"), r)
 			}

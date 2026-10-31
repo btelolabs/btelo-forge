@@ -93,9 +93,12 @@ func IsOutline(text string) bool {
 }
 
 // AddOutline adds an outline's topics under parent at index (free at x, y when parent is 0: then the outline's first
-// topics become free trees, one under another), as one step; it returns the ids of its top-level topics.
+// topics become free trees, one under another), as one step; under a task every topic is a task. It returns the ids
+// of its top-level topics.
 func (m *Map) AddOutline(text string, parent ID, index int, x, y float64) ([]ID, error) {
 	lines := parseOutline(text)
+	pn := m.Node(parent)
+	tasks := pn != nil && pn.Task
 	var tops []ID
 	err := m.step("Paste", func() error {
 		stack := []ID{}
@@ -107,7 +110,7 @@ func (m *Map) AddOutline(text string, parent ID, index int, x, y float64) ([]ID,
 			} else if index >= 0 {
 				index++
 			}
-			n := Node{Text: l.text, Task: l.task, Done: l.done}
+			n := Node{Text: l.text, Task: l.task || tasks, Done: l.done}
 			if p == 0 {
 				n.X, n.Y = x, y+float64(len(tops))*80
 			}

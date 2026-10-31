@@ -44,6 +44,10 @@ func fileGlyph(e *files.Entry) (string, color.RGBA) {
 	switch assets.KindOf(e.Name) {
 	case assets.MindMap:
 		return icMind, gfx.Hex(0x4fb3ff)
+	case assets.Office:
+		return officeGlyph(e.Name)
+	case assets.Model:
+		return icModel, modelHue
 	case assets.Image, assets.Animation, assets.Canvas:
 		return icFmImage, gfx.Hex(0x6fcf97)
 	case assets.Video, assets.Edit:
@@ -240,14 +244,16 @@ func (a *App) drawPaneButtons(fd *filesDoc, i int, id string, head gfx.Rect) flo
 		}
 		x -= size + u.px(2)
 	}
-	hint := withKey(u.t("Open another list beside this one"), a.fileKeyHint("split"))
-	if u.iconButton(id+"/split", rectAt(x, y, size, size), icAdd, hint, false, len(fd.panes) < filesMaxPanes) {
-		fd.after = func() {
-			a.focusPane(fd, i)
-			a.splitPane(fd)
+	if fd.pick == nil { // the dialog has one list
+		hint := withKey(u.t("Open another list beside this one"), a.fileKeyHint("split"))
+		if u.iconButton(id+"/split", rectAt(x, y, size, size), icAdd, hint, false, len(fd.panes) < filesMaxPanes) {
+			fd.after = func() {
+				a.focusPane(fd, i)
+				a.splitPane(fd)
+			}
 		}
+		x -= size + u.px(2)
 	}
-	x -= size + u.px(2)
 	glyph, hint := icCategory, withKey(u.t("Show as pictures, with tags"), a.fileKeyHint("view"))
 	if fd.panes[i].grid {
 		glyph, hint = icFmFiles, withKey(u.t("Show as a list"), a.fileKeyHint("view"))
@@ -523,7 +529,7 @@ func (a *App) drawRows(fd *filesDoc, i int, p *filesPane, id string, body gfx.Re
 		rr := gfx.Rect{X: body.X, Y: body.Y + float32(row-first)*rowH, W: body.W, H: rowH}
 		rid := fmt.Sprintf("%s/row/%s", id, e.Name)
 		hot := u.hover(rid, rr) && fd.prompt == nil
-		if hot && moved && fd.at == i {
+		if hot && moved && fd.at == i && fd.pick == nil {
 			p.cursor = row
 		}
 		if hot {
@@ -538,6 +544,7 @@ func (a *App) drawRows(fd *filesDoc, i int, p *filesPane, id string, body gfx.Re
 		}
 		if u.press(rid, rr) {
 			p.cursor = row
+			a.pickClicked(fd)
 			switch {
 			case u.ctrl:
 				a.toggleMarkAt(p, row)

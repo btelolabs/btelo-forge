@@ -55,6 +55,7 @@ type Key struct {
 type Pointer struct {
 	X, Y   float32
 	Right  bool
+	Middle bool
 	Down   bool
 	Double bool
 }
@@ -102,34 +103,35 @@ type Host interface {
 
 // ctx is the per-frame immediate-mode state.
 type ctx struct {
-	c         *gfx.Canvas
-	fonts     gfx.Fonts
-	s         float32
-	mx, my    float32
-	down      bool
-	pressed   bool
-	pressX    float32
-	pressY    float32
-	double    bool
-	rightAt   *Pointer
-	rightDown bool // the right button is held
-	wheel     float32
-	shift     bool
-	ctrl      bool
-	alt       bool
-	inactive  bool // the window does not have the keyboard focus
-	keys      []Key
-	held      []uint16 // the keys held down, by code, as their presses and releases came
-	heldWas   []uint16 // those held as the frame began, before its presses and releases
-	up        []uint16 // those let go this frame
-	typed     []rune
-	active    string
-	focus     string
-	cursor    Cursor
-	blocked   bool
-	drag      dragState
-	host      Host
-	lang      Language
+	c          *gfx.Canvas
+	fonts      gfx.Fonts
+	s          float32
+	mx, my     float32
+	down       bool
+	pressed    bool
+	pressX     float32
+	pressY     float32
+	double     bool
+	rightAt    *Pointer
+	rightDown  bool // the right button is held
+	middleDown bool // the middle button is held
+	wheel      float32
+	shift      bool
+	ctrl       bool
+	alt        bool
+	inactive   bool // the window does not have the keyboard focus
+	keys       []Key
+	held       []uint16 // the keys held down, by code, as their presses and releases came
+	heldWas    []uint16 // those held as the frame began, before its presses and releases
+	up         []uint16 // those let go this frame
+	typed      []rune
+	active     string
+	focus      string
+	cursor     Cursor
+	blocked    bool
+	drag       dragState
+	host       Host
+	lang       Language
 
 	tip        tip
 	tipSeen    bool
@@ -141,6 +143,8 @@ type ctx struct {
 	caretBlink time.Time
 	caretSeen  caretSeen // the caret as last drawn, so moving it shows it again
 	imeAt      [3]float32
+	imeFont    float32 // the pixel size of the words at the caret, where a document says; zero goes by imeAt's height
+	imeFamily  string  // and their typeface
 	blinking   bool
 }
 
@@ -164,6 +168,10 @@ func (u *ctx) begin(in Input) {
 	u.mx, u.my, u.down = in.X, in.Y, in.Down
 	u.pressed, u.double, u.rightAt = false, false, nil
 	for i, p := range in.Pointer {
+		if p.Middle {
+			u.middleDown = p.Down
+			continue
+		}
 		if p.Right {
 			u.rightDown = p.Down
 		}
@@ -191,6 +199,7 @@ func (u *ctx) begin(in Input) {
 		u.held = u.held[:0] // keys let go in another window are never reported
 	}
 	u.cursor = CursorArrow
+	u.imeFont, u.imeFamily = 0, ""
 }
 
 // px converts logical units to pixels.

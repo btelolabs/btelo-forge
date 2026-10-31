@@ -29,6 +29,16 @@ type Font struct {
 	// fallbacks are font files searched, in order, for characters this font lacks; they load on first need.
 	fallbacks []string
 	loaded    []*Font
+
+	outlines map[rune]*Outline
+}
+
+// Outline is a character's shape for printing: in ems with y going up, Ops one letter a segment ('M' and 'L' take one
+// point of Pts, 'C' three, 'Z' none), and how far it moves the pen, in ems.
+type Outline struct {
+	Ops     []byte
+	Pts     [][2]float64
+	Advance float64
 }
 
 // Face is one size of a font.
@@ -39,6 +49,7 @@ type Face struct {
 	Ascent  float32
 	Descent float32
 	glyphs  map[rune]*glyph
+	widths  map[rune]float32 // advances asked for of glyphs not drawn at this size
 }
 
 type glyph struct {
@@ -112,7 +123,7 @@ func (f *Font) faceLocked(size float32) *Face {
 		panic(err) // NewFace only fails for invalid options
 	}
 	m := of.Metrics()
-	face := &Face{font: f, face: of, Size: size, Ascent: fix(m.Ascent), Descent: fix(m.Descent), glyphs: map[rune]*glyph{}}
+	face := &Face{font: f, face: of, Size: size, Ascent: fix(m.Ascent), Descent: fix(m.Descent), glyphs: map[rune]*glyph{}, widths: map[rune]float32{}}
 	f.faces[size] = face
 	return face
 }
@@ -196,6 +207,114 @@ func (fc *Face) glyph(r rune) *glyph {
 	return g
 }
 
+// advance is how far r moves the pen. Only a glyph that is drawn is rasterised: text measured for the page at a
+// printer's size never makes a picture of itself.
+func (fc *Face) advance(r rune) float32 {
+	f := fc.font
+	f.mu.Lock()
+	if g, ok := fc.glyphs[r]; ok {
+		f.mu.Unlock()
+		return g.advance
+	}
+	if w, ok := fc.widths[r]; ok {
+		f.mu.Unlock()
+		return w
+	}
+	if !f.has(r) && r >= 0x20 {
+		if fb := f.fallback(r); fb != nil {
+			f.mu.Unlock()
+			fb.mu.Lock()
+			face := fb.faceLocked(fc.Size)
+			fb.mu.Unlock()
+			w := face.advance(r)
+			f.mu.Lock()
+			fc.widths[r] = w
+			f.mu.Unlock()
+			return w
+		}
+	}
+	defer f.mu.Unlock()
+	adv, ok := fc.face.GlyphAdvance(r)
+	if !ok {
+		adv, _ = fc.face.GlyphAdvance('□')
+	}
+	w := fix(adv)
+	fc.widths[r] = w
+	return w
+}
+
+// Outline is r's shape for printing, from the font or the fallback that has it; nil when none can give it.
+func (fc *Face) Outline(r rune) *Outline { return fc.font.outline(r) }
+
+func (f *Font) outline(r rune) *Outline {
+	f.mu.Lock()
+	if o, ok := f.outlines[r]; ok {
+		f.mu.Unlock()
+		return o
+	}
+	if !f.has(r) && r >= 0x20 {
+		if fb := f.fallback(r); fb != nil {
+			f.mu.Unlock()
+			return fb.outline(r)
+		}
+	}
+	defer f.mu.Unlock()
+	x, err := f.sfnt.GlyphIndex(&f.buf, r)
+	if err == nil && x == 0 {
+		x, err = f.sfnt.GlyphIndex(&f.buf, '□')
+	}
+	if err != nil {
+		return nil
+	}
+	em := f.sfnt.UnitsPerEm()
+	ppem := fixed.I(int(em))
+	unit := 1 / float64(ppem)
+	segs, err := f.sfnt.LoadGlyph(&f.buf, x, ppem, nil)
+	if err != nil {
+		return nil
+	}
+	adv, err := f.sfnt.GlyphAdvance(&f.buf, x, ppem, font.HintingNone)
+	if err != nil {
+		return nil
+	}
+	o := &Outline{Advance: float64(adv) * unit}
+	var cx, cy float64
+	open := false
+	pt := func(a fixed.Point26_6) [2]float64 { return [2]float64{float64(a.X) * unit, -float64(a.Y) * unit} }
+	for _, s := range segs {
+		switch s.Op {
+		case sfnt.SegmentOpMoveTo:
+			if open {
+				o.Ops = append(o.Ops, 'Z')
+			}
+			p := pt(s.Args[0])
+			o.Ops, o.Pts = append(o.Ops, 'M'), append(o.Pts, p)
+			cx, cy, open = p[0], p[1], true
+		case sfnt.SegmentOpLineTo:
+			p := pt(s.Args[0])
+			o.Ops, o.Pts = append(o.Ops, 'L'), append(o.Pts, p)
+			cx, cy = p[0], p[1]
+		case sfnt.SegmentOpQuadTo:
+			q, p := pt(s.Args[0]), pt(s.Args[1])
+			o.Ops = append(o.Ops, 'C')
+			o.Pts = append(o.Pts, [2]float64{cx + (q[0]-cx)*2/3, cy + (q[1]-cy)*2/3}, [2]float64{p[0] + (q[0]-p[0])*2/3, p[1] + (q[1]-p[1])*2/3}, p)
+			cx, cy = p[0], p[1]
+		case sfnt.SegmentOpCubeTo:
+			a, b, p := pt(s.Args[0]), pt(s.Args[1]), pt(s.Args[2])
+			o.Ops, o.Pts = append(o.Ops, 'C'), append(o.Pts, a, b, p)
+			cx, cy = p[0], p[1]
+		}
+	}
+	if open {
+		o.Ops = append(o.Ops, 'Z')
+	}
+	if f.outlines == nil {
+		f.outlines = map[rune]*Outline{}
+	}
+	f.outlines[r] = o
+	return o
+}
+
 // Height is the line height.
 func (fc *Face) Height() float32 { return fc.Ascent + fc.Descent }
 
@@ -203,13 +322,16 @@ func (fc *Face) Height() float32 { return fc.Ascent + fc.Descent }
 func (fc *Face) Measure(s string) float32 {
 	w := float32(0)
 	for _, r := range s {
-		w += fc.glyph(r).advance
+		w += fc.advance(r)
 	}
 	return w
 }
 
 // Text draws s with its top-left at (x, y); it returns the pen position after the last glyph.
 func (c *Canvas) Text(fc *Face, x, y float32, s string, col color.RGBA) float32 {
+	if c.rec != nil {
+		return c.rec.Text(fc, x, y, s, col)
+	}
 	baseline := y + fc.Ascent
 	for _, r := range s {
 		g := fc.glyph(r)
@@ -243,7 +365,7 @@ func (fc *Face) Ellipsize(s string, width float32) string {
 	dots := fc.Measure("…")
 	w := float32(0)
 	for i, r := range rs {
-		w += fc.glyph(r).advance
+		w += fc.advance(r)
 		if w+dots > width {
 			return string(rs[:i]) + "…"
 		}
@@ -251,8 +373,8 @@ func (fc *Face) Ellipsize(s string, width float32) string {
 	return s
 }
 
-// Wrap breaks s into lines no wider than width, at spaces where possible and between any two CJK characters;
-// explicit newlines are kept.
+// Wrap breaks s into lines no wider than width, at spaces where possible and between any two CJK characters, never so
+// that a line starts with closing punctuation; explicit newlines are kept.
 func (fc *Face) Wrap(s string, width float32) []string {
 	var lines []string
 	for _, para := range strings.Split(s, "\n") {
@@ -261,14 +383,18 @@ func (fc *Face) Wrap(s string, width float32) []string {
 		w := float32(0)
 		for i := 0; i < len(rs); i++ {
 			r := rs[i]
-			if unicode.IsSpace(r) || isCJK(r) {
+			if (unicode.IsSpace(r) || isCJK(r)) && !strings.ContainsRune(closingMarks, r) {
 				lastBreak = i
 			}
-			w += fc.glyph(r).advance
+			w += fc.advance(r)
 			if w > width && i > start {
 				cut := i
 				if lastBreak > start {
 					cut = lastBreak
+				}
+				// With nowhere to break, closing punctuation hangs past the edge rather than starting the next line.
+				for cut < len(rs) && strings.ContainsRune(closingMarks, rs[cut]) {
+					cut++
 				}
 				lines = append(lines, strings.TrimRightFunc(string(rs[start:cut]), unicode.IsSpace))
 				for cut < len(rs) && unicode.IsSpace(rs[cut]) {
@@ -279,10 +405,15 @@ func (fc *Face) Wrap(s string, width float32) []string {
 				w = 0
 			}
 		}
-		lines = append(lines, string(rs[start:]))
+		if start < len(rs) || start == 0 { // hung punctuation can end the words, leaving no last line
+			lines = append(lines, string(rs[start:]))
+		}
 	}
 	return lines
 }
+
+// closingMarks cannot begin a line.
+const closingMarks = "，。、；：？！）］｝》〉」』】〕”’…～"
 
 func isCJK(r rune) bool {
 	return unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r) || (r >= 0x3000 && r <= 0x303f) || (r >= 0xff00 && r <= 0xffef)

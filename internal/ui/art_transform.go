@@ -400,15 +400,15 @@ func (a *App) drawTransformOptions(ad *artDoc, r gfx.Rect) {
 	u := &a.u
 	xf := ad.xf
 	b := &xf.box
-	x := a.drawTransformModes(ad, r.X, r)
+	x := a.drawTransformModes(ad, r.X, &r)
 	if xf.mode != xfFree {
-		u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x - u.px(76), H: r.H},
-			u.t("Drag the handles; drag elsewhere to move it all; Enter applies, Esc cancels"), colDim, 0)
+		a.optHint(x, gfx.Rect{X: r.X, Y: r.Y, W: r.W - u.px(76), H: r.H}, u.t("Drag the handles; drag elsewhere to move it all; Enter applies, Esc cancels"))
 	}
 	scaleW, scaleH := 100*b.w/float64(xf.src.Dx()), 100*b.h/float64(xf.src.Dy())
 	if xf.mode == xfFree {
-		x = a.transformFields(ad, x, r, scaleW, scaleH)
+		x = a.transformFields(ad, x, &r, scaleW, scaleH)
 	}
+	a.optRow(&x, &r, u.px(72))
 	if u.iconButton("art/xf/cancel", gfx.Rect{X: r.Right() - u.px(66), Y: r.Y, W: u.px(30), H: r.H}, icCancel, withKey(u.t("Cancel the transform"), "Esc"), false, true) {
 		a.cancelTransform(ad)
 		return
@@ -421,22 +421,28 @@ func (a *App) drawTransformOptions(ad *artDoc, r gfx.Rect) {
 }
 
 // transformFields are Free Transform's numbers and turns; it returns where the next control goes.
-func (a *App) transformFields(ad *artDoc, x float32, r gfx.Rect, scaleW, scaleH float64) float32 {
+func (a *App) transformFields(ad *artDoc, x float32, r *gfx.Rect, scaleW, scaleH float64) float32 {
 	u := &a.u
 	xf := ad.xf
 	b := &xf.box
+	field := u.px(130) // a number with its label and unit
+	a.optRow(&x, r, field)
 	x = a.numberField("art/xf/x", x, r.Y, r.H, "X", "px", xf.fields, b.cx, func(v float64) { b.cx = v })
+	a.optRow(&x, r, field)
 	x = a.numberField("art/xf/y", x, r.Y, r.H, "Y", "px", xf.fields, b.cy, func(v float64) { b.cy = v })
+	a.optRow(&x, r, field)
 	x = a.numberField("art/xf/w", x, r.Y, r.H, u.t("W"), "%", xf.fields, scaleW, func(v float64) {
 		if v != 0 {
 			b.w = atLeast(v/100*float64(xf.src.Dx()), 1)
 		}
 	})
+	a.optRow(&x, r, field)
 	x = a.numberField("art/xf/h", x, r.Y, r.H, u.t("H"), "%", xf.fields, scaleH, func(v float64) {
 		if v != 0 {
 			b.h = atLeast(v/100*float64(xf.src.Dy()), 1)
 		}
 	})
+	a.optRow(&x, r, field)
 	x = a.numberField("art/xf/angle", x, r.Y, r.H, u.t("Angle"), "°", xf.fields, b.angle, func(v float64) { b.angle = math.Remainder(v, 360) })
 	for _, c := range []struct {
 		id, glyph, hint string
@@ -446,6 +452,7 @@ func (a *App) transformFields(ad *artDoc, x float32, r gfx.Rect, scaleW, scaleH 
 		{"rotcw", icRotateCW, u.t("Rotate 90° clockwise"), func() { b.angle = math.Remainder(b.angle+90, 360) }},
 		{"rotccw", icRotateCCW, u.t("Rotate 90° counter clockwise"), func() { b.angle = math.Remainder(b.angle-90, 360) }},
 	} {
+		a.optRow(&x, r, u.px(32)+u.px(72))
 		if x+u.px(32) > r.Right()-u.px(72) {
 			break
 		}
@@ -465,7 +472,22 @@ const (
 	dialogImageSize
 	dialogCanvasSize
 	dialogRotate
+	dialogExpand
+	dialogContract
+	dialogSmooth
+	dialogBorder
 )
+
+// selectionDialogs are Select › Modify's dialogs, which each ask for a whole number of pixels up to limit.
+var selectionDialogs = map[int]struct {
+	limit, initial int
+	run            func(d *paint.Doc, size int)
+}{
+	dialogExpand:   {500, 5, (*paint.Doc).ExpandSelection},
+	dialogContract: {500, 5, (*paint.Doc).ContractSelection},
+	dialogSmooth:   {500, 5, (*paint.Doc).SmoothSelection},
+	dialogBorder:   {200, 10, (*paint.Doc).BorderSelection},
+}
 
 // artDialog is the canvas editor's open dialog, which asks for one or two numbers.
 type artDialog struct {
@@ -493,6 +515,9 @@ func (a *App) openDialog(kind int) {
 		f.a, f.b = strconv.Itoa(e.Dx()), strconv.Itoa(e.Dy())
 	case dialogRotate:
 		f.a = "0"
+	}
+	if s, ok := selectionDialogs[kind]; ok {
+		f.a = strconv.Itoa(s.initial)
 	}
 	a.dialog = f
 }
@@ -525,9 +550,11 @@ func (a *App) drawArtDialog() {
 		return
 	}
 	u := &a.u
-	heights := map[int]float32{dialogFeather: 170, dialogImageSize: 250, dialogCanvasSize: 300, dialogRotate: 170}
+	heights := map[int]float32{dialogFeather: 170, dialogImageSize: 250, dialogCanvasSize: 300, dialogRotate: 170,
+		dialogExpand: 170, dialogContract: 170, dialogSmooth: 170, dialogBorder: 170}
 	titles := map[int]string{dialogFeather: u.t("Feather selection"), dialogImageSize: u.t("Image size"),
-		dialogCanvasSize: u.t("Canvas size"), dialogRotate: u.t("Rotate canvas")}
+		dialogCanvasSize: u.t("Canvas size"), dialogRotate: u.t("Rotate canvas"), dialogExpand: u.t("Expand selection"),
+		dialogContract: u.t("Contract selection"), dialogSmooth: u.t("Smooth selection"), dialogBorder: u.t("Border selection")}
 	u.c.Fill(a.screen, gfxShade)
 	box := rectCentered(a.screen, u.px(360), u.px(heights[f.kind]))
 	panel(u, box)
@@ -573,6 +600,14 @@ func (a *App) drawArtDialog() {
 		v, ok := number(f.a)
 		valid = ok && v >= -360 && v <= 360
 		run = func() error { return ad.d.RotateCanvasBy(v) }
+	case dialogExpand, dialogContract, dialogSmooth, dialogBorder:
+		labels := map[int]string{dialogExpand: u.t("Expand by"), dialogContract: u.t("Contract by"),
+			dialogSmooth: u.t("Sample radius"), dialogBorder: u.t("Width")}
+		s := selectionDialogs[f.kind]
+		_, entered = a.dialogRow("dialog/a", in, y, labels[f.kind], u.t("pixels"), &f.a)
+		v, ok := number(f.a)
+		valid = ok && v >= 1 && v <= float64(s.limit) && v == math.Trunc(v)
+		run = func() error { s.run(ad.d, int(v)); return nil }
 	}
 	foot := in.Bottom() - u.px(34)
 	if !valid {
@@ -582,7 +617,8 @@ func (a *App) drawArtDialog() {
 		f.kind = dialogNone
 	}
 	if u.button("dialog/ok", gfx.Rect{X: in.Right() - u.px(100), Y: foot, W: u.px(100), H: u.px(34)}, "", u.t("OK"), primary, valid) || entered && valid {
-		resized := f.kind != dialogFeather
+		_, modifies := selectionDialogs[f.kind]
+		resized := f.kind != dialogFeather && !modifies
 		f.kind = dialogNone
 		a.artRun(ad, run)
 		if resized {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/thumb"
 )
 
 // artTool is what a press on the canvas does.
@@ -47,6 +48,10 @@ const (
 	toolSharpen
 	toolSmudge
 	toolMaskGradient
+	toolSpot
+	toolHeal
+	toolPatch
+	toolLiquify
 )
 
 // artDoc is a canvas tab: a layered picture, saved with its layers next to the recordings and exported as PNG.
@@ -94,6 +99,10 @@ type artDoc struct {
 	// The clone stamp: where it was last set to clone from, and the distance from the brush it keeps once aligned.
 	cloneFrom    [2]float64
 	cloneSet     bool
+	patching     bool       // the Patch tool is dragging the selection to its source
+	patchFrom    [2]float64 // where that drag began
+	filling      bool       // Content-Aware Fill is being worked out
+	matting      bool       // a model is looking for the picture's subject
 	cloneOffset  image.Point
 	cloneAligned bool
 	moveFrom     [2]float64       // where in the picture the move began
@@ -108,6 +117,8 @@ type artDoc struct {
 	panFrom      [4]float64 // pointer and pan where a hand drag began
 	nav          int        // the navigation drag under way: navPan or navZoom, with Space or the zoom key held
 	navZoom      float64    // the zoom where it began
+	held         int        // what Space or the zoom key is doing, the mouse alone moving the view
+	heldMoved    bool       // the mouse has moved since
 	renaming     int
 	rename       string
 	sliceInfo    int                 // the node whose slice the ⓘ panel explains
@@ -115,6 +126,9 @@ type artDoc struct {
 	sliceRows    map[int]paint.Slice // the slices and folder groups, by node, as the layers panel last listed them
 	cursor       [2]float64          // the pointer in canvas pixels, for the status line
 	over         bool                // the pointer is over the canvas
+	// onScreen makes it the drawing on the screen: shown at its own size where it is drawn, never zoomed or moved,
+	// so without the tools and commands that only do that (screenView, screenLeavesOut).
+	onScreen bool
 }
 
 type viewKey struct {
@@ -159,7 +173,7 @@ func (a *App) newBareCanvas() error { return a.openNewCanvas(paint.New(a.u.tf("L
 
 // openNewCanvas opens d, a new canvas, under a file named now.
 func (a *App) openNewCanvas(d *paint.Doc) error {
-	path, err := a.capturePath(a.u.t("Canvas %s"), paint.Ext, time.Now())
+	path, err := a.capturePath(categoryCreative, a.u.t("Canvas %s"), paint.Ext, time.Now())
 	if err != nil {
 		return err
 	}
@@ -219,6 +233,7 @@ func (a *App) saveArt(ad *artDoc, wait bool) error {
 		return nil
 	}
 	snap := ad.d.Snapshot()
+	small, ext := ad.d.Reduced(thumb.Box), ad.d.Extent()
 	// A drawing on the video gets its picture again, for the overlay.
 	images := a.drawingImages(ad.path)
 	var flat *image.RGBA
@@ -228,6 +243,13 @@ func (a *App) saveArt(ad *artDoc, wait bool) error {
 	}
 	ad.dirty, ad.saving = false, true
 	write := func() error {
+		if small != nil {
+			end, err := thumb.Encode(small, thumb.Meta{W: ext.Dx(), H: ext.Dy()})
+			if err != nil {
+				return err
+			}
+			snap.Thumb = end
+		}
 		var buf bytes.Buffer
 		if err := snap.Save(&buf); err != nil {
 			return err

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/capture"
-	"github.com/btelolabs/btelo-forge/internal/files"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/mind"
 )
@@ -55,7 +54,7 @@ func defaultRecordSettings() recordSettings {
 var recordRates = []int{30, 60}
 
 // recordAreas are the choices of what part of the screen to record.
-var recordAreas = msgs("The whole screen", "A region, picked at the start")
+var recordAreas = msgs("The whole screen", "A region of any screen, picked at the start")
 
 // recordState is the recording dialog and the recording in progress.
 type recordState struct {
@@ -216,12 +215,12 @@ func (a *App) recordBlocker() (reason string, checking bool) {
 
 // recordingPath is a new file for a recording in the folder recordings and phone uploads go to.
 func (a *App) recordingPath(at time.Time) (string, error) {
-	return a.capturePath(a.u.t("Screen recording %s"), ".mp4", at)
+	return a.capturePath(categoryTools, a.u.t("Screen recording %s"), ".mp4", at)
 }
 
-// capturePath is a new file in that folder, named by the translated format with the time filled in.
-func (a *App) capturePath(format, ext string, at time.Time) (string, error) {
-	dir, err := a.uploadDir()
+// capturePath is a new file in the folder of a kind of work, named by the translated format with the time filled in.
+func (a *App) capturePath(category int, format, ext string, at time.Time) (string, error) {
+	dir, err := a.categoryDir(category)
 	if err != nil {
 		return "", err
 	}
@@ -261,38 +260,59 @@ func (a *App) pathFree(path string) bool {
 	return true
 }
 
-// startRecording begins recording with the saved settings; done, when not nil, hears whether it started.
+// startRecording begins recording with the saved settings, first letting the user pick a region of any display when
+// they say so; done, when not nil, hears whether it started.
 func (a *App) startRecording(done func(path string, err error)) {
-	a.startRecordingIn(image.Rectangle{}, false, done)
+	d, err := a.recordingReady()
+	if err != nil {
+		reportStart(done, err)
+		return
+	}
+	if !a.settings.Record.Region {
+		a.startRecordingOn(d, image.Rectangle{}, done)
+		return
+	}
+	a.rec.open = false
+	a.pickRegion(a.recordPick(), func(d capture.Display, region image.Rectangle, ok bool) {
+		if !ok {
+			reportStart(done, errRegionCancelled)
+			return
+		}
+		a.startRecordingOn(d, region, done)
+	})
 }
 
-// startRecordingRegion begins recording a region already picked (empty for the whole display).
+// startRecordingRegion begins recording a region of the chosen display (empty for the whole display).
 func (a *App) startRecordingRegion(region image.Rectangle, done func(path string, err error)) {
-	a.startRecordingIn(region, true, done)
+	d, err := a.recordingReady()
+	if err != nil {
+		reportStart(done, err)
+		return
+	}
+	a.startRecordingOn(d, region, done)
 }
 
 // errRegionCancelled means the user cancelled picking the region to record or capture.
 var errRegionCancelled = errors.New("no region was chosen")
 
-func (a *App) startRecordingIn(region image.Rectangle, pickedRegion bool, done func(path string, err error)) {
-	r := &a.rec
-	report := func(path string, err error) {
-		if done != nil {
-			done(path, err)
-		}
+// reportStart tells done, when not nil, how starting a recording went.
+func reportStart(done func(path string, err error), err error) {
+	if done != nil {
+		done("", err)
 	}
-	host := a.recorder()
+}
+
+// recordingReady is the chosen display when a recording can start now, or why it cannot.
+func (a *App) recordingReady() (capture.Display, error) {
+	r := &a.rec
 	switch {
-	case host == nil:
-		report("", capture.ErrUnsupported)
-		return
+	case a.recorder() == nil:
+		return capture.Display{}, capture.ErrUnsupported
 	case a.recording():
-		report("", errors.New(a.u.t("A recording is already running")))
-		return
+		return capture.Display{}, errors.New(a.u.t("A recording is already running"))
 	}
 	if reason, _ := a.recordBlocker(); reason != "" {
-		report("", errors.New(reason))
-		return
+		return capture.Display{}, errors.New(reason)
 	}
 	d, ok := a.chosenDisplay()
 	if !ok {
@@ -300,20 +320,25 @@ func (a *App) startRecordingIn(region image.Rectangle, pickedRegion bool, done f
 		if err == nil {
 			err = errors.New(a.u.t("No screen to record was found"))
 		}
+		return capture.Display{}, err
+	}
+	return d, nil
+}
+
+// startRecordingOn begins recording a region of a display (empty for all of it), checking again that it can: much
+// may have changed while the region was picked.
+func (a *App) startRecordingOn(d capture.Display, region image.Rectangle, done func(path string, err error)) {
+	r := &a.rec
+	report := func(path string, err error) {
+		if done != nil {
+			done(path, err)
+		}
+	}
+	if _, err := a.recordingReady(); err != nil {
 		report("", err)
 		return
 	}
-	if a.settings.Record.Region && !pickedRegion {
-		r.open = false
-		a.pickRegion(d, func(region image.Rectangle, ok bool) {
-			if !ok {
-				report("", errRegionCancelled)
-				return
-			}
-			a.startRecordingRegion(region, done)
-		})
-		return
-	}
+	host := a.recorder()
 	path, err := a.recordingPath(time.Now())
 	if err != nil {
 		report("", err)
@@ -322,7 +347,8 @@ func (a *App) startRecordingIn(region image.Rectangle, pickedRegion bool, done f
 	s := a.settings.Record
 	o := capture.Options{Display: d, FPS: s.FPS, Cursor: s.Cursor, SystemAudio: s.SystemAudio, Microphone: s.Microphone, MicrophoneID: s.MicrophoneID,
 		Region: region, Path: path}
-	e, known := r.encoders[encoderKey(d, s.FPS)]
+	key := encoderKey(d, s.FPS)
+	e, known := r.encoders[key]
 	r.starting, r.open = true, false
 	a.player.Stop()
 	a.audition.Stop()
@@ -342,6 +368,13 @@ func (a *App) startRecordingIn(region image.Rectangle, pickedRegion bool, done f
 				a.toast(a.u.tf("Recording could not start: %s", a.describe(err)), true)
 				report("", err)
 				return
+			}
+			if !known {
+				// Another display than the chosen one is probed as it is first recorded, and remembered.
+				if r.encoders == nil {
+					r.encoders = map[string]capture.Encoder{}
+				}
+				r.encoders[key] = e
 			}
 			r.rec = rec
 			a.liveFollow()
@@ -498,7 +531,10 @@ func (a *App) Tick(in Input) time.Duration {
 	a.recordTick(in)
 	a.screenTick()
 	a.updateTick()
-	if a.recording() || a.streaming() || a.cameraSettling() || a.over.bar != nil || a.over.pick != nil {
+	if sd := a.over.draw; sd != nil && (sd.wait > 0 || sd.again) {
+		return max(min(sd.wait, 250*time.Millisecond), redrawNow) // a hint on the drawing's panel, or its options wrapped
+	}
+	if a.recording() || a.streaming() || a.cameraSettling() || a.over.bar != nil || a.over.pick != nil || a.over.draw != nil {
 		return 250 * time.Millisecond
 	}
 	return 0
@@ -546,8 +582,10 @@ func (a *App) displayLabel(d capture.Display, i int) string {
 }
 
 // drawRecordControl is, while recording, the recording's time, sound levels and buttons at the end of the tab strip;
-// it returns where it begins. Recording and screenshots start from the new tab's card or their hotkeys.
-func (a *App) drawRecordControl(end, y, h float32) float32 {
+// it returns where it begins. It is w wide; narrower than its usual 232, down the side strip, it has no room for the
+// size of the file, and the word for saving takes the time's place. Recording and screenshots start from the new tab's
+// card or their hotkeys.
+func (a *App) drawRecordControl(end, y, h, w float32) float32 {
 	u := &a.u
 	r := &a.rec
 	if r.rec == nil {
@@ -555,7 +593,8 @@ func (a *App) drawRecordControl(end, y, h float32) float32 {
 	}
 	end -= u.px(4)
 	st := r.rec.Status()
-	pill := gfx.Rect{X: end - u.px(236), Y: y, W: u.px(232), H: h}
+	pill := gfx.Rect{X: end - w - u.px(4), Y: y, W: w, H: h}
+	narrow := w < u.px(232)
 	u.c.Fill(pill, gfx.Mix(colSurface, colDanger, 0.18))
 	dot := colDanger
 	if st.Paused {
@@ -564,8 +603,13 @@ func (a *App) drawRecordControl(end, y, h float32) float32 {
 		dot = gfx.Mix(colDanger, colPanel, 0.5)
 	}
 	u.c.Circle(pill.X+u.px(14), pill.Y+h/2, u.px(4.5), dot)
-	u.label(u.bold(12.5), rectAt(pill.X+u.px(24), pill.Y, u.px(56), h), shortClock(st.Elapsed.Seconds()), colText, 0)
+	if narrow && r.stopping {
+		u.label(u.face(11), rectAt(pill.X+u.px(24), pill.Y, w-u.px(90), h), u.t("Saving…"), colDim, 0)
+	} else {
+		u.label(u.bold(12.5), rectAt(pill.X+u.px(24), pill.Y, u.px(56), h), shortClock(st.Elapsed.Seconds()), colText, 0)
+	}
 	switch {
+	case narrow:
 	case r.stopping:
 		u.label(u.face(11), rectAt(pill.X+u.px(78), pill.Y, u.px(90), h), u.t("Saving…"), colDim, 0)
 	case st.Bytes > 1<<10:
@@ -584,7 +628,12 @@ func (a *App) drawRecordControl(end, y, h float32) float32 {
 	if o.Microphone {
 		levels, names = append(levels, st.Mic), append(names, u.t("the microphone"))
 	}
-	meters := rectAt(pill.X+u.px(136), pill.Y+h/2-u.px(3)*float32(len(levels)), u.px(24), u.px(6)*float32(len(levels)))
+	// Before the pause button, and in a narrow pill shorter and closer, to clear the time.
+	meterX, meterW := pill.Right()-u.px(96), u.px(24)
+	if narrow {
+		meterX, meterW = pill.Right()-u.px(86), u.px(20)
+	}
+	meters := rectAt(meterX, pill.Y+h/2-u.px(3)*float32(len(levels)), meterW, u.px(6)*float32(len(levels)))
 	for i, level := range levels {
 		bar := rectAt(meters.X, meters.Y+float32(i)*u.px(6), meters.W, u.px(4))
 		u.c.Fill(bar, colSurfaceHi)
@@ -621,17 +670,15 @@ const (
 // shotTargets are the targets of the screenshot hotkeys, from hotkeyScreenshot on.
 var shotTargets = [...]shotTarget{shotClipboard, shotFile, shotPath}
 
-// screenshotRegion lets the user pick a region of the chosen screen, or click for all of it, and sends it to the
-// target.
+// screenshotRegion lets the user pick a region of any display, or click for all of one, and sends it to the target.
 func (a *App) screenshotRegion(to shotTarget) {
-	d, ok := a.chosenDisplay()
-	if !ok || a.rec.shooting {
-		a.takeScreenshot(image.Rectangle{}, to, nil) // says why it cannot
+	if _, ok := a.chosenDisplay(); !ok || a.rec.shooting {
+		a.takeScreenshot(capture.Display{}, image.Rectangle{}, to, nil) // says why it cannot
 		return
 	}
-	a.pickRegion(d, func(region image.Rectangle, ok bool) {
+	a.pickRegion(a.shotPick(to), func(d capture.Display, region image.Rectangle, ok bool) {
 		if ok {
-			a.takeScreenshot(region, to, nil)
+			a.takeScreenshot(d, region, to, nil)
 		}
 	})
 }
@@ -644,21 +691,9 @@ func withKey(hint, key string) string {
 	return hint + " (" + key + ")"
 }
 
-// screenshotDir is the folder screenshots are saved in: the export folder the user chose, or else a folder of the
-// app's own in the pictures folder.
-func (a *App) screenshotDir() (string, error) {
-	if a.settings.ExportDir != "" {
-		return a.settings.ExportDir, nil
-	}
-	if dir := files.Pictures(); dir != "" {
-		return filepath.Join(dir, ProductName), nil
-	}
-	return a.uploadDir()
-}
-
-// takeScreenshot takes a PNG of the chosen screen, leaving this window out when the recording settings say so, and
-// sends it to the target; done, when not nil, hears the file, "" for one only on the clipboard.
-func (a *App) takeScreenshot(region image.Rectangle, to shotTarget, done func(path string, err error)) {
+// takeScreenshot takes a PNG of a region of a display (the chosen one when d is zero, all of it when region is
+// empty), leaving this window out when the recording settings say so, and sends it to the target; done, when not nil, hears the file, "" for one only on the clipboard.
+func (a *App) takeScreenshot(d capture.Display, region image.Rectangle, to shotTarget, done func(path string, err error)) {
 	r := &a.rec
 	report := func(path string, err error) {
 		if err != nil {
@@ -685,10 +720,12 @@ func (a *App) takeScreenshot(region image.Rectangle, to shotTarget, done func(pa
 		report("", errors.New(reason))
 		return
 	}
-	d, ok := a.chosenDisplay()
-	if !ok {
-		report("", errors.New(a.u.t("No screen to record was found")))
-		return
+	if d.Width == 0 {
+		var ok bool
+		if d, ok = a.chosenDisplay(); !ok {
+			report("", errors.New(a.u.t("No screen to record was found")))
+			return
+		}
 	}
 	cb, pictures := a.host.(imageClipboard)
 	if to == shotClipboard && !pictures {
@@ -701,7 +738,7 @@ func (a *App) takeScreenshot(region image.Rectangle, to shotTarget, done func(pa
 		path, err = tempShotPath()
 	} else {
 		var dir string
-		if dir, err = a.screenshotDir(); err == nil {
+		if dir, err = a.categoryDir(categoryTools); err == nil {
 			path = a.datedPath(dir, a.u.t("Screenshot %s"), ".png", time.Now())
 		}
 	}
@@ -975,7 +1012,7 @@ func (a *App) recorderBody(in gfx.Rect) float32 {
 		}
 	}
 	y = a.paragraph(in.X, y, in.W, status, 12, col)
-	dir, err := a.uploadDir()
+	dir, err := a.categoryDir(categoryTools)
 	if err != nil {
 		dir = err.Error()
 	}
@@ -985,7 +1022,7 @@ func (a *App) recorderBody(in gfx.Rect) float32 {
 	u.label(u.face(12), line.Inset(u.px(10)), u.tf("Saved in %s", dir), colText, 0)
 	u.hint("record/dir/path", u.t("Recordings open here for editing as soon as they stop"), line)
 	if u.button("record/dir", rectAt(in.Right()-u.px(150), y+u.px(1), u.px(150), u.px(30)), icFolder, u.t("Choose folder…"), plain, true) {
-		a.chooseExportDir()
+		a.chooseResourceDir()
 	}
 	return y + u.px(32)
 }

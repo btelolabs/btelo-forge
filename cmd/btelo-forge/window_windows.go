@@ -6,6 +6,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/btelolabs/btelo-forge/internal/printing"
 	"github.com/btelolabs/btelo-forge/internal/ui"
 	"github.com/btelolabs/btelo-forge/internal/win"
 )
@@ -49,10 +50,7 @@ func uiInput(raw *win.Input) ui.Input {
 	in := ui.Input{X: raw.X, Y: raw.Y, Down: raw.Down[win.Left], Wheel: raw.Wheel, Ctrl: raw.Ctrl, Shift: raw.Shift, Alt: raw.Alt, Up: raw.Up, Typed: raw.Typed, Dropped: raw.Dropped, Opened: raw.Opened, Hotkeys: raw.Hotkeys,
 		Inactive: raw.Inactive}
 	for _, p := range raw.Pointer {
-		if p.Button == win.Middle {
-			continue
-		}
-		in.Pointer = append(in.Pointer, ui.Pointer{X: p.X, Y: p.Y, Right: p.Button == win.Right, Down: p.Down, Double: p.Double})
+		in.Pointer = append(in.Pointer, ui.Pointer{X: p.X, Y: p.Y, Right: p.Button == win.Right, Middle: p.Button == win.Middle, Down: p.Down, Double: p.Double})
 	}
 	for _, k := range raw.Keys {
 		in.Keys = append(in.Keys, ui.Key{Code: k.VK, Ctrl: k.Ctrl, Shift: k.Shift, Alt: k.Alt})
@@ -66,6 +64,7 @@ func (h winWindow) Wake()                                   { h.w.Wake() }
 func (h winWindow) SetTitle(title string)                   { h.w.SetTitle(title) }
 func (h winWindow) SetCursor(c ui.Cursor)                   { h.w.SetCursor(cursors[c]) }
 func (h winWindow) TextInput(on bool, x, y, height float32) { h.w.TextInput(on, x, y, height) }
+func (h winWindow) TextInputFont(px float32, family string) { h.w.TextInputFont(px, family) }
 func (h winWindow) Clipboard() (string, error)              { return h.w.Clipboard() }
 func (h winWindow) SetClipboard(text string) error          { return h.w.SetClipboard(text) }
 func (h winWindow) Paste() (image.Image, []string, string)  { return h.w.Paste() }
@@ -77,6 +76,13 @@ func (h winWindow) Reveal(path string) error   { return win.Reveal(path) }
 func (h winWindow) Launch(path string) error   { return win.Launch(path) }
 func (h winWindow) LaunchURL(url string) error { return win.LaunchURL(url) }
 func (h winWindow) Languages() []string        { return win.Languages() }
+
+// ChoosePrinter shows the system's print dialog.
+func (h winWindow) ChoosePrinter(last *printing.Target) (*printing.Target, error) {
+	t, err := printing.ChoosePrinter(h.w.Handle, last)
+	h.w.ForgetButtons()
+	return t, err
+}
 
 // SetClipboardImage lets canvases copy pictures.
 func (h winWindow) SetClipboardImage(img image.Image) error { return h.w.SetClipboardImage(img) }
@@ -112,6 +118,9 @@ func (h winWindow) OpenOverlay(o ui.OverlayOptions) (ui.Overlay, error) {
 	return winOverlay{w}, nil
 }
 
+// Pointer is where the mouse pointer is on the desktop, for opening an overlay on the display it is on.
+func (h winWindow) Pointer() image.Point { return win.PointerAt() }
+
 // winOverlay adapts an overlay window to the editor.
 type winOverlay struct{ w *win.Window }
 
@@ -119,10 +128,14 @@ func (o winOverlay) Bounds() image.Rectangle { return o.w.Bounds() }
 func (o winOverlay) Scale() float32          { return o.w.Scale() }
 func (o winOverlay) SetClickThrough(on bool) { o.w.SetClickThrough(on) }
 func (o winOverlay) TakeKeyboard(on bool)    { o.w.TakeKeyboard(on) }
+func (o winOverlay) Raise()                  { o.w.Raise() }
 func (o winOverlay) Move(r image.Rectangle)  { o.w.MoveOverlay(r) }
 func (o winOverlay) SetCursor(c ui.Cursor)   { o.w.SetCursor(cursors[c]) }
 func (o winOverlay) Closed() bool            { return o.w.Closed() }
 func (o winOverlay) Close()                  { o.w.Close() }
+func (o winOverlay) TextInput(on bool, x, y, height float32) {
+	o.w.TextInput(on, x, y, height)
+}
 func (o winOverlay) Present(img *image.RGBA, dirty image.Rectangle) error {
 	return o.w.PresentLayered(img.Pix, img.Rect.Dx(), img.Rect.Dy(), dirty)
 }

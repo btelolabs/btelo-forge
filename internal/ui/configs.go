@@ -7,9 +7,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/btelolabs/btelo-forge/internal/ai"
 	"github.com/btelolabs/btelo-forge/internal/capture"
+	"github.com/btelolabs/btelo-forge/internal/keyboard"
 	"github.com/btelolabs/btelo-forge/internal/library"
 	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/render3d"
 	"github.com/btelolabs/btelo-forge/internal/speech"
 	"github.com/btelolabs/btelo-forge/internal/transcribe"
 )
@@ -24,17 +27,22 @@ type configKind struct {
 	defaults []byte
 	guide    string
 	apply    func(a *App, data []byte) error
+	ownPage  bool // edited on a Settings page of its own rather than under Extensions
 }
 
 // configTitles and configAbouts mark the titles and descriptions of configKinds for translation.
 var (
-	configTitles = msgs("Music sources", "Subtitle models", "ffmpeg", "Streaming platforms", "Voice-over voices")
+	configTitles = msgs("Music sources", "Subtitle models", "ffmpeg", "Streaming platforms", "Voice-over voices", "Keyboard rules", "System remaps", "AI models", "Skies")
 	configAbouts = msgs(
 		"Music sources are the websites the music panel searches. Add a site by describing its search address and how to read its answers; see the format guide.",
 		"Speech engines, models and languages for AI subtitles. Point to another whisper.cpp version or another ggml model; see the format guide.",
 		"Where the app gets ffmpeg, which records, streams and exports: the downloads to try and the oldest version it accepts; see the format guide.",
 		"The streaming platforms offered for live streams, with their server addresses and where to find the stream key; see the format guide.",
 		"Engines, models and voices for voice-overs. Add a voice by describing it in English, or point to another Qwen3-TTS or Breeze TTS 2 model; see the format guide.",
+		"Change keys, run programs and expand abbreviations in every program, with one rule on each line.",
+		"Keys changed below the programs, with nothing running: in the Windows registry as SharpKeys does, or with hidutil on macOS.",
+		"The chat models: engines that run them on this computer, the models to download, and online services reached with an API key (entered in Settings → AI models). Add a model by pointing to its GGUF file; see the format guide.",
+		"The skies the 3D tool offers: their colours and the sun that casts shadows; see the format guide.",
 	)
 )
 
@@ -103,6 +111,37 @@ var configKinds = []configKind{
 			return nil
 		},
 	},
+	{
+		id: "ai_models", file: "ai-models.json", title: configTitles[7], about: configAbouts[7], defaults: ai.DefaultJSON, guide: ai.FormatGuide,
+		apply: func(a *App, data []byte) error {
+			c, err := ai.ParseConfig(data)
+			if err != nil {
+				return err
+			}
+			a.setAIConfig(c)
+			return nil
+		},
+	},
+	{
+		id: "sky_presets", file: "sky-presets.json", title: configTitles[8], about: configAbouts[8], defaults: render3d.DefaultSkiesJSON, guide: render3d.SkiesGuide,
+		apply: func(a *App, data []byte) error {
+			s, err := render3d.ParseSkies(data)
+			if err != nil {
+				return err
+			}
+			a.models.skies = s
+			a.models.skyVersion++
+			return nil
+		},
+	},
+	{
+		id: keyboardRules, file: "keyboard-rules.json", title: configTitles[5], about: configAbouts[5], defaults: keyboard.DefaultJSON, guide: keyboard.FormatGuide, ownPage: true,
+		apply: (*App).applyKeyboard,
+	},
+	{
+		id: keyboardRemap, file: "keyboard-remap.json", title: configTitles[6], about: configAbouts[6], defaults: keyboard.DefaultRemapJSON, guide: keyboard.RemapGuide, ownPage: true,
+		apply: (*App).applyRemap,
+	},
 }
 
 func findConfig(id string) (configKind, error) {
@@ -111,7 +150,7 @@ func findConfig(id string) (configKind, error) {
 			return k, nil
 		}
 	}
-	return configKind{}, fmt.Errorf("unknown configuration %q (use music_sources, subtitle_models, speech_voices, ffmpeg or streaming_platforms)", id)
+	return configKind{}, fmt.Errorf("unknown configuration %q (use music_sources, subtitle_models, speech_voices, ai_models, ffmpeg, streaming_platforms, sky_presets, keyboard_rules or keyboard_remap)", id)
 }
 
 func (a *App) configPath(k configKind) string { return filepath.Join(a.stateDir, k.file) }

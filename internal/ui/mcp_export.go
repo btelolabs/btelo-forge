@@ -174,7 +174,7 @@ func (a *App) addExportTools(s *mcp.Server) {
 			}
 			return a.exportView(e), nil
 		})
-	tool(s, a, "export", "Encode the active edit to an MP4, or a GIF or WebP animation when the settings ask for one (next to the source, or in the default export folder), optionally changing the settings first like set_export. Runs in the background; poll export_status.",
+	tool(s, a, "export", "Encode the active edit to an MP4, or a GIF or WebP animation when the settings ask for one (in the export folder chosen in Settings, by default the Creative folder of the resource folder), optionally changing the settings first like set_export. Runs in the background; poll export_status.",
 		func(in exportIn) (any, error) {
 			if a.p == nil {
 				return nil, errNoProject

@@ -37,7 +37,7 @@ const (
 )
 
 // kindNames name each kind in assets.Kinds' order.
-var kindNames = msgs("Pictures", "Animations", "Videos", "Sounds", "Canvases", "Edits", "Mind maps", "Markdown", "Code", "Texts", "Other files")
+var kindNames = msgs("Pictures", "Animations", "Videos", "Sounds", "Canvases", "Edits", "Mind maps", "Office documents", "3D models", "Markdown", "Code", "Texts", "Other files")
 
 // assetLibrary is the tags and categories, opened the first time they are needed.
 func (a *App) assetLibrary() *assets.Library {
@@ -156,7 +156,7 @@ func digitsPrefix(s string) string {
 // opensInApp reports whether a file of the kind opens in a tab of the app rather than in the system's program.
 func opensInApp(kind assets.Kind) bool {
 	switch kind {
-	case assets.Video, assets.Edit, assets.Canvas, assets.Image, assets.Animation, assets.MindMap:
+	case assets.Video, assets.Edit, assets.Canvas, assets.Image, assets.Animation, assets.MindMap, assets.Office, assets.Model:
 		return true
 	}
 	return false
@@ -165,6 +165,10 @@ func opensInApp(kind assets.Kind) bool {
 // openAsset opens a file where it belongs: a video, edit or canvas in a tab of its own, a picture as a canvas,
 // anything else with the program the system has for it.
 func (a *App) openAsset(path string) {
+	if isPSD(path) {
+		a.openPSD(path)
+		return
+	}
 	switch assets.KindOf(path) {
 	case assets.Video:
 		a.newTab()
@@ -175,6 +179,10 @@ func (a *App) openAsset(path string) {
 		a.openCanvasFile(path)
 	case assets.MindMap:
 		a.openMindFile(path)
+	case assets.Office:
+		a.openOfficeFile(path)
+	case assets.Model:
+		a.openModelFile(path)
 	case assets.Image, assets.Animation:
 		a.newTab()
 		a.openImageAsArt(path)
@@ -256,6 +264,10 @@ func (a *App) openFromSystem(paths []string) {
 			a.openAssets(p)
 			continue
 		}
+		if isPSD(p) {
+			a.openPSD(p)
+			continue
+		}
 		switch assets.KindOf(p) {
 		case assets.Video:
 			if a.occupied() {
@@ -268,6 +280,10 @@ func (a *App) openFromSystem(paths []string) {
 			a.openCanvasFile(p)
 		case assets.MindMap:
 			a.openMindFile(p)
+		case assets.Office:
+			a.openOfficeFile(p)
+		case assets.Model:
+			a.openModelFile(p)
 		case assets.Image, assets.Animation:
 			a.openImageAsArt(p)
 		default:

@@ -19,6 +19,7 @@ type toolsState struct {
 	err         error
 	stop        context.CancelFunc
 	waiting     []string // videos dropped before ffmpeg was ready, opened once it is
+	whenReady   []func() // pinned tabs of videos, opened again once it is
 }
 
 func (a *App) toolsDir() string { return filepath.Join(a.cacheDir, "ffmpeg") }
@@ -68,6 +69,11 @@ func (a *App) prepareTools() {
 						a.toast(a.u.tf("The camera could not be shown: %s", a.describe(err)), true)
 					}
 				})
+			}
+			whenReady := t.whenReady
+			t.whenReady = nil
+			for _, fn := range whenReady {
+				fn()
 			}
 			waiting := t.waiting
 			t.waiting = nil

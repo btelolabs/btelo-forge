@@ -2,6 +2,7 @@ package mind
 
 import (
 	"image"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -123,7 +124,12 @@ func DrawFile(path string, box int, fonts gfx.Fonts, labels Labels, src Source) 
 		return nil, err
 	}
 	defer f.Close()
-	m, err := Load(f, filepath.Dir(path), FontMeasurer{fonts})
+	return DrawFrom(f, path, box, fonts, labels, src)
+}
+
+// DrawFrom draws as DrawFile does, the file's bytes coming from in: what is being saved to path, say.
+func DrawFrom(in io.Reader, path string, box int, fonts gfx.Fonts, labels Labels, src Source) (*image.RGBA, error) {
+	m, err := Load(in, filepath.Dir(path), FontMeasurer{fonts})
 	if err != nil {
 		return nil, err
 	}

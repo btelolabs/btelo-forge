@@ -1,0 +1,69 @@
+name: Bug report
+description: Something does not work, looks wrong, or crashes
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Only the first three fields are required; the more you can add, the faster it gets fixed.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      options:
+        - Video editor / export
+        - Drawing / artboards
+        - Mind map
+        - Office documents (docx, xlsx, pptx, PDF)
+        - 3D model
+        - Live stream / recording
+        - AI models / chat
+        - Files / resource manager
+        - Keyboard tool
+        - Music library / downloads
+        - Speech / transcription / voice-over
+        - Printing
+        - Settings / updates / start page
+        - MCP tools
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      placeholder: "I clicked X, and Y happened. I expected Z."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: A short numbered list. If there is a file involved, say what kind (format, rough size).
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Btelo Forge version
+      description: Shown in Settings, or on the start page.
+      placeholder: "e.g. 1.4.0"
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS
+        - Other
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, files or error text
+      description: Drag images, a small sample file, or pasted error text here. Do not include passwords or API keys.

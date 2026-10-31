@@ -246,8 +246,8 @@ engines  speech server programs; only those whose os and arch match this compute
            "breeze-server"  breeze-server of Breeze-TTS-2.cpp; "arguments" must pass {model} (the model file) and
                             {port}, and may pass {voices} (a folder for its saved voices).
          Downloaded: {"id", "api", "name", "note", "url": a .zip archive, "size": bytes (for progress), "sha256":
-         optional checksum of the archive, "executable": the program at the top of the archive (a folder holding
-         everything is looked inside), "backend", "arguments"}. Each url gets its own folder, so a new version
+         optional checksum of the archive, "executable": the program at the top of the archive, or its path there
+         with forward slashes (a folder holding everything is looked inside), "backend", "arguments"}. Each url gets its own folder, so a new version
          downloads anew.
          Installed: {"id", "api", "name", "note", "commands": names looked up on PATH, "paths": full paths to try,
          "install": how to install it, shown when it is missing, "backend", "arguments"}.

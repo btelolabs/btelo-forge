@@ -303,6 +303,7 @@ func (a *App) drawTextOptions(ad *artDoc, r gfx.Rect) {
 	p := &a.settings.Paint
 	x, done := a.labelledSlider("art/text/size", r.X, r.Y, r.H, u.t("Font size"), &p.TextSize, 4, 400, func(v float64) string { return fmt.Sprintf("%.0f px", v) })
 	p.TextSize = math.Round(p.TextSize)
+	a.optRow(&x, &r, u.px(42))
 	if u.iconButton("art/text/bold", gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}, icBold, u.t("Bold"), p.TextBold, true) {
 		p.TextBold, done = !p.TextBold, true
 	}
@@ -310,14 +311,14 @@ func (a *App) drawTextOptions(ad *artDoc, r gfx.Rect) {
 	for i, c := range []struct{ glyph, hint string }{
 		{icAlignLeft, u.t("Align left")}, {icAlignMid, u.t("Centre")}, {icAlignRight, u.t("Align right")},
 	} {
+		a.optRow(&x, &r, u.px(32))
 		if u.iconButton(fmt.Sprintf("art/text/align/%d", i), gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}, c.glyph, c.hint, p.TextAlign == i, true) {
 			p.TextAlign, done = i, true
 		}
 		x += u.px(32)
 	}
 	x += u.px(10)
-	u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x - u.px(80), H: r.H},
-		u.t("Click to type, or click a text layer to edit it; Ctrl+Enter commits, Esc cancels"), colDim, 0)
+	a.optHint(x, gfx.Rect{X: r.X, Y: r.Y, W: r.W - u.px(80), H: r.H}, u.t("Click to type, or click a text layer to edit it; Ctrl+Enter commits, Esc cancels"))
 	if done {
 		a.saveSettings()
 	}

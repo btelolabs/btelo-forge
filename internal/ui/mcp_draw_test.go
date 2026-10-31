@@ -181,6 +181,48 @@ func TestRetouchAdjustStyleAndWarpOverMCP(t *testing.T) {
 	if c := look(40, 60); c[0] <= 140 || d.UndoName() != "Dodge" {
 		t.Errorf("dodged %v (%q)", c, d.UndoName())
 	}
+	// The healing tools take a mark out, each from what is around it.
+	mark := func() {
+		s.ok("canvas_select", map[string]any{"shape": "rect", "rect": []int{145, 95, 8, 8}}, nil)
+		s.ok("canvas_fill", map[string]any{"color": "#000000"}, nil)
+		s.ok("canvas_select", map[string]any{"shape": "none"}, nil)
+	}
+	healed := func(step string) {
+		t.Helper()
+		if c := look(149, 99); c[0] < 40 || d.UndoName() != step {
+			t.Errorf("%s left %v (%q)", step, c, d.UndoName())
+		}
+	}
+	mark()
+	s.ok("canvas_heal", map[string]any{"tool": "spot", "points": [][]float64{{149, 99}}, "size": 24}, nil)
+	healed("Spot healing")
+	mark()
+	s.ok("canvas_heal", map[string]any{"tool": "heal", "points": [][]float64{{149, 99}}, "size": 24, "offset": []int{-40, 0}}, nil)
+	healed("Healing brush")
+	mark()
+	s.ok("canvas_select", map[string]any{"shape": "rect", "rect": []int{140, 90, 18, 18}}, nil)
+	s.ok("canvas_select", map[string]any{"shape": "smooth", "size": 2}, nil)
+	s.ok("canvas_heal", map[string]any{"tool": "patch", "offset": []int{-40, 0}}, nil)
+	healed("Patch")
+	s.ok("canvas_select", map[string]any{"shape": "none"}, nil)
+	mark()
+	s.ok("canvas_select", map[string]any{"shape": "rect", "rect": []int{140, 90, 18, 18}}, nil)
+	s.ok("canvas_heal", map[string]any{"tool": "fill"}, nil)
+	healed("Content-aware fill")
+	s.ok("canvas_select", map[string]any{"shape": "none"}, nil)
+	if res := s.call("canvas_heal", map[string]any{"tool": "heal", "points": [][]float64{{10, 10}}}); !res.IsError {
+		t.Error("healing without an offset was accepted")
+	}
+	s.ok("canvas_select", map[string]any{"shape": "rect", "rect": []int{40, 40, 20, 20}}, nil)
+	s.ok("canvas_select", map[string]any{"shape": "expand", "size": 5}, nil)
+	if d.UndoName() != "Expand" {
+		t.Errorf("step %q", d.UndoName())
+	}
+	s.ok("canvas_select", map[string]any{"shape": "none"}, nil)
+	s.ok("canvas_filter", map[string]any{"name": "shadows_highlights", "shadows": 30}, nil)
+	s.ok("canvas_filter", map[string]any{"name": "develop", "develop": []float64{0, 0, 0.2, 0, 0, 0, 0, 0, 0, 10, 0}}, nil)
+	d.Undo()
+	d.Undo()
 	var layer struct {
 		ID   int    `json:"id"`
 		Kind string `json:"kind"`

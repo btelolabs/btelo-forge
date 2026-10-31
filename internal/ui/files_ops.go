@@ -96,6 +96,10 @@ func (a *App) goUp(p *filesPane) {
 // enter goes into the folder under the cursor, or opens the file in a tab of its own when the app works on it (a
 // video, an edit, a canvas, a picture) and previews it otherwise; in a search, it goes to what was found.
 func (a *App) enter(fd *filesDoc) {
+	if fd.pick != nil {
+		a.pickEnter(fd)
+		return
+	}
 	p := fd.pane()
 	if p.search != nil {
 		a.openFound(fd, p)
@@ -432,11 +436,9 @@ func (a *App) openDefault(fd *filesDoc) {
 func (a *App) toggleHidden() {
 	a.settings.Files.HideHidden = !a.settings.Files.HideHidden
 	a.saveSettings()
-	for _, d := range a.docs {
-		if d.files != nil {
-			for _, p := range d.files.panes {
-				a.arrange(p)
-			}
+	for _, fd := range a.filesDocs() {
+		for _, p := range fd.panes {
+			a.arrange(p)
 		}
 	}
 	if a.settings.Files.HideHidden {
@@ -470,6 +472,8 @@ func (a *App) escapeFiles(fd *filesDoc) {
 		a.setFilter(p, assetFilter{})
 	case fd.preview:
 		a.togglePreview(fd)
+	case fd.pick != nil:
+		fd.pick.pickCancel()
 	case len(a.fm.clip.paths) > 0:
 		a.fm.clip = fileClip{}
 	}
@@ -1187,7 +1191,9 @@ const gitRefresh = 4 * time.Second
 // fileTick keeps the lists current: when the window comes back to the front, the folders are read again, as other
 // programs may have changed them; the folders visited are written once they settle.
 func (a *App) fileTick(fd *filesDoc) {
-	a.rememberPanes(fd)
+	if fd.pick == nil {
+		a.rememberPanes(fd)
+	}
 	if a.fm.wasInactive && !a.u.inactive {
 		a.refreshPanes(nil)
 		a.fm.repoOf = nil

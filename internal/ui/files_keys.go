@@ -2,6 +2,7 @@ package ui
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/btelolabs/btelo-forge/internal/assets"
@@ -35,7 +36,7 @@ func (a *App) fileCommands() []fileCommand {
 		return fileCommand{shortcut: shortcut{id: "files." + id, domain: domainFiles, label: label, defaults: keys(ks...)},
 			short: short, run: run, listed: listed}
 	}
-	return []fileCommand{
+	cmds := []fileCommand{
 		c("down", u.t("Move down"), u.t("down"), false, func() { a.moveRows(fd, 1) }, key('J', ""), key(keyDown, "")),
 		c("up", u.t("Move up"), u.t("up"), false, func() { a.moveRows(fd, -1) }, key('K', ""), key(keyUp, "")),
 		c("parent", u.t("Go to the folder above"), u.t("up a folder"), false, func() { a.goUp(fd.pane()) }, key(keyBack, "")),
@@ -83,6 +84,10 @@ func (a *App) fileCommands() []fileCommand {
 		c("refresh", u.t("Read the folders again"), u.t("refresh"), true, func() { a.refreshFiles(fd) }, key(keyF5, "")),
 		c("escape", u.t("Unmark, or leave the search"), u.t("unmark"), true, func() { a.escapeFiles(fd) }, key(keyEscape, "")),
 	}
+	if fd != nil && fd.pick != nil {
+		return slices.DeleteFunc(cmds, func(c fileCommand) bool { return !fd.pick.keeps(c.id) })
+	}
+	return cmds
 }
 
 // fileShortcuts lists the file manager's commands for Settings; their ids, names and keys do not depend on a tab.

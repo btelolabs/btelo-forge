@@ -36,10 +36,14 @@ type Stroke struct {
 	mark       Mark
 	leash      float64 // the smoothing's string length: the brush moves once the pointer is this far from it
 	clone      *cloneSource
-	retouch    *Retouch  // a retouching brush's settings, or nil for painting
-	carried    []float32 // the colour smudge carries from dab to dab
-	dir        float64   // the stroke's direction in degrees, which a tip that follows it turns with
-	rnd        uint64    // the shape dynamics' random state
+	heal       *healing                  // what happens when a healing stroke ends, or nil for any other
+	retouch    *Retouch                  // a retouching brush's settings, or nil for painting
+	carried    []float32                 // the colour smudge carries from dab to dab
+	field      map[image.Point][]float32 // where liquify reads each pixel from, a tile at a time
+	lastDab    [2]float64                // where liquify's last dab went
+	dabbed     bool                      // it has laid one
+	dir        float64                   // the stroke's direction in degrees, which a tip that follows it turns with
+	rnd        uint64                    // the shape dynamics' random state
 }
 
 // cloneSource is where the clone stamp paints from, as it was when the stroke began, and how far from the brush it
@@ -133,7 +137,7 @@ func (d *Doc) beginStrokeOf(b Brush, erase bool, clone *cloneSource, rt *Retouch
 // laid shows the dabs laid within r: the pixels there are worked out once from what they were and the coverage,
 // however many dabs crossed them. It returns r.
 func (s *Stroke) laid(r image.Rectangle) image.Rectangle {
-	if !r.Empty() && !(s.retouch != nil && s.retouch.Kind == RetouchSmudge) {
+	if !r.Empty() && !(s.retouch != nil && s.retouch.dabsItself()) {
 		s.compose(r)
 	}
 	return r
@@ -207,8 +211,13 @@ func (s *Stroke) coverOf(x, y int) uint32 {
 // dab lays one dab centred at (cx, cy) into the stroke's coverage and returns the pixels it touched, which laid
 // then shows (a smudge's dab shows itself, as it carries colour from one dab to the next).
 func (s *Stroke) dab(cx, cy float64) image.Rectangle {
-	if s.retouch != nil && s.retouch.Kind == RetouchSmudge {
-		box := s.smudgeDab(cx, cy)
+	if s.retouch != nil && s.retouch.dabsItself() {
+		var box image.Rectangle
+		if s.retouch.Kind == RetouchSmudge {
+			box = s.smudgeDab(cx, cy)
+		} else {
+			box = s.liquifyDab(cx, cy)
+		}
 		s.dirty = s.dirty.Union(box)
 		return box
 	}
@@ -393,10 +402,18 @@ func (s *Stroke) End() image.Rectangle {
 		d.restore(s.mark.s) // nothing was painted, so a text layer stays text
 		return caught
 	}
+	if s.heal != nil {
+		s.finishHeal()
+		caught = caught.Union(s.dirty)
+	}
 	name := "Brush"
 	switch {
 	case s.erase:
 		name = "Eraser"
+	case s.heal != nil && s.heal.spot:
+		name = "Spot healing"
+	case s.heal != nil:
+		name = "Healing brush"
 	case s.clone != nil:
 		name = "Clone stamp"
 	case s.retouch != nil:

@@ -49,11 +49,12 @@ func (t *tile) differing(fill uint8, measure func(pix []uint8) image.Rectangle) 
 // Where there is no tile every byte of every pixel is fill. Positions on the canvas are the plane's own plus off, so
 // moving a whole plane is free.
 type plane struct {
-	bpp   int
-	fill  uint8
-	off   image.Point
-	tiles map[image.Point]*tile
-	mips  []map[image.Point]*tile // halved levels, made on demand; a write drops the tiles above what it changed
+	bpp     int
+	fill    uint8
+	off     image.Point
+	tiles   map[image.Point]*tile
+	mips    []map[image.Point]*tile // halved levels, made on demand; a write drops the tiles above what it changed
+	version uint64                  // goes up with every write, for what is worked out from the pixels
 }
 
 func newPlane(bpp int, fill uint8) plane {
@@ -100,6 +101,7 @@ func (p *plane) writable(k image.Point) *tile {
 
 // invalidate drops the level tiles above the tile at k, to be made again from the new pixels when asked for.
 func (p *plane) invalidate(k image.Point) {
+	p.version++
 	for _, level := range p.mips {
 		k = image.Pt(k.X>>1, k.Y>>1)
 		delete(level, k)

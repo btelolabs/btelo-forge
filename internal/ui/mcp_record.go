@@ -7,6 +7,7 @@ import (
 	"image"
 	"time"
 
+	"github.com/btelolabs/btelo-forge/internal/capture"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -188,7 +189,7 @@ func (a *App) addRecordTools(s *mcp.Server) {
 		func(ctx context.Context, req *mcp.CallToolRequest, in none) (*mcp.CallToolResult, any, error) {
 			done := make(chan pathResult, 1)
 			if _, err := call(a, func() (any, error) {
-				a.takeScreenshot(image.Rectangle{}, shotFile, func(path string, err error) { done <- pathResult{path, err} })
+				a.takeScreenshot(capture.Display{}, image.Rectangle{}, shotFile, func(path string, err error) { done <- pathResult{path, err} })
 				return nil, nil
 			}); err != nil {
 				return errorResult(err), nil, nil

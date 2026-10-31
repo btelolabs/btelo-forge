@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/btelolabs/btelo-forge/internal/paint"
+	"github.com/btelolabs/btelo-forge/internal/psd"
 )
 
 // The drawing tools: they act on the canvas in the active tab, the same picture the window shows, and each change
@@ -349,7 +350,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 		if err != nil {
 			return nil, err
 		}
-		path, err := a.capturePath(a.u.t("Canvas %s"), paint.Ext, time.Now())
+		path, err := a.capturePath(categoryCreative, a.u.t("Canvas %s"), paint.Ext, time.Now())
 		if err != nil {
 			return nil, err
 		}
@@ -362,7 +363,7 @@ func (a *App) addDrawTools(s *mcp.Server) {
 	})
 
 	type openIn struct {
-		Path string `json:"path" jsonschema:"absolute path of a .btcanvas file, or a picture (PNG, JPEG…) to open as a new canvas"`
+		Path string `json:"path" jsonschema:"absolute path of a .btcanvas file, or a Photoshop file or a picture (PNG, JPEG…) to open as a new canvas"`
 	}
 	mcp.AddTool(s, &mcp.Tool{Name: "canvas_open", Description: "Open a saved canvas (.btcanvas) or a picture as a canvas in a tab, and return its state."},
 		func(ctx contextT, req *mcp.CallToolRequest, in openIn) (*mcp.CallToolResult, any, error) {
@@ -372,6 +373,8 @@ func (a *App) addDrawTools(s *mcp.Server) {
 			before, _ := call(a, func() (*artDoc, error) {
 				if strings.EqualFold(filepath.Ext(in.Path), paint.Ext) {
 					a.openCanvasFile(in.Path)
+				} else if isPSD(in.Path) {
+					a.openPSD(in.Path)
 				} else {
 					a.openImageAsArt(in.Path)
 				}
@@ -444,14 +447,16 @@ func (a *App) addDrawTools(s *mcp.Server) {
 	})
 
 	type exportIn struct {
-		What     string `json:"what,omitempty" jsonschema:"picture (the frame, or all that is drawn; the default), selection, artboard or artboards (each its own PNG)"`
+		What     string `json:"what,omitempty" jsonschema:"picture (the frame, or all that is drawn; the default), selection, artboard or artboards (each its own PNG), or psd (a Photoshop file with the layers; left_out says what it could not hold)"`
 		Artboard int    `json:"artboard,omitempty" jsonschema:"the artboard id, for what artboard"`
 	}
-	mcp.AddTool(s, &mcp.Tool{Name: "canvas_export", Description: "Export PNGs next to the canvas file and return their paths."},
+	mcp.AddTool(s, &mcp.Tool{Name: "canvas_export", Description: "Export PNGs or a Photoshop file next to the canvas file and return their paths."},
 		func(ctx contextT, req *mcp.CallToolRequest, in exportIn) (*mcp.CallToolResult, any, error) {
 			type job struct {
 				paths []string
 				pics  []namedPicture
+				psd   *psd.File
+				loss  paint.PSDLoss
 			}
 			j, err := call(a, func() (job, error) {
 				ad, err := a.canvasNow()
@@ -461,6 +466,12 @@ func (a *App) addDrawTools(s *mcp.Server) {
 				d := ad.d
 				var pics []namedPicture
 				switch in.What {
+				case "psd":
+					f, loss, err := d.ToPSD()
+					if err != nil {
+						return job{}, err
+					}
+					return job{paths: []string{exportPSDTarget(ad)}, psd: f, loss: loss}, nil
 				case "", "picture":
 					img, err := d.Picture()
 					if err != nil {
@@ -497,6 +508,12 @@ func (a *App) addDrawTools(s *mcp.Server) {
 			})
 			if err != nil {
 				return errorResult(err), nil, nil
+			}
+			if j.psd != nil {
+				if err := writePSD(j.psd, j.paths[0]); err != nil {
+					return errorResult(err), nil, nil
+				}
+				return result(map[string]any{"files": j.paths, "left_out": map[string]int{"adjustment_layers": j.loss.Adjustments, "layer_effects": j.loss.Effects}}, nil)
 			}
 			for i, p := range j.pics {
 				if err := writePNG(j.paths[i], p.img); err != nil {
@@ -650,11 +667,12 @@ func (a *App) addDrawTools(s *mcp.Server) {
 	})
 
 	type selectIn struct {
-		Shape     string  `json:"shape" jsonschema:"rect, ellipse, polygon, wand (by colour from a point), all, none, invert or reselect"`
+		Shape     string  `json:"shape" jsonschema:"rect, ellipse, polygon, wand (by colour from a point), all, none, invert, reselect; or expand, contract, smooth or border, which change the selection there is by size"`
 		Rect      []int   `json:"rect,omitempty" jsonschema:"[x, y, width, height] for rect and ellipse"`
 		Points    []ptIn  `json:"points,omitempty" jsonschema:"[[x, y], …] for polygon; [[x, y]] for wand"`
 		Mode      string  `json:"mode,omitempty" jsonschema:"new (default), add, subtract or intersect"`
 		Feather   float64 `json:"feather,omitempty" jsonschema:"softens the edge by this many pixels"`
+		Size      int     `json:"size,omitempty" jsonschema:"expand, contract, smooth: pixels; border: the band's width in pixels"`
 		Tolerance *int    `json:"tolerance,omitempty" jsonschema:"wand: 0 to 255, how far colours may differ (32 when left out)"`
 		Merged    bool    `json:"merged,omitempty" jsonschema:"wand: look at all layers, not only the chosen one"`
 		Scattered bool    `json:"scattered,omitempty" jsonschema:"wand: take matching colours anywhere, not only touching"`
@@ -718,6 +736,14 @@ func (a *App) addDrawTools(s *mcp.Server) {
 				d.InvertSelection()
 			case "reselect":
 				d.Reselect()
+			case "expand", "contract", "smooth", "border":
+				if d.Selection == nil {
+					return nil, errors.New("there is no selection to change")
+				}
+				if in.Size < 1 || in.Size > 500 {
+					return nil, errors.New("size is 1 to 500 pixels")
+				}
+				map[string]func(int){"expand": d.ExpandSelection, "contract": d.ContractSelection, "smooth": d.SmoothSelection, "border": d.BorderSelection}[in.Shape](in.Size)
 			default:
 				return nil, fmt.Errorf("unknown shape %q", in.Shape)
 			}
@@ -1056,8 +1082,8 @@ func (a *App) addDrawTools(s *mcp.Server) {
 	})
 
 	type filterIn struct {
-		Name       string    `json:"name" jsonschema:"gaussian_blur, unsharp_mask, add_noise, mosaic, invert, desaturate, brightness_contrast, levels, hue_saturation, posterize or threshold"`
-		Radius     float64   `json:"radius,omitempty" jsonschema:"gaussian_blur (2 when left out), unsharp_mask (1): pixels"`
+		Name       string    `json:"name" jsonschema:"gaussian_blur, unsharp_mask, add_noise, mosaic, invert, desaturate, brightness_contrast, levels, hue_saturation, posterize, threshold, shadows_highlights or develop"`
+		Radius     float64   `json:"radius,omitempty" jsonschema:"gaussian_blur (2 when left out), unsharp_mask (1), shadows_highlights (30): pixels"`
 		Amount     float64   `json:"amount,omitempty" jsonschema:"percent: unsharp_mask 1 to 500 (50 when left out), add_noise 0.1 to 400 (12.5 when left out)"`
 		Threshold  float64   `json:"threshold,omitempty" jsonschema:"unsharp_mask: 0 to 255"`
 		Size       int       `json:"size,omitempty" jsonschema:"mosaic: cell size in pixels (8 when left out)"`
@@ -1070,6 +1096,9 @@ func (a *App) addDrawTools(s *mcp.Server) {
 		Count      int       `json:"count,omitempty" jsonschema:"posterize: levels, 2 to 255 (4 when left out)"`
 		Level      float64   `json:"level,omitempty" jsonschema:"threshold: 1 to 255; brighter pixels turn white, the rest black (128 when left out)"`
 		Mono       bool      `json:"mono,omitempty" jsonschema:"add_noise: grey noise"`
+		Shadows    float64   `json:"shadows,omitempty" jsonschema:"shadows_highlights: lighten dark areas, 0 to 100"`
+		Highlights float64   `json:"highlights,omitempty" jsonschema:"shadows_highlights: darken light areas, 0 to 100"`
+		Develop    []float64 `json:"develop,omitempty" jsonschema:"develop: [temperature, tint, exposure in stops -5…5, contrast, highlights, shadows, whites, blacks, clarity, vibrance, saturation], the others -100…100"`
 	}
 	tool(s, a, "canvas_filter", "Apply a filter or adjustment to the chosen pixel layer, within the selection.", func(in filterIn) (any, error) {
 		return a.drawEdit(func(ad *artDoc) (any, error) {
@@ -1131,6 +1160,17 @@ func (a *App) addDrawTools(s *mcp.Server) {
 					level = 128
 				}
 				f, name = paint.Threshold(min(max(level, 1), 255)), "Threshold"
+			case "shadows_highlights":
+				radius := in.Radius
+				if radius == 0 {
+					radius = 30
+				}
+				f, name = paint.ShadowsHighlights(min(max(in.Shadows, 0), 100), min(max(in.Highlights, 0), 100), min(max(radius, 1), 250)), "Shadows/Highlights"
+			case "develop":
+				if len(in.Develop) != 11 {
+					return nil, errors.New("develop is [temperature, tint, exposure, contrast, highlights, shadows, whites, blacks, clarity, vibrance, saturation]")
+				}
+				f, name = developOf(in.Develop).Filter(), "Develop"
 			default:
 				return nil, fmt.Errorf("unknown filter %q", in.Name)
 			}

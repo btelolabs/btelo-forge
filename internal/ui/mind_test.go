@@ -641,6 +641,45 @@ func TestMindTasks(t *testing.T) {
 	x.shot("mind-tasks")
 }
 
+// TestMindNewTopicsJoinTheTaskList: a topic added under, beside or above a task is a task, with a box of its own; on
+// a plain branch it stays plain.
+func TestMindNewTopicsJoinTheTaskList(t *testing.T) {
+	x, md := newMindHarness(t)
+	m := md.m
+	root := m.Roots()[0].ID
+	branch, _ := m.Add(mind.Node{Text: "Branch"}, root, -1)
+	plain, _ := m.Add(mind.Node{Text: "Plain"}, root, -1)
+	md.selectOnly(branch)
+	x.press('K', "cs")
+
+	added := func(do func(*mindDoc)) *mind.Node {
+		do(md)
+		x.press(keyEscape, "")
+		return m.Node(md.primary)
+	}
+	child := added(x.a.mindAddChild)
+	if child.Parent != branch || !child.Task {
+		t.Fatalf("a child of a task: parent %d, task %v", child.Parent, child.Task)
+	}
+	if _, ok := m.TaskBox(child); !ok {
+		t.Fatal("the new child has no box")
+	}
+	for _, after := range []bool{true, false} {
+		if n := added(func(md *mindDoc) { x.a.mindAddSibling(md, after) }); n.Parent != branch || !n.Task {
+			t.Fatalf("a sibling of a task, after %v: parent %d, task %v", after, n.Parent, n.Task)
+		}
+	}
+	md.selectOnly(child.ID)
+	if n := added(x.a.mindAddParent); !n.Task || m.Node(child.ID).Parent != n.ID {
+		t.Fatalf("a topic above a task: task %v", n.Task)
+	}
+
+	md.selectOnly(plain)
+	if n := added(x.a.mindAddChild); n.Task {
+		t.Fatal("a child of a plain topic became a task")
+	}
+}
+
 // themeBoard fills a map with a tree with tasks, a flowchart, a table and connectors, to see a theme on.
 func themeBoard(m *mind.Map) {
 	root := m.Roots()[0].ID

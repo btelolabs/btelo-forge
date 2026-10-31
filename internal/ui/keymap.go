@@ -227,7 +227,7 @@ var (
 // painting reports whether the chosen tool paints with the brush, so the brush commands act.
 func (a *App) painting() bool {
 	switch a.artTool {
-	case toolBrush, toolEraser, toolClone, toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge:
+	case toolBrush, toolEraser, toolClone, toolSpot, toolHeal, toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge, toolLiquify:
 		return true
 	}
 	return false
@@ -273,35 +273,6 @@ func (a *App) drawingKey(k Key) bool {
 	return false
 }
 
-// brushSizeKey reports whether k is bound to making the brush smaller or larger, and which; drawing on the screen
-// takes the same keys as the canvas.
-func (a *App) brushSizeKey(k Key) (larger, ok bool) {
-	for _, dk := range drawingKeys {
-		if (dk.id == "draw.brush-smaller" || dk.id == "draw.brush-larger") && a.bound(dk.id, dk.defaults, k) {
-			return dk.id == "draw.brush-larger", true
-		}
-	}
-	return false, false
-}
-
-// brushSizeKeyLabels name every key making the brush smaller, and larger, as hints show them.
-func (a *App) brushSizeKeyLabels() (smaller, larger string) {
-	names := func(id string) string {
-		for _, dk := range drawingKeys {
-			if dk.id != id {
-				continue
-			}
-			var out []string
-			for _, k := range a.keysFor(id, dk.defaults) {
-				out = append(out, hotkeyOf(k).String())
-			}
-			return strings.Join(out, " / ")
-		}
-		return ""
-	}
-	return names("draw.brush-smaller"), names("draw.brush-larger")
-}
-
 // stepBrushSize makes the brush a step smaller or larger, and keeps it.
 func (a *App) stepBrushSize(larger bool) {
 	if larger {
@@ -324,7 +295,7 @@ func (a *App) toolFor(k Key) (artTool, bool) {
 	plain := Key{Code: k.Code}
 	var with []artTool
 	for _, e := range artTools {
-		if slices.Contains(a.toolKeys(e.tool), plain) {
+		if a.toolOffered(e.tool) && slices.Contains(a.toolKeys(e.tool), plain) {
 			with = append(with, e.tool)
 		}
 	}

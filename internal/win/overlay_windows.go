@@ -21,6 +21,7 @@ var (
 	setWindowLong         = user32.NewProc("SetWindowLongPtrW")
 	setWindowPos          = user32.NewProc("SetWindowPos")
 	isWindow              = user32.NewProc("IsWindow")
+	getCursorPos          = user32.NewProc("GetCursorPos")
 	overlayClassOnce      sync.Once
 	overlayClassErr       error
 	overlayClass, _       = syscall.UTF16PtrFromString("BteloForgeOverlay")
@@ -95,7 +96,7 @@ func OpenOverlay(o OverlayOptions) (*Window, error) {
 	}
 	w := &Window{Handle: hwnd, cursor: Arrow, overlay: &overlayState{bounds: b, clickThru: o.ClickThrough, forwardClose: !o.Activate}}
 	windows.Store(hwnd, w)
-	// No overlay takes text: without an IME its keys come as themselves, as the brush keys over a drawing need.
+	// Without an IME keys come as themselves, as the brush keys over a drawing need, until TextInput asks for it.
 	if err := associateIME(hwnd, false); err != nil {
 		w.Close()
 		return nil, err
@@ -256,6 +257,22 @@ func (w *Window) TakeKeyboard(on bool) {
 	o.before = 0
 }
 
+// Raise brings the overlay back to the front of the always-on-top windows, without activating it; one that has taken
+// the keyboard takes it again, which a press on another of the app's overlays lets it do even when Windows refused
+// it at first, as it may when another program was in front.
+func (w *Window) Raise() {
+	o := w.overlay
+	if o == nil {
+		return
+	}
+	const noSize, noMove, noActivate = 0x0001, 0x0002, 0x0010
+	topmost := ^uintptr(0) // HWND_TOPMOST
+	setWindowPos.Call(w.Handle, topmost, 0, 0, 0, 0, noSize|noMove|noActivate)
+	if o.keyboard {
+		setForeground.Call(w.Handle)
+	}
+}
+
 // MoveOverlay puts the overlay at r, such as a toolbar being dragged.
 func (w *Window) MoveOverlay(r image.Rectangle) {
 	o := w.overlay
@@ -272,12 +289,23 @@ func (w *Window) TakeInput() Input {
 	in := w.input
 	in.Pointer = append([]PointerEvent(nil), w.input.Pointer...)
 	in.Keys = append([]KeyEvent(nil), w.input.Keys...)
-	in.Typed, in.Dropped, in.Hotkeys = nil, nil, nil
+	in.Up = append([]uint16(nil), w.input.Up...)
+	in.Typed = append([]rune(nil), w.input.Typed...)
+	in.Dropped, in.Hotkeys = nil, nil
 	w.input.Pointer = w.input.Pointer[:0]
 	w.input.Keys = w.input.Keys[:0]
+	w.input.Up = w.input.Up[:0]
+	w.input.Typed = w.input.Typed[:0]
 	w.input.Wheel = 0
 	in.Ctrl, in.Shift, in.Alt = held(0x11), held(0x10), held(0x12)
 	return in
+}
+
+// PointerAt is where the mouse pointer is on the desktop, in physical pixels.
+func PointerAt() image.Point {
+	var p struct{ X, Y int32 }
+	getCursorPos.Call(uintptr(unsafe.Pointer(&p)))
+	return image.Pt(int(p.X), int(p.Y))
 }
 
 // Closed reports whether the overlay was asked to close, such as with Alt+F4.

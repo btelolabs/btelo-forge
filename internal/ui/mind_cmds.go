@@ -71,6 +71,7 @@ func (a *App) mindCommands() []mindCommand {
 		c("actual-size", u.t("Actual size"), func() { md.zoomAt(a.layout().body.W/2, a.layout().body.H/2, 1) }, key('0', "s")),
 		c("save", u.t("Save now"), func() { md.dirty = true; a.saveMind(md, false) }, key('S', "c")),
 		c("export", u.t("Export as a picture…"), func() { a.exportMindPicture(md) }, key('E', "cs")),
+		c("print", u.t("Print…"), func() { a.printMind(md) }, key('P', "c")),
 		c("copy-outline", u.t("Copy as an outline"), func() { a.mindCopyOutline(md) }, key('C', "cs")),
 		c("escape", u.t("Stop the video, or drop the choice"), func() { a.mindEscape(md) }, key(keyEscape, "")),
 	}
@@ -147,24 +148,17 @@ var (
 // mindChooseFiles asks for files of the tool's kind and adds them where the view is.
 func (a *App) mindChooseFiles(md *mindDoc, t mindTool) {
 	u := &a.u
-	var title string
-	var filter [][2]string
+	r := pickRequest{key: "mind", multiple: true}
 	switch t {
 	case mtPicture:
-		title = u.t("Add pictures, animations or canvases")
-		exts := append(append(slices.Clone(assets.ImageExtensions), assets.AnimationExtensions...), paint.Ext)
-		filter = [][2]string{{u.t("Pictures"), extPattern(exts)}}
+		r.title, r.kinds = u.t("Add pictures, animations or canvases"), u.t("Pictures")
+		r.exts = append(append(slices.Clone(assets.ImageExtensions), assets.AnimationExtensions...), paint.Ext)
 	case mtVideo:
-		title = u.t("Add videos")
-		filter = [][2]string{{u.t("Videos"), extPattern(assets.VideoExtensions)}}
+		r.title, r.kinds, r.exts = u.t("Add videos"), u.t("Videos"), assets.VideoExtensions
 	default:
-		title = u.t("Add a mind map inside this one")
-		filter = [][2]string{{u.t("Mind maps"), "*" + mind.Ext}}
+		r.title, r.kinds, r.exts = u.t("Add a mind map inside this one"), u.t("Mind maps"), []string{mind.Ext}
 	}
-	paths := a.host.OpenFiles(title, filter, true)
-	if len(paths) > 0 {
-		a.mindAddFiles(md, paths, a.mindViewCentre(md))
-	}
+	a.pickFiles(r, func(paths []string) { a.mindAddFiles(md, paths, a.mindViewCentre(md)) })
 }
 
 // extPattern is a file dialog's pattern for extensions.
@@ -249,20 +243,21 @@ func (a *App) mindAddFiles(md *mindDoc, paths []string, at mind.Vec) {
 	}
 }
 
-// mindAddChild adds a topic under the chosen one and types into it.
+// mindAddChild adds a topic under the chosen one and types into it; under a task it is a task too.
 func (a *App) mindAddChild(md *mindDoc) {
 	n := md.m.Node(md.primary)
 	if n == nil {
 		return
 	}
-	id, err := md.m.Add(mind.Node{}, n.ID, -1)
+	id, err := md.m.Add(mind.Node{Task: n.Task}, n.ID, -1)
 	if a.mindDo(md, err) {
 		md.selectOnly(id)
 		a.editMindText(md, id, "", false)
 	}
 }
 
-// mindAddSibling adds a topic beside the chosen one, after or before it; beside a free node it adds a child.
+// mindAddSibling adds a topic beside the chosen one, after or before it, a task if that is one; beside a free node
+// it adds a child.
 func (a *App) mindAddSibling(md *mindDoc, after bool) {
 	n := md.m.Node(md.primary)
 	if n == nil {
@@ -277,14 +272,14 @@ func (a *App) mindAddSibling(md *mindDoc, after bool) {
 	if after {
 		i++
 	}
-	id, err := md.m.Add(mind.Node{Side: n.Side}, p.ID, i)
+	id, err := md.m.Add(mind.Node{Side: n.Side, Task: n.Task}, p.ID, i)
 	if a.mindDo(md, err) {
 		md.selectOnly(id)
 		a.editMindText(md, id, "", false)
 	}
 }
 
-// mindAddParent puts a new topic between the chosen one and its parent.
+// mindAddParent puts a new topic between the chosen one and its parent, a task if the chosen one is.
 func (a *App) mindAddParent(md *mindDoc) {
 	m := md.m
 	n := m.Node(md.primary)
@@ -296,13 +291,13 @@ func (a *App) mindAddParent(md *mindDoc) {
 	var err error
 	if n.Parent == 0 {
 		pos := m.Pos(n)
-		id, err = m.Add(mind.Node{X: pos.X, Y: pos.Y, Layout: n.Layout}, 0, -1)
+		id, err = m.Add(mind.Node{X: pos.X, Y: pos.Y, Layout: n.Layout, Task: n.Task}, 0, -1)
 		if err == nil {
 			err = m.Move(n.ID, id, -1, 0, 0)
 		}
 	} else {
 		p := m.Node(n.Parent)
-		id, err = m.Add(mind.Node{Side: n.Side}, p.ID, slices.Index(p.Children, n.ID))
+		id, err = m.Add(mind.Node{Side: n.Side, Task: n.Task}, p.ID, slices.Index(p.Children, n.ID))
 		if err == nil {
 			err = m.Move(n.ID, id, -1, 0, 0)
 		}
@@ -1229,6 +1224,7 @@ func (a *App) mindMoreMenu(md *mindDoc) []menuItem {
 	u := &a.u
 	key := a.mindKeyHint
 	return []menuItem{
+		{label: u.t("Print…"), key: key("mind.print"), run: func() { a.printMind(md) }},
 		{label: u.t("Export as a picture…"), key: key("mind.export"), run: func() { a.exportMindPicture(md) }},
 		{label: u.t("Copy as an outline"), key: key("mind.copy-outline"), run: func() { a.mindCopyOutline(md) }},
 		{label: u.t("Show the file in its folder"), run: func() { a.host.Reveal(md.path) }},

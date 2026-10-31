@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "rules": [
+    "# One rule on each line, for example:",
+    "# CapsLock -> Esc",
+    "# Ctrl+Alt+T -> open \"wt.exe\"",
+    "# ;mail => me@example.com"
+  ]
+}

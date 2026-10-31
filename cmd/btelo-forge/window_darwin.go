@@ -34,7 +34,7 @@ func (h macWindow) Input() ui.Input {
 	in := ui.Input{X: raw.X, Y: raw.Y, Down: raw.Down, Wheel: raw.Wheel, Ctrl: raw.Ctrl, Shift: raw.Shift, Up: raw.Up, Typed: raw.Typed, Dropped: raw.Dropped,
 		Inactive: !h.w.Focused()}
 	for _, p := range raw.Pointer {
-		in.Pointer = append(in.Pointer, ui.Pointer{X: p.X, Y: p.Y, Right: p.Right, Down: p.Down, Double: p.Double})
+		in.Pointer = append(in.Pointer, ui.Pointer{X: p.X, Y: p.Y, Right: p.Right, Middle: p.Middle, Down: p.Down, Double: p.Double})
 	}
 	for _, k := range raw.Keys {
 		in.Keys = append(in.Keys, ui.Key{Code: k.VK, Ctrl: k.Ctrl, Shift: k.Shift, Alt: k.Alt})

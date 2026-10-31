@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/proc"
@@ -31,6 +32,8 @@ import (
 type Manager struct {
 	dir    string
 	client *http.Client
+	mu     sync.Mutex
+	active map[string]bool // the files being downloaded
 }
 
 // NewManager caches downloads under dir.
@@ -100,11 +103,11 @@ func (m *Manager) Prepare(ctx context.Context, e Engine, model Model, progress P
 		if e.URL == "" {
 			return "", "", &MissingEngine{Engine: e.Name.In("en"), Install: e.Install}
 		}
-		zipPath := cli + ".zip"
-		if err := m.download(ctx, e.URL, zipPath, e.Size, e.SHA256, func(f float64) { progress("engine", f) }); err != nil {
+		zipPath := filepath.Join(m.dir, "engine", e.ID+"-"+urlKey(e.URL), "engine.zip")
+		if err := m.Download(ctx, e.URL, zipPath, e.Size, e.SHA256, func(f float64) { progress("engine", f) }); err != nil {
 			return "", "", fmt.Errorf("downloading the speech engine: %w", err)
 		}
-		if err := unzip(zipPath, filepath.Dir(cli)); err != nil {
+		if err := unzip(zipPath, filepath.Join(m.dir, "engine", e.ID+"-"+urlKey(e.URL))); err != nil {
 			return "", "", fmt.Errorf("unpacking the speech engine: %w", err)
 		}
 		os.Remove(zipPath)
@@ -119,47 +122,113 @@ func (m *Manager) Prepare(ctx context.Context, e Engine, model Model, progress P
 	}
 	modelPath, ok = m.ModelPath(model)
 	if !ok {
-		if err := m.download(ctx, model.URL, modelPath, model.Size, model.SHA256, func(f float64) { progress("model", f) }); err != nil {
+		if err := m.Download(ctx, model.URL, modelPath, model.Size, model.SHA256, func(f float64) { progress("model", f) }); err != nil {
 			return "", "", fmt.Errorf("downloading the %s model: %w", model.Name.In("en"), err)
 		}
 	}
 	return cli, modelPath, nil
 }
 
-// download fetches url into path atomically, reporting progress against the expected size and checking the
-// SHA-256 checksum when one is given.
-func (m *Manager) download(ctx context.Context, url, path string, size int64, checksum string, progress func(float64)) error {
+// errDownloading means the same file is being downloaded already.
+var errDownloading = errors.New("this file is already being downloaded")
+
+// Download fetches url into path atomically, reporting progress against the expected size and checking the
+// SHA-256 checksum when one is given. What came before an interruption is kept in path.part and continued from
+// the next time, so a model of many gigabytes is not downloaded again from its start.
+func (m *Manager) Download(ctx context.Context, url, path string, size int64, checksum string, progress func(float64)) error {
+	m.mu.Lock()
+	if m.active[path] {
+		m.mu.Unlock()
+		return errDownloading
+	}
+	if m.active == nil {
+		m.active = map[string]bool{}
+	}
+	m.active[path] = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.active, path)
+		m.mu.Unlock()
+	}()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
+	}
+	part := path + ".part"
+	err := m.fetch(ctx, url, part, size, checksum, progress)
+	if errors.Is(err, errRestart) {
+		os.Remove(part)
+		err = m.fetch(ctx, url, part, size, checksum, progress)
+	}
+	if err != nil {
+		if errors.Is(err, errCorrupt) || errors.Is(err, errRestart) {
+			os.Remove(part)
+		}
+		return err
+	}
+	return os.Rename(part, path)
+}
+
+var (
+	errRestart = errors.New("the server cannot continue the download")
+	errCorrupt = errors.New("the downloaded file does not match its sha256 checksum")
+)
+
+// fetch appends what part lacks of url to part and checks it.
+func (m *Manager) fetch(ctx context.Context, url, part string, size int64, checksum string, progress func(float64)) error {
+	var have int64
+	if st, err := os.Stat(part); err == nil {
+		have = st.Size()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "btelo-forge/1.0")
+	if have > 0 {
+		req.Header.Set("Range", "bytes="+strconv.FormatInt(have, 10)+"-")
+	}
 	resp, err := m.client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	switch {
+	case resp.StatusCode == http.StatusRequestedRangeNotSatisfiable && have > 0:
+		return errRestart
+	case resp.StatusCode == http.StatusPartialContent && have > 0:
+	case resp.StatusCode == http.StatusOK:
+		have = 0 // the server sends the whole file, whether or not a part was asked for
+	default:
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
+	total := size
 	if resp.ContentLength > 0 {
-		size = resp.ContentLength
+		total = have + resp.ContentLength
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "part-*")
+	flags := os.O_WRONLY | os.O_CREATE
+	if have == 0 {
+		flags |= os.O_TRUNC
+	} else {
+		flags |= os.O_APPEND
+	}
+	tmp, err := os.OpenFile(part, flags, 0o644)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
 	var sum hash.Hash
 	var out io.Writer = tmp
 	if checksum != "" {
 		sum = sha256.New()
+		if have > 0 {
+			if err := hashFile(sum, part, have); err != nil {
+				tmp.Close()
+				return err
+			}
+		}
 		out = io.MultiWriter(tmp, sum)
 	}
-	var done int64
+	done := have
 	last := time.Time{}
 	buf := make([]byte, 256<<10)
 	for {
@@ -170,8 +239,8 @@ func (m *Manager) download(ctx context.Context, url, path string, size int64, ch
 				return err
 			}
 			done += int64(n)
-			if time.Since(last) > 200*time.Millisecond && size > 0 {
-				progress(min(float64(done)/float64(size), 1))
+			if time.Since(last) > 200*time.Millisecond && total > 0 {
+				progress(min(float64(done)/float64(total), 1))
 				last = time.Now()
 			}
 		}
@@ -186,13 +255,24 @@ func (m *Manager) download(ctx context.Context, url, path string, size int64, ch
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if resp.ContentLength > 0 && done != resp.ContentLength {
-		return fmt.Errorf("download incomplete: %d of %d bytes", done, resp.ContentLength)
+	if resp.ContentLength > 0 && done != total {
+		return fmt.Errorf("download incomplete: %d of %d bytes", done, total)
 	}
 	if sum != nil && hex.EncodeToString(sum.Sum(nil)) != checksum {
-		return errors.New("the downloaded file does not match its sha256 checksum")
+		return errCorrupt
 	}
-	return os.Rename(tmp.Name(), path)
+	return nil
+}
+
+// hashFile feeds the first n bytes of the file at path to h.
+func hashFile(h hash.Hash, path string, n int64) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(h, io.LimitReader(f, n))
+	return err
 }
 
 // unzip extracts an archive into dir, keeping its folders but dropping a top folder that holds everything, so the

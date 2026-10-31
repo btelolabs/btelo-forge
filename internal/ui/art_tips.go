@@ -125,13 +125,14 @@ func (a *App) removeTip(name string) {
 
 // drawTipButtons are the picture tips in the brush's options bar, from x: a click chooses one, a right-click offers
 // to remove it. It returns where the next control goes.
-func (a *App) drawTipButtons(x float32, r gfx.Rect) float32 {
+func (a *App) drawTipButtons(x float32, r *gfx.Rect) float32 {
 	u := &a.u
 	for _, name := range a.settings.Paint.Tips {
 		tip := a.tipShape(name)
 		if tip == nil {
 			continue
 		}
+		a.optRow(&x, r, u.px(30))
 		tr := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
 		if tr.Right() > r.Right() {
 			break

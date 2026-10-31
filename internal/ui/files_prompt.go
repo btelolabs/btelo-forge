@@ -594,11 +594,8 @@ func (a *App) searchTick(p *filesPane) {
 
 // searching reports whether a search is running whose results arrive without telling.
 func (a *App) searching() bool {
-	for _, d := range a.docs {
-		if d.files == nil {
-			continue
-		}
-		for _, p := range d.files.panes {
+	for _, fd := range a.filesDocs() {
+		for _, p := range fd.panes {
 			if s := p.search; s != nil && (s.running || s.finding || !s.grep && !s.index.Done()) {
 				return true
 			}
@@ -695,7 +692,7 @@ func (a *App) drawSearch(fd *filesDoc, i int, p *filesPane, head, body gfx.Rect,
 	for row := first; row < n && float32(row-first)*rowH < body.H; row++ {
 		r := rectAt(body.X, body.Y+float32(row-first)*rowH, body.W, rowH)
 		rid := fmt.Sprintf("%s/row/%d", id, row)
-		if u.hover(rid, r) && moved && fd.at == i {
+		if u.hover(rid, r) && moved && fd.at == i && fd.pick == nil {
 			s.pick = row
 		}
 		if row == s.pick {

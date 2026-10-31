@@ -178,10 +178,10 @@ func CheckEngines(engines []Engine) error {
 			return fmt.Errorf("%s: give url or commands / paths, not both", where)
 		case e.URL != "" && e.Executable == "":
 			return fmt.Errorf("%s: executable (the program inside the zip) is missing", where)
-		case e.URL != "" && !strings.HasSuffix(strings.ToLower(urlPath(e.URL)), ".zip"):
+		case e.URL != "" && !strings.HasSuffix(strings.ToLower(urlPath(e.URL)), ".zip") && !strings.HasSuffix(strings.ToLower(urlPath(e.URL)), ".whl"):
 			return fmt.Errorf("%s: url must point to a .zip archive", where)
-		case e.Executable != "" && (strings.ContainsAny(e.Executable, `/\`) || e.Executable == "." || e.Executable == ".."):
-			return fmt.Errorf("%s: executable must be a file name", where)
+		case e.Executable != "" && !insideArchive(e.Executable):
+			return fmt.Errorf("%s: executable must be a file name, or a path with forward slashes inside the archive", where)
 		case e.Size < 0:
 			return fmt.Errorf("%s: size must not be negative", where)
 		case e.SHA256 != "" && !sha256Hex.MatchString(e.SHA256):
@@ -304,8 +304,8 @@ const FormatGuide = `Subtitle models configuration (JSON)
 
 engines  whisper.cpp command-line programs; only those whose os and arch match this computer are offered
          (os: windows, darwin; arch: amd64, arm64; leave out for any).
-         Downloaded: {"id", "name", "note", "url": a .zip archive, "size": bytes (for progress), "sha256": optional
-         checksum of the archive, "executable": the program's file name at the top of the archive (a folder holding
+         Downloaded: {"id", "name", "note", "url": a .zip archive (or a Python wheel, which is one), "size": bytes (for progress), "sha256": optional
+         checksum of the archive, "executable": the program's file name at the top of the archive, or its path there with forward slashes (a folder holding
          everything is looked inside)}. Each url gets its own folder, so a new version downloads anew.
          Installed: {"id", "name", "note", "commands": names looked up on PATH, "paths": full paths to try,
          "install": the command that installs it, shown when it is missing}.
@@ -320,3 +320,16 @@ arguments the command line of the engine. Placeholders: {model} model file, {aud
 progress  regular expression matched against the engine's error output; its one group is the percentage done.
 
 Names and notes are text or {"en": ..., "zh": ...}.`
+
+// insideArchive reports whether a path of forward slashes stays within the folder it is taken from.
+func insideArchive(name string) bool {
+	if strings.Contains(name, `\`) {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}

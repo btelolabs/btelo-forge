@@ -10,6 +10,7 @@ import (
 
 	"github.com/btelolabs/btelo-forge/internal/media"
 	"github.com/btelolabs/btelo-forge/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/thumb"
 )
 
 // An edit is remembered by the video it starts from, so opening that video again brings it back. Saving it as a
@@ -19,10 +20,10 @@ import (
 // isEditFile reports whether path is an edit file.
 func isEditFile(path string) bool { return strings.EqualFold(filepath.Ext(path), project.EditExt) }
 
-// editFilePath is where an edit of source is saved the first time: in the export folder, named after the video,
+// editFilePath is where an edit of source is saved the first time: among the creative work, named after the video,
 // numbered when that name is taken.
 func (a *App) editFilePath(source string) (string, error) {
-	dir, err := a.uploadDir()
+	dir, err := a.categoryDir(categoryCreative)
 	if err != nil {
 		return "", err
 	}
@@ -51,11 +52,27 @@ func (a *App) saveEditFile() (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
-	if err := project.WriteFile(path, a.p); err != nil {
+	if err := project.WriteFile(path, a.p, editPicture(a.doc, path)); err != nil {
 		return "", err
 	}
 	a.doc.file = path
 	return path, nil
+}
+
+// editPicture is what the edit's file ends with: the frame on the screen, already made, or else, before one is shown,
+// what the file at old has.
+func editPicture(d *doc, old string) []byte {
+	if img := d.shown.img; img != nil {
+		end, err := thumb.Encode(img, thumb.Meta{W: d.p.Canvas.Width, H: d.p.Canvas.Height, Duration: d.p.Duration()})
+		if err == nil {
+			return end
+		}
+	}
+	end, err := thumb.Raw(old)
+	if err != nil {
+		return nil
+	}
+	return end
 }
 
 // saveEditCommand saves the edit as a file and says where.
@@ -78,6 +95,9 @@ func (a *App) openEditFile(path string) {
 			a.switchTab(i)
 			return
 		}
+	}
+	if a.showRestoring(path) {
+		return
 	}
 	if !a.tools.ready {
 		a.tools.waiting = append(a.tools.waiting, path)

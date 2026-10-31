@@ -107,3 +107,11 @@ func BenchmarkStyledLayerInAView(b *testing.B) {
 		d.compositeInto(dst, d.Root, r, 0)
 	}
 }
+
+func BenchmarkReducedForAFilePicture(b *testing.B) {
+	d := viewDoc()
+	b.ResetTimer()
+	for b.Loop() {
+		d.Reduced(512)
+	}
+}

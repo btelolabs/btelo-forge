@@ -4,6 +4,7 @@ package mac
 type PointerEvent struct {
 	X, Y   float32
 	Right  bool
+	Middle bool
 	Down   bool
 	Double bool
 }

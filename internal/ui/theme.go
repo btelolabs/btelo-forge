@@ -61,6 +61,7 @@ const (
 	icZoomOut  = "\ue900"
 	icCheck    = "\ue5ca"
 	icClose    = "\ue5cd"
+	icPin      = "\uf10d"
 	icStop     = "\ue047"
 	icExport   = "\uf09b"
 	icCopy     = "\ue14d"
@@ -74,8 +75,6 @@ const (
 	icSubtitle = "\ue048"
 	icVoice    = "\ue91f"
 	icInfo     = "\ue88e"
-	icPanelOut = "\ueac9"
-	icPanelIn  = "\ueac3"
 	icRecord   = "\ue061"
 	icCamera   = "\ue412"
 	// icFullscreen and icFullscreenExit enter and leave player mode.

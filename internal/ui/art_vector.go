@@ -658,13 +658,14 @@ func (a *App) drawPenOptions(ad *artDoc, r gfx.Rect, hint string) {
 		p.PenFill, done = on, true
 	}
 	x += u.px(78)
-	x = a.drawCombineButtons(ad, x, r)
+	x = a.drawCombineButtons(ad, x, &r)
 	var d bool
+	a.optRow(&x, &r, u.px(190))
 	x, d = a.labelledSlider("art/pen/width", x, r.Y, r.H, u.t("Stroke width"), &p.ShapeWidth, 1, 100, func(v float64) string { return fmt.Sprintf("%.0f px", v) })
 	p.ShapeWidth = math.Round(p.ShapeWidth)
 	done = done || d
 	if x+u.px(200) < r.Right() {
-		u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H}, hint, colDim, 0)
+		a.optHint(x, r, hint)
 	}
 	if done {
 		a.saveSettings()
@@ -677,7 +678,7 @@ func (a *App) drawNodeOptions(ad *artDoc, r gfx.Rect) {
 	u := &a.u
 	n, ok := ad.editedVector()
 	if !ok {
-		u.label(u.face(12), r, u.t("Click a shape to choose it, double-click it to edit its nodes, Esc to come out; the pen and the shape tool make them"), colDim, 0)
+		a.optHint(r.X, r, u.t("Click a shape to choose it, double-click it to edit its nodes, Esc to come out; the pen and the shape tool make them"))
 		return
 	}
 	ne := ad.nodeState()
@@ -711,14 +712,15 @@ func (a *App) drawNodeOptions(ad *artDoc, r gfx.Rect) {
 	}
 	x += u.px(40)
 	if len(ad.chosenVectors()) >= 2 {
-		x = a.drawBoolButtons(ad, x, r)
+		x = a.drawBoolButtons(ad, x, &r)
 	} else {
-		x = a.drawShapeOps(ad, n, x, r)
+		x = a.drawShapeOps(ad, n, x, &r)
 	}
 	if n.Vector == nil {
-		u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H}, u.t("Editing the vector mask: the layer shows inside its outline"), colDim, 0)
+		a.optHint(x, r, u.t("Editing the vector mask: the layer shows inside its outline"))
 		return
 	}
+	a.optRow(&x, &r, u.px(180))
 	a.drawVectorProperties(ad, n, gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H})
 }
 
@@ -741,7 +743,7 @@ var shapeOpBools = []paint.BoolOp{paint.BoolAdd, paint.BoolSubtract, paint.BoolI
 
 // drawShapeOps are the buttons that choose how the shape of the chosen nodes combines with the shapes before it,
 // and the one that expands the shapes into one outline; it returns where the next control goes.
-func (a *App) drawShapeOps(ad *artDoc, n *paint.Node, x float32, r gfx.Rect) float32 {
+func (a *App) drawShapeOps(ad *artDoc, n *paint.Node, x float32, r *gfx.Rect) float32 {
 	u := &a.u
 	v := n.EditedVector()
 	if !v.Compound() {
@@ -751,6 +753,7 @@ func (a *App) drawShapeOps(ad *artDoc, n *paint.Node, x float32, r gfx.Rect) flo
 	on := shape > 0 // the first shape combines with nothing
 	for i, b := range shapeOpBools {
 		op := paint.ShapeOp(i + 1)
+		a.optRow(&x, r, u.px(32))
 		br := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
 		hint := u.tf("%s: how the chosen nodes' shape combines with the shapes under it", u.tc("boolean", boolNames[b]))
 		pressed := u.iconButton(fmt.Sprintf("art/shapeop/%d", i), br, "", hint, on && v.ShapeOpOf(shape) == op, on)
@@ -762,6 +765,7 @@ func (a *App) drawShapeOps(ad *artDoc, n *paint.Node, x float32, r gfx.Rect) flo
 	}
 	label := u.t("Merge shape components")
 	w := u.buttonWidth("", label)
+	a.optRow(&x, r, w)
 	if x+w < r.Right() && u.button("art/shape/expand", gfx.Rect{X: x, Y: r.Y, W: w, H: r.H}, "", label, ghost, true) {
 		ad.nodeState().sel = nil
 		a.artRun(ad, func() error { return ad.d.ExpandShapes(n.ID) })
@@ -896,7 +900,11 @@ func (a *App) drawVectorProperties(ad *artDoc, n *paint.Node, r gfx.Rect) {
 		}
 		x += u.px(30)
 	}
-	if v.Stroke.Paint.Kind == paint.PaintNone || x+u.px(200) > r.Right() {
+	if v.Stroke.Paint.Kind == paint.PaintNone {
+		return
+	}
+	a.optRow(&x, &r, u.px(200))
+	if x+u.px(200) > r.Right() {
 		return
 	}
 	// The width drags live and is recorded as one step when it is let go.
@@ -937,6 +945,7 @@ func (a *App) drawVectorProperties(ad *artDoc, n *paint.Node, r gfx.Rect) {
 		}},
 	} {
 		w := u.px(108)
+		a.optRow(&x, &r, w)
 		if x+w > r.Right() {
 			break
 		}
@@ -1043,7 +1052,7 @@ func drawBoolGlyph(u *ctx, r gfx.Rect, op paint.BoolOp, enabled bool) {
 
 // drawCombineButtons are the buttons combining the chosen vector layers, in the options of the tools that work on
 // vectors, while two or more are chosen; it returns where the next control goes.
-func (a *App) drawCombineButtons(ad *artDoc, x float32, r gfx.Rect) float32 {
+func (a *App) drawCombineButtons(ad *artDoc, x float32, r *gfx.Rect) float32 {
 	if len(ad.chosenVectors()) < 2 {
 		return x
 	}
@@ -1052,10 +1061,11 @@ func (a *App) drawCombineButtons(ad *artDoc, x float32, r gfx.Rect) float32 {
 
 // drawBoolButtons are the buttons combining the chosen vector layers into one, enabled when two or more are
 // chosen; it returns where the next control goes.
-func (a *App) drawBoolButtons(ad *artDoc, x float32, r gfx.Rect) float32 {
+func (a *App) drawBoolButtons(ad *artDoc, x float32, r *gfx.Rect) float32 {
 	u := &a.u
 	on := len(ad.chosenVectors()) >= 2
 	for i, name := range combineNames {
+		a.optRow(&x, r, u.px(32))
 		br := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
 		hint := u.tf("%s: combine the chosen vector layers into one, each staying a shape you can edit (Shift+click layers to choose more)", u.t(name))
 		pressed := u.iconButton(fmt.Sprintf("art/bool/%d", i), br, "", hint, false, on)

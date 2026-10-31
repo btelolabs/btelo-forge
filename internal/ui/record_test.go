@@ -23,7 +23,7 @@ func recordingHarness(t *testing.T) *harness {
 		t.Skip(err)
 	}
 	x := newHarness(t)
-	x.a.settings.ExportDir = x.mediaDir()
+	x.a.settings.ResourceDir = x.mediaDir()
 	// The app checks what it can record once ffmpeg is ready.
 	x.pump(time.Minute, func() bool {
 		_, checking := x.a.recordBlocker()
@@ -129,8 +129,9 @@ func TestRecordFromTheWindowAndEditIt(t *testing.T) {
 		t.Errorf("window while recording: minimized %v, left out %v", h.minimized, h.excluded)
 	}
 	path := a.rec.rec.Path()
-	if filepath.Dir(path) != a.settings.ExportDir || !strings.HasSuffix(path, ".mp4") {
-		t.Errorf("recording into %s, want a new MP4 in %s", path, a.settings.ExportDir)
+	tools, _ := a.categoryDir(categoryTools)
+	if filepath.Dir(path) != tools || !strings.HasSuffix(path, ".mp4") {
+		t.Errorf("recording into %s, want a new MP4 in %s", path, tools)
 	}
 	// Minimized, the window draws nothing and the main loop calls Tick instead.
 	h.minimized = true
@@ -215,7 +216,7 @@ func TestRecordingIntoAnEditOpensANewTab(t *testing.T) {
 func TestRecordingNameIsNew(t *testing.T) {
 	x := newHarness(t)
 	a := x.a
-	a.settings.ExportDir = x.mediaDir()
+	a.settings.ResourceDir = x.mediaDir()
 	at := time.Date(2026, 10, 27, 14, 3, 5, 0, time.Local)
 	first, err := a.recordingPath(at)
 	if err != nil {
@@ -224,6 +225,7 @@ func TestRecordingNameIsNew(t *testing.T) {
 	if filepath.Base(first) != "Screen recording 2026-10-27 14.03.05.mp4" {
 		t.Errorf("first name %s", filepath.Base(first))
 	}
+	os.MkdirAll(filepath.Dir(first), 0o755)
 	os.WriteFile(first, nil, 0o644)
 	second, _ := a.recordingPath(at)
 	if filepath.Base(second) != "Screen recording 2026-10-27 14.03.05 (2).mp4" {

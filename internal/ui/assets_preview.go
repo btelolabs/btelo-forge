@@ -246,18 +246,11 @@ func canvasPreview(path string) (*image.RGBA, error) {
 	if err != nil {
 		return nil, err
 	}
-	ext := d.Extent()
-	if ext.Empty() {
+	dst := d.Reduced(2048)
+	if dst == nil {
 		return nil, errEmptyCanvas
 	}
-	l := 0
-	for max(ext.Dx(), ext.Dy())>>l > 2048 {
-		l++
-	}
-	r := image.Rect(ext.Min.X>>l, ext.Min.Y>>l, (ext.Max.X+(1<<l)-1)>>l, (ext.Max.Y+(1<<l)-1)>>l)
-	dst := image.NewRGBA(r)
-	d.Render(dst, r, l)
-	dst.Rect = dst.Rect.Sub(r.Min)
+	dst.Rect = dst.Rect.Sub(dst.Rect.Min)
 	return dst, nil
 }
 

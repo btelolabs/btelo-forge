@@ -302,7 +302,7 @@ func TestConfigErrorsArePrecise(t *testing.T) {
 		strings.Replace(base, `"family": "qwen3_tts",`, ``, 1):                                                                     "family and task",
 		strings.Replace(base, `"id": "steady"`, `"id": "warm"`, 1):                                                                 "voices[1] (warm)",
 		strings.Replace(base, `"id": "breeze-q6_k"`, `"id": "breeze-q4_k"`, 1):                                                     "models[4] (breeze-q4_k)",
-		strings.Replace(base, `"executable": "breeze-server.exe"`, `"executable": "a/b.exe"`, 1):                                   "file name",
+		strings.Replace(base, `"executable": "breeze-server.exe"`, `"executable": "../b.exe"`, 1):                                  "file name",
 		strings.Replace(base, `"sha256": "d1741e16154f99ef96382a36d5e89ccf12fd4fda6ec7dcdcdbd122d82f525c11"`, `"sha256": "x"`, 1):  "sha256",
 		strings.Replace(base, `"instruction": "A warm, gentle young woman with a clear, calm delivery."`, `"instruction": " "`, 1): "instruction",
 		strings.Replace(base, `"id": "warm",`, `"id": "warm", "guidance": 9,`, 1):                                                  "guidance",

@@ -17,19 +17,21 @@ const (
 	icBlurTool    = "\ue3a5"
 	icSharpenTool = "\ue3c8"
 	icSmudge      = "\ue913"
+	icLiquify     = "\ue176"
 )
 
 // toneRangeNames and spongeModeNames name dodge's and burn's ranges, in paint.ToneRange's order, and the sponge's
 // modes.
 var (
-	toneRangeNames  = msgs("Shadows", "Midtones", "Highlights")
-	spongeModeNames = msgs("Desaturate", "Saturate")
+	toneRangeNames   = msgs("Shadows", "Midtones", "Highlights")
+	spongeModeNames  = msgs("Desaturate", "Saturate")
+	liquifyModeNames = msgs("Forward", "Pucker", "Bloat")
 )
 
 // retouching reports whether the chosen tool is a retouching one.
 func (a *App) retouching() bool {
 	switch a.artTool {
-	case toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge:
+	case toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge, toolLiquify:
 		return true
 	}
 	return false
@@ -50,6 +52,8 @@ func (a *App) retouch() paint.Retouch {
 		rt.Kind, rt.Strength = paint.RetouchBlur, p.FocusStrength
 	case toolSharpen:
 		rt.Kind, rt.Strength = paint.RetouchSharpen, p.FocusStrength
+	case toolLiquify:
+		rt.Kind, rt.Strength, rt.Liquify = paint.RetouchLiquify, p.LiquifyStrength, paint.LiquifyMode(min(max(p.LiquifyMode, 0), 2))
 	default:
 		rt.Kind, rt.Strength = paint.RetouchSmudge, p.SmudgeStrength
 	}
@@ -68,8 +72,10 @@ func (a *App) drawRetouchOptions(r gfx.Rect) {
 	x, done = a.labelledSlider("art/retouch/size", x, r.Y, r.H, u.t("Brush size"), &b.Size, 1, 500, px)
 	b.Size = float64(int(b.Size + 0.5))
 	brushDone := done
+	a.optRow(&x, &r, u.px(190))
 	x, done = a.labelledSlider("art/retouch/hardness", x, r.Y, r.H, u.t("Hardness"), &b.Hardness, 0, 1, percent)
 	brushDone = brushDone || done
+	a.optRow(&x, &r, u.px(190))
 	switch a.artTool {
 	case toolDodge, toolBurn:
 		lw := u.face(12).Measure(u.t("Range")) + u.px(6)
@@ -80,6 +86,7 @@ func (a *App) drawRetouchOptions(r gfx.Rect) {
 			a.saveSettings()
 		})
 		x += u.px(130)
+		a.optRow(&x, &r, u.px(190))
 		if x+u.px(190) < r.Right() {
 			_, done = a.labelledSlider("art/retouch/exposure", x, r.Y, r.H, u.t("Exposure"), &p.Exposure, 0.01, 1, percent)
 			saved = saved || done
@@ -97,6 +104,7 @@ func (a *App) drawRetouchOptions(r gfx.Rect) {
 			a.saveSettings()
 		})
 		x += u.px(130)
+		a.optRow(&x, &r, u.px(190))
 		if x+u.px(190) < r.Right() {
 			_, done = a.labelledSlider("art/retouch/flow", x, r.Y, r.H, u.t("Flow"), &p.SpongeFlow, 0.01, 1, percent)
 			saved = saved || done
@@ -106,6 +114,14 @@ func (a *App) drawRetouchOptions(r gfx.Rect) {
 		saved = saved || done
 	case toolSmudge:
 		_, done = a.labelledSlider("art/retouch/smudge", x, r.Y, r.H, u.t("Strength"), &p.SmudgeStrength, 0.01, 1, percent)
+		saved = saved || done
+	case toolLiquify:
+		a.dropdown("art/retouch/liquify", gfx.Rect{X: x, Y: r.Y, W: u.px(120), H: r.H}, u.ts(liquifyModeNames), min(max(p.LiquifyMode, 0), 2), nil, func(i int) {
+			p.LiquifyMode = i
+			a.saveSettings()
+		})
+		x += u.px(132)
+		_, done = a.labelledSlider("art/retouch/liquify-strength", x, r.Y, r.H, u.t("Strength"), &p.LiquifyStrength, 0.01, 1, percent)
 		saved = saved || done
 	}
 	if brushDone {

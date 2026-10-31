@@ -23,7 +23,8 @@ var ErrNotACanvas = errors.New("not a canvas file")
 // after another in <name>.tiles (premultiplied RGBA, or 8-bit for masks), in the order doc.json lists their keys;
 // all losslessly compressed. Versions 1 and 2 had a picture of a fixed size, whose layers were rectangles in
 // layer-<id>.rgba, masks in mask-<id>.a and the selection, the picture's size, in selection.a (version 1 had no
-// masks and a rectangular selection); they are still read, their size becoming the frame. Version 4 added the
+// masks and a rectangular selection); they are still read, their size becoming the frame. The zip's comment, which
+// ends the file, is the small picture (internal/thumb). Version 4 added the
 // artboards, version 5 adjustment layers, version 6 vector masks and made the artboards groups (versions 4 and 5
 // listed them apart from the layers; each becomes a group of the top-level layers lying wholly on it); older files
 // are read the same way, without what they lack.
@@ -59,25 +60,26 @@ type filePlane struct {
 }
 
 type fileNode struct {
-	ID        int         `json:"id"`
-	Name      string      `json:"name"`
-	Visible   bool        `json:"visible"`
-	Opacity   float64     `json:"opacity"`
-	Blend     Blend       `json:"blend,omitempty"`
-	LockAlpha bool        `json:"lockAlpha,omitempty"`
-	Pixels    *filePlane  `json:"pixels,omitempty"`
-	Vector    *Vector     `json:"vector,omitempty"`
-	Adjust    *Adjustment `json:"adjust,omitempty"`
-	Style     *LayerStyle `json:"style,omitempty"`
-	MaskTiles *filePlane  `json:"maskTiles,omitempty"`
-	MaskOff   bool        `json:"maskOff,omitempty"`
-	Text      *Text       `json:"text,omitempty"` // a text layer's words; its pixels are saved as for any layer
-	Clip      *Vector     `json:"clip,omitempty"`
-	Board     *fileFrame  `json:"board,omitempty"`
-	Smart     *fileSmart  `json:"smart,omitempty"`
-	Group     bool        `json:"group,omitempty"`
-	Open      bool        `json:"open,omitempty"`
-	Children  []fileNode  `json:"children,omitempty"`
+	ID        int          `json:"id"`
+	Name      string       `json:"name"`
+	Visible   bool         `json:"visible"`
+	Opacity   float64      `json:"opacity"`
+	Blend     Blend        `json:"blend,omitempty"`
+	LockAlpha bool         `json:"lockAlpha,omitempty"`
+	Pixels    *filePlane   `json:"pixels,omitempty"`
+	Vector    *Vector      `json:"vector,omitempty"`
+	Adjust    *Adjustment  `json:"adjust,omitempty"`
+	Style     *LayerStyle  `json:"style,omitempty"`
+	MaskTiles *filePlane   `json:"maskTiles,omitempty"`
+	MaskOff   bool         `json:"maskOff,omitempty"`
+	Text      *Text        `json:"text,omitempty"` // a text layer's words; its pixels are saved as for any layer
+	Clip      *Vector      `json:"clip,omitempty"`
+	Board     *fileFrame   `json:"board,omitempty"`
+	Smart     *fileSmart   `json:"smart,omitempty"`
+	Filters   *FilterStack `json:"filters,omitempty"`
+	Group     bool         `json:"group,omitempty"`
+	Open      bool         `json:"open,omitempty"`
+	Children  []fileNode   `json:"children,omitempty"`
 
 	// Versions 1 and 2.
 	Rect     *[4]int `json:"rect,omitempty"` // a layer's pixels; version 1 had none: the whole picture
@@ -115,6 +117,8 @@ func rectFrom(a *[4]int) image.Rectangle { return image.Rect(a[0], a[1], a[2], a
 type Snapshot struct {
 	doc    fileDoc
 	planes map[string]plane
+
+	Thumb []byte // the end of the file, from thumb.Encode, if it has one
 }
 
 // planeOf notes a plane for saving under name and describes it, its tile keys in a fixed order.
@@ -139,7 +143,7 @@ func (d *Doc) Snapshot() Snapshot {
 	var conv func(n *Node) fileNode
 	conv = func(n *Node) fileNode {
 		f := fileNode{ID: n.ID, Name: n.Name, Visible: n.Visible, Opacity: n.Opacity, Blend: n.Blend, LockAlpha: n.LockAlpha,
-			Group: n.IsGroup(), Open: n.Open, Text: n.Text, MaskOff: n.MaskOff, Style: n.Style, Clip: n.Clip}
+			Group: n.IsGroup(), Open: n.Open, Text: n.Text, MaskOff: n.MaskOff, Style: n.Style, Clip: n.Clip, Filters: n.Filters}
 		if s := n.Smart; s != nil {
 			f.Smart = &fileSmart{ID: s.ID, Offset: [2]int{s.Offset.X, s.Offset.Y}, Version: s.Version}
 		}
@@ -207,6 +211,9 @@ func (s Snapshot) Save(w io.Writer) error {
 				return err
 			}
 		}
+	}
+	if err := z.SetComment(string(s.Thumb)); err != nil {
+		return err
 	}
 	return z.Close()
 }
@@ -300,7 +307,7 @@ func Load(r io.ReaderAt, size int64) (*Doc, error) {
 	var conv func(f fileNode) (*Node, error)
 	conv = func(f fileNode) (*Node, error) {
 		if seen[f.ID] || f.ID <= 0 || f.Blend < 0 || f.Blend >= blendCount || !f.Group && f.Pixels == nil && f.Vector == nil && f.Adjust == nil ||
-			f.Vector != nil && !f.Vector.valid() || f.Adjust != nil && !f.Adjust.valid() || f.Style != nil && !f.Style.valid() ||
+			f.Vector != nil && !f.Vector.valid() || f.Adjust != nil && !f.Adjust.valid() || f.Style != nil && !f.Style.valid() || !f.Filters.valid() ||
 			f.Clip != nil && !f.Clip.valid() || f.Board != nil && !f.Group ||
 			f.Smart != nil && (!f.Group || f.Board != nil || !validLinkID(strings.ToUpper(f.Smart.ID)) || abs(f.Smart.Offset[0]) > maxTileReach*TileSize || abs(f.Smart.Offset[1]) > maxTileReach*TileSize) {
 			return nil, fmt.Errorf("%w: layer %d", ErrNotACanvas, f.ID)
@@ -309,6 +316,9 @@ func Load(r io.ReaderAt, size int64) (*Doc, error) {
 		d.nextID = max(d.nextID, f.ID)
 		n := &Node{ID: f.ID, Name: f.Name, Visible: f.Visible, Opacity: min(max(f.Opacity, 0), 1), Blend: f.Blend,
 			LockAlpha: f.LockAlpha, Open: f.Open, MaskOff: f.MaskOff}
+		if f.Smart != nil {
+			n.Filters = f.Filters
+		}
 		if !f.Group && f.Adjust == nil && !f.Style.empty() {
 			n.Style = f.Style
 		}

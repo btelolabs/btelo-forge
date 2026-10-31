@@ -11,12 +11,12 @@ import (
 
 func TestEditFilesSaveAndOpenAgain(t *testing.T) {
 	x := newHarness(t)
-	x.a.settings.ExportDir = filepath.Join(x.dir, "out")
+	x.a.settings.ResourceDir = filepath.Join(x.dir, "out")
 	x.open(x.fixture())
 	x.a.split()
 	x.key('S', true)
 	path := x.a.doc.file
-	if filepath.Dir(path) != x.a.settings.ExportDir || filepath.Ext(path) != project.EditExt {
+	if filepath.Dir(path) != filepath.Join(x.a.settings.ResourceDir, "Creative") || filepath.Ext(path) != project.EditExt {
 		t.Fatalf("saved to %q", path)
 	}
 	// A second save goes to the same file, not a numbered copy.

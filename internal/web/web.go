@@ -191,7 +191,7 @@ var page = template.Must(template.New("page").Parse(`<!doctype html>
 :root{color-scheme:dark;--bg:#0f1112;--panel:#171a1c;--line:#2b3034;--text:#eceff0;--dim:#9ba3a8;--accent:#1fbf75}
 *{box-sizing:border-box}html,button,input,a{touch-action:manipulation}body{-webkit-text-size-adjust:100%;margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
 header{display:flex;align-items:center;justify-content:space-between;padding:18px 16px;border-bottom:1px solid var(--line)}
-h1{font-size:18px;margin:0}.brand{display:flex;align-items:center;gap:10px;min-width:0}.brand img{width:32px;height:32px;border-radius:18%;flex:none}
+h1{font-size:18px;margin:0}.brand{display:flex;align-items:center;gap:10px;min-width:0}.brand img{width:32px;height:32px;flex:none}
 button{background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
 .refresh.flash{animation:flash .6s}@keyframes flash{from{background:var(--accent);border-color:var(--accent)}to{background:none}}
 main{padding:12px 16px;max-width:720px;margin:0 auto}.item{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}

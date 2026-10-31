@@ -88,12 +88,14 @@ type paintSettings struct {
 	ShapeSides  int     `json:"shapeSides"` // a polygon's or star's points
 	ShapeInner  float64 `json:"shapeInner"` // a star's inner radius, as a share of its outer
 
-	ToneRange      int     `json:"toneRange"` // dodge's and burn's, paint.ToneRange
-	Exposure       float64 `json:"exposure"`  // dodge's and burn's strength
-	SpongeSaturate bool    `json:"spongeSaturate"`
-	SpongeFlow     float64 `json:"spongeFlow"`
-	FocusStrength  float64 `json:"focusStrength"` // blur's and sharpen's
-	SmudgeStrength float64 `json:"smudgeStrength"`
+	ToneRange       int     `json:"toneRange"` // dodge's and burn's, paint.ToneRange
+	Exposure        float64 `json:"exposure"`  // dodge's and burn's strength
+	SpongeSaturate  bool    `json:"spongeSaturate"`
+	SpongeFlow      float64 `json:"spongeFlow"`
+	FocusStrength   float64 `json:"focusStrength"` // blur's and sharpen's
+	SmudgeStrength  float64 `json:"smudgeStrength"`
+	LiquifyMode     int     `json:"liquifyMode"` // paint.LiquifyMode
+	LiquifyStrength float64 `json:"liquifyStrength"`
 
 	TextSize  float64 `json:"textSize"`
 	TextBold  bool    `json:"textBold"`
@@ -106,7 +108,7 @@ func defaultPaintSettings() paintSettings {
 		Round: b.Round, Spacing: b.Spacing, Tip: int(b.Tip), Color: hexColor(b.Color), Background: "#ffffff",
 		WandTolerance: 32, WandContiguous: true, FillOpacity: 1, FillTolerance: 32, FillContiguous: true,
 		GradientOpacity: 1, GradientDither: true, CloneAligned: true, ShapeFill: true, ShapeWidth: 3, ShapeSides: 5, ShapeInner: 0.5, TextSize: 48,
-		ToneRange: int(paint.RangeMidtones), Exposure: 0.5, SpongeFlow: 0.5, FocusStrength: 0.5, SmudgeStrength: 0.5}
+		ToneRange: int(paint.RangeMidtones), Exposure: 0.5, SpongeFlow: 0.5, FocusStrength: 0.5, SmudgeStrength: 0.5, LiquifyStrength: 0.8}
 }
 
 func (p paintSettings) brush() paint.Brush {

@@ -4,6 +4,7 @@ import (
 	"image"
 	"os"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -241,5 +242,128 @@ func TestOverlayTakesTheKeyboard(t *testing.T) {
 	pump(main, 200*time.Millisecond)
 	if front() != main.Handle {
 		t.Errorf("the keyboard did not go back to the main window: %#x in front", front())
+	}
+}
+
+// TestDrawingStaysBehindItsPanel opens the windows of drawing on the screen as the app does: the picture, which
+// never takes the focus, then the panel, which takes the keyboard. The panel and any window opened after the picture
+// must stay in front of it, and the picture must never be activated, which would bring it in front of them. It
+// shows windows, so it runs only when FORGE_OVERLAY_TEST is set.
+func TestDrawingStaysBehindItsPanel(t *testing.T) {
+	if os.Getenv("FORGE_OVERLAY_TEST") == "" {
+		t.Skip("set FORGE_OVERLAY_TEST to let the test show windows")
+	}
+	EnableDPI()
+	main, err := Open("overlay test", 200, 120, Foreground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer main.Close()
+	area := image.Rect(100, 100, 400, 300)
+	pix := make([]byte, area.Dx()*area.Dy()*4)
+	for i := 3; i < len(pix); i += 4 {
+		pix[i] = 1 // the floor that catches the mouse
+	}
+	pic, err := OpenOverlay(OverlayOptions{Bounds: area})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pic.Close()
+	panel, err := OpenOverlay(OverlayOptions{Bounds: area, Excluded: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer panel.Close()
+	bar, err := OpenOverlay(OverlayOptions{Bounds: image.Rect(120, 120, 200, 160), Excluded: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bar.Close()
+	for _, w := range []*Window{pic, panel, bar} {
+		if err := w.PresentLayered(pix, w.Bounds().Dx(), w.Bounds().Dy(), image.Rectangle{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	panel.TakeKeyboard(true)
+	pump(main, 200*time.Millisecond)
+	if front, _, _ := getForeground.Call(); front != panel.Handle {
+		t.Errorf("the panel does not have the keyboard")
+	}
+	if ex, _, _ := getWindowLong.Call(pic.Handle, gwlExStyle); ex&exNoActivate == 0 {
+		t.Error("the picture can be activated, which brings it in front of the panel")
+	}
+	// Z order, front to back: the panel and the bar come before the picture.
+	getWindow := user32.NewProc("GetWindow")
+	const next = 2 // GW_HWNDNEXT
+	place := map[uintptr]int{}
+	h, _, _ := getWindow.Call(panel.Handle, 0) // GW_HWNDFIRST
+	for i := 0; h != 0; i++ {
+		place[h] = i
+		h, _, _ = getWindow.Call(h, next)
+	}
+	if place[panel.Handle] > place[pic.Handle] || place[bar.Handle] > place[pic.Handle] {
+		t.Errorf("front to back: panel %d, bar %d, picture %d", place[panel.Handle], place[bar.Handle], place[pic.Handle])
+	}
+	// The mouse goes to the panel; should the picture come in front all the same, Raise puts that right. Neither
+	// check moves the mouse: Windows is asked which window a point belongs to.
+	windowAt := func(x, y int) uintptr {
+		h, _, _ := user32.NewProc("WindowFromPoint").Call(uintptr(uint32(x)) | uintptr(uint32(y))<<32)
+		return h
+	}
+	if h := windowAt(300, 250); h != panel.Handle {
+		t.Errorf("a point on the panel belongs to %x, the panel is %x", h, panel.Handle)
+	}
+	const noSize, noMove, noActivate = 0x0001, 0x0002, 0x0010
+	setWindowPos.Call(pic.Handle, ^uintptr(0), 0, 0, 0, 0, noSize|noMove|noActivate)
+	pump(main, 100*time.Millisecond)
+	if h := windowAt(300, 250); h != pic.Handle {
+		t.Errorf("with the picture in front a point belongs to %x, the picture is %x", h, pic.Handle)
+	}
+	panel.Raise()
+	pump(main, 100*time.Millisecond)
+	if h := windowAt(300, 250); h != panel.Handle {
+		t.Errorf("after Raise a point belongs to %x, the panel is %x", h, panel.Handle)
+	}
+}
+
+// TestOverlayInputGoesOnce has keys and typing posted to an overlay come out of TakeInput once: they are not left to
+// pile up between frames, as an overlay is never Polled itself.
+func TestOverlayInputGoesOnce(t *testing.T) {
+	if os.Getenv("FORGE_OVERLAY_TEST") == "" {
+		t.Skip("set FORGE_OVERLAY_TEST to let the test show windows")
+	}
+	EnableDPI()
+	main, err := Open("overlay test", 200, 120, Foreground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer main.Close()
+	o, err := OpenOverlay(OverlayOptions{Bounds: image.Rect(100, 100, 200, 200), Excluded: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.Close()
+	const keyDown, keyUp, char = 0x0100, 0x0101, 0x0102
+	postMessage.Call(o.Handle, keyDown, 'E', 0)
+	postMessage.Call(o.Handle, keyUp, 'E', 0)
+	pump(main, 100*time.Millisecond)
+	o.TextInputFont(37, "Arial")
+	o.TextInput(true, 0, 0, 10)
+	ctx, _, _ := immGetContext.Call(o.Handle)
+	var font logFont
+	if ctx == 0 {
+		t.Error("no input context")
+	} else if r, _, _ := immGetCompositionFont.Call(ctx, uintptr(unsafe.Pointer(&font))); r == 0 || font.Height != -37 || syscall.UTF16ToString(font.Face[:]) != "Arial" {
+		t.Errorf("the words being composed are in %d %q", font.Height, syscall.UTF16ToString(font.Face[:]))
+	}
+	immReleaseContext.Call(o.Handle, ctx)
+	postMessage.Call(o.Handle, char, 'e', 0)
+	pump(main, 100*time.Millisecond)
+	in := o.TakeInput()
+	if len(in.Keys) != 1 || len(in.Up) != 1 || string(in.Typed) != "e" {
+		t.Errorf("keys %v, let go %v, typed %q", in.Keys, in.Up, string(in.Typed))
+	}
+	if in = o.TakeInput(); len(in.Keys)+len(in.Up)+len(in.Typed) != 0 {
+		t.Errorf("taken twice: keys %v, let go %v, typed %q", in.Keys, in.Up, string(in.Typed))
 	}
 }

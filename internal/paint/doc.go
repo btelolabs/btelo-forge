@@ -40,7 +40,9 @@ type Node struct {
 	// A smart object's link, which makes the group one whose layers its copies share; nil for any other node. Never
 	// changed in place.
 	Smart *SmartLink
-	Open  bool // a group shows its children in the layers panel
+	// A smart object's filters, applied to what its layers show; nil for none. Never changed in place.
+	Filters *FilterStack
+	Open    bool // a group shows its children in the layers panel
 }
 
 // IsGroup reports whether n is a group.
@@ -53,10 +55,11 @@ type Doc struct {
 	Frame image.Rectangle
 	// Paper is white under the layers, as a new canvas has; without it the picture is transparent where nothing is.
 	Paper     bool
-	Root      *Node // the top-level group, whose children are the top-level layers, groups and artboards
-	Active    int   // the node being painted on or changed
-	Selection *Mask // 255 where selected; nil when nothing is
-	EditMask  bool  // painting and filling go to the chosen layer's mask instead of its pixels
+	Root      *Node      // the top-level group, whose children are the top-level layers, groups and artboards
+	filtered  smartStore // what smart filters worked out
+	Active    int        // the node being painted on or changed
+	Selection *Mask      // 255 where selected; nil when nothing is
+	EditMask  bool       // painting and filling go to the chosen layer's mask instead of its pixels
 	// View is the part of the canvas on screen. It bounds what would otherwise reach without end, such as a fill
 	// with nothing selected on a canvas without a frame.
 	View image.Rectangle
@@ -280,6 +283,14 @@ func (d *Doc) compositeInto(dst *image.RGBA, g *Node, r image.Rectangle, l int) 
 			blendPixels(dst, readLayer(c, at, l), at, c.Opacity, c.Blend, maskPix, maskFill)
 			continue
 		}
+		if c.Filters.shown() != nil {
+			mode := c.Blend
+			if mode == BlendPassThrough {
+				mode = BlendNormal
+			}
+			blendPixels(dst, d.smartPicture(c, at, l), at, c.Opacity, mode, maskPix, maskFill)
+			continue
+		}
 		if c.Blend == BlendPassThrough && c.Opacity >= 1 && maskPix == nil {
 			if c.Board != nil {
 				drawBoardFill(dst, c.Board, at, l)
@@ -320,6 +331,23 @@ func (d *Doc) Render(dst *image.RGBA, r image.Rectangle, l int) {
 		draw.Draw(dst, r, image.White, image.Point{}, draw.Src)
 	}
 	d.compositeBands(dst, d.Root, r, l)
+}
+
+// Reduced composes the whole picture at the detail level nearest side pixels on its longer side, no smaller, so a
+// huge canvas costs no more than a small one; nil when nothing is drawn.
+func (d *Doc) Reduced(side int) *image.RGBA {
+	ext := d.Extent()
+	if ext.Empty() {
+		return nil
+	}
+	l := 0
+	for max(ext.Dx(), ext.Dy())>>l > side {
+		l++
+	}
+	r := image.Rect(ext.Min.X>>l, ext.Min.Y>>l, (ext.Max.X+(1<<l)-1)>>l, (ext.Max.Y+(1<<l)-1)>>l)
+	dst := image.NewRGBA(r)
+	d.Render(dst, r, l)
+	return dst
 }
 
 // minBand is the fewest rows a band of a composite drawn on several cores has.

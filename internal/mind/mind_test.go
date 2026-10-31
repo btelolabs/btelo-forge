@@ -525,6 +525,15 @@ func TestTasksCountTheirProgress(t *testing.T) {
 	if d, n := m2.Progress(m2.Node(tops[0])); d != 2 || n != 4 {
 		t.Fatalf("read back from the outline: %d of %d", d, n)
 	}
+	// An outline added under a task is all tasks, ticks kept; elsewhere its plain lines stay plain.
+	under, _ := m.AddOutline("- plain\n  - deeper\n- [x] ticked", a1, -1, 0, 0)
+	if !m.Node(under[0]).Task || !m.Node(m.Node(under[0]).Children[0]).Task || !m.Node(under[1]).Done {
+		t.Fatal("an outline under a task did not become tasks")
+	}
+	free, _ := m.AddOutline("- plain", 0, -1, 0, 0)
+	if m.Node(free[0]).Task {
+		t.Fatal("a free outline became a task")
+	}
 	data, _ := Encode(m, "")
 	got, _ := Load(bytes.NewReader(data), "", SimpleMeasurer{})
 	if !got.Node(a1).Task || !got.Node(a1).Done {

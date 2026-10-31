@@ -196,7 +196,7 @@ type mindNodeIn struct {
 	Size     *float32   `json:"size,omitempty" jsonschema:"the words' size in board units, 0 for the theme's"`
 	Bold     *bool      `json:"bold,omitempty"`
 	Folded   *bool      `json:"folded,omitempty"`
-	Task     *bool      `json:"task,omitempty" jsonschema:"a task: a box to tick, or with tasks under it a ring of their progress"`
+	Task     *bool      `json:"task,omitempty" jsonschema:"a task: a box to tick, or with tasks under it a ring of their progress; a topic added under a task is one unless this says false"`
 	Done     *bool      `json:"done,omitempty" jsonschema:"a task ticked off"`
 	TaskList *bool      `json:"task_list,omitempty" jsonschema:"for mind_update: make the node and everything under it tasks (true) or not (false), as MindNode's Convert to Task List"`
 	Side     string     `json:"side,omitempty" jsonschema:"a mind map root's child: left, right or auto"`
@@ -508,6 +508,9 @@ func (a *App) addMindTools(s *mcp.Server) {
 						if p == 0 && ni.X == nil && ni.Y == nil {
 							c := a.mindViewCentre(md)
 							n.X, n.Y = c.X, c.Y
+						}
+						if pn := md.m.Node(p); pn != nil && pn.Task && ni.Task == nil && n.Kind == mind.Topic {
+							n.Task = true
 						}
 						index := -1
 						if ni.Index != nil {

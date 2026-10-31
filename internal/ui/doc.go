@@ -38,28 +38,37 @@ type selection struct {
 
 // doc is one tab: an edit with its own history, playhead, selection and view. An empty tab has no project.
 type doc struct {
-	p          *project.Project
-	hist       project.History
-	dragBefore *project.Project
-	bodyBefore *project.Project
-	dirty      bool
-	savedAt    time.Time
-	playhead   float64
-	sel        selection
-	picked     map[int]bool // items selected besides sel
-	marquee    *marquee
-	view       timelineView
-	shown      shownFrame
-	times      timeFields
-	opening    string
-	file       string    // the edit file it was saved to or opened from, if any
-	art        *artDoc   // a canvas tab instead of an edit
-	files      *filesDoc // a file manager tab instead of an edit
-	board      *mindDoc  // a mind map tab instead of an edit
-	liveTab    bool      // the live stream's tab instead of an edit; there is one at most
+	p           *project.Project
+	hist        project.History
+	dragBefore  *project.Project
+	bodyBefore  *project.Project
+	dirty       bool
+	savedAt     time.Time
+	playhead    float64
+	sel         selection
+	picked      map[int]bool // items selected besides sel
+	marquee     *marquee
+	view        timelineView
+	shown       shownFrame
+	times       timeFields
+	opening     string
+	file        string     // the edit file it was saved to or opened from, if any
+	art         *artDoc    // a canvas tab instead of an edit
+	files       *filesDoc  // a file manager tab instead of an edit
+	board       *mindDoc   // a mind map tab instead of an edit
+	office      *officeDoc // a Word, Excel, PowerPoint or PDF tab instead of an edit
+	liveTab     bool       // the live stream's tab instead of an edit; there is one at most
+	keyboardTab bool       // the keyboard tool's tab instead of an edit; there is one at most
+	aiTab       bool       // the chat with AI models instead of an edit; there is one at most
+	mailTab     bool       // the mail of the mailboxes bound; there is one at most
+	model       *modelDoc  // a 3D tab instead of an edit
 	// editing makes a tab with no edit yet the video editor, waiting for videos to be added or dropped.
 	editing bool
 	queued  []queuedVideo // videos to open in this tab once the one opening is in
+
+	pinned    bool      // kept at the left of the strip, and opened again with the app
+	restoring *savedTab // what a pinned tab is opening again as the app starts, until it is in
+	tabShift  float32   // how far the tab still is from its place on the strip, sliding there
 }
 
 func (d *doc) title(a *App) string {
@@ -70,8 +79,18 @@ func (d *doc) title(a *App) string {
 		return d.files.title(&a.u)
 	case d.board != nil:
 		return d.board.title()
+	case d.office != nil:
+		return d.office.title()
 	case d.liveTab:
 		return a.u.t("Live stream")
+	case d.keyboardTab:
+		return a.u.t("Keyboard")
+	case d.model != nil:
+		return d.model.title(a)
+	case d.aiTab:
+		return a.u.t("Local models")
+	case d.mailTab:
+		return a.u.t("Mail")
 	case d.p != nil && d.file != "":
 		return strings.TrimSuffix(filepath.Base(d.file), project.EditExt)
 	case d.p != nil:
@@ -88,14 +107,26 @@ func (d *doc) title(a *App) string {
 // a new tab.
 func (d *doc) glyph() string {
 	switch {
+	case d.restoring != nil:
+		return d.restoring.glyph()
 	case d.art != nil:
 		return icBrush
 	case d.files != nil:
 		return icFmFiles
 	case d.board != nil:
 		return icMind
+	case d.office != nil:
+		return d.office.format.glyph
 	case d.liveTab:
 		return icLive
+	case d.keyboardTab:
+		return icKeyboard
+	case d.model != nil:
+		return icModel
+	case d.aiTab:
+		return icAI
+	case d.mailTab:
+		return icMail
 	case d.p != nil || d.opening != "" || d.editing:
 		return icVideo
 	}
@@ -145,11 +176,22 @@ func (a *App) closeTab(i int) {
 	if d.board != nil {
 		a.closeMind(d.board)
 	}
+	if d.office != nil {
+		a.closeOffice(d.office)
+	}
+	a.keepModel(d.model)
+	if d.aiTab {
+		a.aiClosed()
+	}
+	if d.mailTab {
+		a.mailClosed()
+	}
 	if a.doc == d {
 		a.player.Stop()
 	}
 	a.leaveFiles(d, true)
 	a.docs = slices.Delete(a.docs, i, i+1)
+	a.stopModelCard()
 	if len(a.docs) == 0 {
 		a.doc = nil
 		a.newTab()

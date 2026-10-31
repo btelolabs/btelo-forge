@@ -344,13 +344,9 @@ func (a *App) drawMusicPanel(r gfx.Rect) {
 }
 
 func (a *App) chooseAudio() {
-	var patterns []string
-	for _, e := range library.AudioExtensions {
-		patterns = append(patterns, "*"+e)
-	}
-	if files := a.host.OpenFiles(a.u.t("Import sounds"), [][2]string{{a.u.t("Sound files"), strings.Join(patterns, ";")}}, true); len(files) > 0 {
-		a.importAudio(files, false)
-	}
+	a.pickFiles(pickRequest{key: "sound", title: a.u.t("Import sounds"), kinds: a.u.t("Sound files"), exts: library.AudioExtensions, multiple: true}, func(paths []string) {
+		a.importAudio(paths, false)
+	})
 }
 
 func (a *App) drawTrackList(r gfx.Rect) {

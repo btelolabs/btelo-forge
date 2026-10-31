@@ -43,6 +43,9 @@ func (a *App) startSweep(fd *filesDoc, i int, p *filesPane, row int) {
 	u := &a.u
 	at := u.rightAt
 	u.rightAt = nil
+	if fd.pick != nil {
+		return // its marks and menu are the file manager's
+	}
 	a.focusPane(fd, i)
 	name := p.entries[p.rows[row]].Name
 	now := time.Now()

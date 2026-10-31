@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -24,6 +25,14 @@ const (
 	filterNoise
 	filterMosaic
 	filterSharpen
+	adjustColorBalance
+	adjustVibrance
+	adjustSelective
+	adjustPhotoFilter
+	adjustGradientMap
+	adjustExposure
+	adjustShadowsHighlights
+	filterDevelop
 )
 
 // adjustParam is a setting of an adjustment: a slider with its range and how its value reads.
@@ -36,12 +45,22 @@ type adjustParam struct {
 	decimals int
 }
 
+// adjustSwatch is a colour among an adjustment's settings: three values after its sliders, set from the foreground
+// colour.
+type adjustSwatch struct {
+	label   string
+	initial [3]float64
+}
+
 // adjustKind is an adjustment's dialog: its title, its name in the history, its settings and what it does with them.
 type adjustKind struct {
 	title   string
 	step    string // the history's name, which the history panel translates
 	params  []adjustParam
-	toggle  string // a checkbox, or none
+	pages   []string       // the same sliders for each of these, chosen in a list, or one set of them
+	pagesOf string         // what the list chooses
+	colours []adjustSwatch // after the sliders' values
+	toggle  string         // a checkbox, or none
 	filter  func(v []float64, on bool, curve []paint.CurvePoint, seed uint64) paint.Filter
 	curve   bool // a curve to edit
 	levels  bool // the input levels over a histogram
@@ -49,9 +68,62 @@ type adjustKind struct {
 	initial bool // the toggle's starting state
 }
 
+// startValues are the settings a dialog opens with, every page's and then the colours'.
+func (k adjustKind) startValues() []float64 {
+	var v []float64
+	for range max(len(k.pages), 1) {
+		for _, p := range k.params {
+			v = append(v, p.initial)
+		}
+	}
+	for _, s := range k.colours {
+		v = append(v, s.initial[:]...)
+	}
+	return v
+}
+
+// percentSliders are sliders from -100 to 100 that start at nothing.
+func percentSliders(labels ...string) []adjustParam {
+	out := make([]adjustParam, len(labels))
+	for i, l := range labels {
+		out[i] = adjustParam{label: l, lo: -100, hi: 100, whole: true}
+	}
+	return out
+}
+
 func (a *App) adjustKinds() map[int]adjustKind {
 	u := &a.u
 	return map[int]adjustKind{
+		adjustColorBalance: {title: u.t("Color balance"), step: "Color balance", toggle: u.t("Preserve luminosity"), initial: true,
+			pages: u.ts(toneRangeNames), pagesOf: u.t("Tones"), params: percentSliders(u.t("Cyan – Red"), u.t("Magenta – Green"), u.t("Yellow – Blue")),
+			filter: layerFilter(adjustColorBalance)},
+		adjustVibrance: {title: u.t("Vibrance"), step: "Vibrance", params: percentSliders(u.t("Vibrance"), u.t("Saturation")), filter: layerFilter(adjustVibrance)},
+		adjustSelective: {title: u.t("Selective color"), step: "Selective color", toggle: u.t("Relative"), initial: true,
+			pages: u.ts(selectiveColourNames), pagesOf: u.t("Colors"), params: percentSliders(u.t("Cyan"), u.t("Magenta"), u.t("Yellow"), u.tc("ink", "Black")),
+			filter: layerFilter(adjustSelective)},
+		adjustPhotoFilter: {title: u.t("Photo filter"), step: "Photo filter", toggle: u.t("Preserve luminosity"), initial: true,
+			params:  []adjustParam{{label: u.t("Density"), lo: 0, hi: 100, initial: 25, whole: true, unit: "%"}},
+			colours: []adjustSwatch{{label: u.t("Color"), initial: [3]float64{236, 138, 0}}}, filter: layerFilter(adjustPhotoFilter)},
+		adjustGradientMap: {title: u.t("Gradient map"), step: "Gradient map",
+			params:  []adjustParam{{label: u.t("Midpoint"), lo: 1, hi: 99, initial: 50, whole: true, unit: "%"}},
+			colours: []adjustSwatch{{label: u.t("Shadows"), initial: [3]float64{0, 0, 0}}, {label: u.t("Highlights"), initial: [3]float64{255, 255, 255}}},
+			filter:  layerFilter(adjustGradientMap)},
+		adjustExposure: {title: u.t("Exposure"), step: "Exposure", params: []adjustParam{
+			{label: u.t("Exposure"), lo: -10, hi: 10, decimals: 2},
+			{label: u.t("Offset"), lo: -0.5, hi: 0.5, decimals: 3},
+			{label: u.t("Gamma"), lo: 0.01, hi: 9.99, initial: 1, decimals: 2},
+		}, filter: layerFilter(adjustExposure)},
+		adjustShadowsHighlights: {title: u.t("Shadows/Highlights"), step: "Shadows/Highlights", params: []adjustParam{
+			{label: u.t("Shadows"), lo: 0, hi: 100, initial: 35, whole: true, unit: "%"},
+			{label: u.t("Highlights"), lo: 0, hi: 100, whole: true, unit: "%"},
+			{label: u.t("Radius"), lo: 1, hi: 250, initial: 30, whole: true, unit: "px"},
+		}, filter: func(v []float64, _ bool, _ []paint.CurvePoint, _ uint64) paint.Filter {
+			return paint.ShadowsHighlights(v[0], v[1], v[2])
+		}},
+		filterDevelop: {title: u.t("Develop"), step: "Develop", params: append(append(percentSliders(u.t("Temperature"), u.t("Tint")),
+			adjustParam{label: u.t("Exposure"), lo: -5, hi: 5, decimals: 2}),
+			percentSliders(u.t("Contrast"), u.t("Highlights"), u.t("Shadows"), u.t("Whites"), u.t("Blacks"), u.t("Clarity"), u.t("Vibrance"), u.t("Saturation"))...),
+			filter: func(v []float64, _ bool, _ []paint.CurvePoint, _ uint64) paint.Filter { return developOf(v).Filter() }},
 		adjustBrightness: {title: u.t("Brightness/Contrast"), step: "Brightness/Contrast", params: []adjustParam{
 			{label: u.t("Brightness"), lo: -150, hi: 150, whole: true},
 			{label: u.t("Contrast"), lo: -50, hi: 100, whole: true},
@@ -98,6 +170,15 @@ func (a *App) adjustKinds() map[int]adjustKind {
 	}
 }
 
+// selectiveColourNames name Selective Color's pages, in the order of its values.
+var selectiveColourNames = msgs("Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas", "Whites", "Neutrals", "Blacks")
+
+// developOf is Develop's settings from its sliders, in their order.
+func developOf(v []float64) paint.Develop {
+	return paint.Develop{Temperature: v[0], Tint: v[1], Exposure: v[2], Contrast: v[3], Highlights: v[4], Shadows: v[5],
+		Whites: v[6], Blacks: v[7], Clarity: v[8], Vibrance: v[9], Saturate: v[10]}
+}
+
 // adjustGlyph is an adjustment layer's icon in the layers panel.
 func adjustGlyph(k paint.AdjustKind) string {
 	switch k {
@@ -115,7 +196,9 @@ func adjustGlyph(k paint.AdjustKind) string {
 
 // layerKinds are the adjustments that can also be adjustment layers, with what they are in the picture.
 var layerKinds = map[int]paint.AdjustKind{adjustBrightness: paint.AdjustBrightness, adjustLevels: paint.AdjustLevels,
-	adjustCurves: paint.AdjustCurves, adjustHue: paint.AdjustHue, adjustPosterize: paint.AdjustPosterize, adjustThreshold: paint.AdjustThreshold}
+	adjustCurves: paint.AdjustCurves, adjustHue: paint.AdjustHue, adjustPosterize: paint.AdjustPosterize, adjustThreshold: paint.AdjustThreshold,
+	adjustColorBalance: paint.AdjustColorBalance, adjustVibrance: paint.AdjustVibrance, adjustSelective: paint.AdjustSelectiveColor,
+	adjustPhotoFilter: paint.AdjustPhotoFilter, adjustGradientMap: paint.AdjustGradientMap, adjustExposure: paint.AdjustExposure}
 
 // adjustmentOf is the dialog's settings for an adjustment layer.
 func adjustmentOf(kind int, v []float64, on bool, curve []paint.CurvePoint) paint.Adjustment {
@@ -138,26 +221,33 @@ func layerFilter(kind int) func(v []float64, on bool, curve []paint.CurvePoint, 
 // adjustDialog is an adjustment or filter being tried: its settings, and its preview, worked out on another
 // goroutine and shown when ready so dragging a slider stays smooth on a large picture.
 type adjustDialog struct {
-	kind    int
-	ad      *artDoc
-	s       *paint.FilterSession
-	layer   *paint.AdjustSession // or, instead, an adjustment layer's settings
-	initial paint.Adjustment     // the layer's settings when the dialog opened, shown without the preview
-	values  []float64
-	on      bool
-	curve   []paint.CurvePoint
-	grab    int // the curve point being dragged, or -1
-	preview bool
-	seed    uint64
-	hist    [256]int // the brightness histogram, for Levels and Threshold
-	shown   string   // the settings the picture shows
-	pending string   // the settings being worked out
-	busy    bool
+	kind         int
+	ad           *artDoc
+	s            *paint.FilterSession
+	layer        *paint.AdjustSession      // or, instead, an adjustment layer's settings
+	smart        *paint.SmartFilterSession // or a smart object's filter
+	smartInitial paint.SmartFilter         // the filter when the dialog opened, shown without the preview
+	initial      paint.Adjustment          // the layer's settings when the dialog opened, shown without the preview
+	values       []float64
+	on           bool
+	curve        []paint.CurvePoint
+	grab         int // the curve point being dragged, or -1
+	page         int // which of the kind's pages the sliders show
+	preview      bool
+	seed         uint64
+	hist         [256]int // the brightness histogram, for Levels and Threshold
+	shown        string   // the settings the picture shows
+	pending      string   // the settings being worked out
+	busy         bool
 }
 
 // openAdjust starts trying an adjustment or filter on the chosen layer.
 func (a *App) openAdjust(ad *artDoc, kind int) {
 	if ad.stroke != nil || ad.move != nil {
+		return
+	}
+	if n := ad.d.Node(ad.d.Active); n != nil && n.IsSmart() {
+		a.openSmartFilter(ad, kind)
 		return
 	}
 	s, err := ad.d.BeginFilter()
@@ -166,10 +256,7 @@ func (a *App) openAdjust(ad *artDoc, kind int) {
 		return
 	}
 	k := a.adjustKinds()[kind]
-	f := &adjustDialog{kind: kind, ad: ad, s: s, preview: true, grab: -1, on: k.initial, seed: rand.Uint64()}
-	for _, p := range k.params {
-		f.values = append(f.values, p.initial)
-	}
+	f := &adjustDialog{kind: kind, ad: ad, s: s, preview: true, grab: -1, on: k.initial, seed: rand.Uint64(), values: k.startValues()}
 	if k.curve {
 		f.curve = []paint.CurvePoint{{In: 0, Out: 0}, {In: 255, Out: 255}}
 	}
@@ -183,10 +270,7 @@ func (a *App) openAdjust(ad *artDoc, kind int) {
 // openAdjustLayer makes an adjustment layer of the kind and opens its settings: OK keeps it, Cancel takes it away.
 func (a *App) openAdjustLayer(ad *artDoc, kind int) {
 	k := a.adjustKinds()[kind]
-	f := &adjustDialog{kind: kind, ad: ad, preview: true, grab: -1, on: k.initial}
-	for _, p := range k.params {
-		f.values = append(f.values, p.initial)
-	}
+	f := &adjustDialog{kind: kind, ad: ad, preview: true, grab: -1, on: k.initial, values: k.startValues()}
 	if k.curve {
 		f.curve = []paint.CurvePoint{{In: 0, Out: 0}, {In: 255, Out: 255}}
 	}
@@ -282,6 +366,18 @@ func (a *App) refreshPreview(f *adjustDialog) {
 	if f.busy || want == f.shown {
 		return
 	}
+	if f.smart != nil {
+		sf := f.smartInitial
+		if f.preview {
+			sf = smartFilterOf(f)
+			sf.Off = f.smartInitial.Off
+		}
+		if err := f.smart.Set(sf); err == nil {
+			f.ad.changedAll()
+		}
+		f.shown = want
+		return
+	}
 	if f.layer != nil {
 		// An adjustment layer's settings show at once: the picture is only drawn with them.
 		adj := f.initial
@@ -322,6 +418,13 @@ func (a *App) closeAdjust(apply bool) {
 		return
 	}
 	switch {
+	case f.smart != nil && apply:
+		sf := smartFilterOf(f)
+		sf.Off = f.smartInitial.Off
+		f.smart.Set(sf)
+		f.smart.End()
+	case f.smart != nil:
+		f.smart.Cancel()
 	case f.layer != nil && apply:
 		f.layer.Set(adjustmentOf(f.kind, f.values, f.on, f.curve))
 		f.layer.End()
@@ -345,8 +448,16 @@ func (a *App) drawAdjustDialog() {
 		return
 	}
 	u := &a.u
+	// The list of pages lies over the dialog and has the pointer and the keys while it is open.
+	listed := a.menuOpen("adjust/page")
+	u.blocked = listed
+	defer func() { u.blocked = false }()
 	k := a.adjustKinds()[f.kind]
 	h := u.px(130) + float32(len(k.params))*u.px(40)
+	h += float32(len(k.colours)) * u.px(36)
+	if len(k.pages) > 0 {
+		h += u.px(40)
+	}
 	if k.toggle != "" {
 		h += u.px(36)
 	}
@@ -371,17 +482,27 @@ func (a *App) drawAdjustDialog() {
 		a.drawCurveEditor(f, gfx.Rect{X: in.X + (in.W-u.px(270))/2, Y: y, W: u.px(270), H: u.px(270)})
 		y += u.px(290)
 	}
+	if len(k.pages) > 0 {
+		u.label(u.face(12.5), gfx.Rect{X: in.X, Y: y, W: u.px(110), H: u.px(28)}, k.pagesOf, colDim, 0)
+		a.dropdown("adjust/page", gfx.Rect{X: in.X + u.px(110), Y: y, W: in.W - u.px(110), H: u.px(28)}, k.pages, f.page, nil, func(i int) { f.page = i })
+		y += u.px(40)
+	}
 	for i, p := range k.params {
+		at := f.page*len(k.params) + i
 		lw := u.px(110)
 		u.label(u.face(12.5), gfx.Rect{X: in.X, Y: y, W: lw, H: u.px(28)}, p.label, colDim, 0)
 		sr := gfx.Rect{X: in.X + lw, Y: y + u.px(11), W: in.W - lw - u.px(90), H: u.px(6)}
-		u.slider(fmt.Sprintf("adjust/%d", i), sr, &f.values[i], p.lo, p.hi, true)
+		u.slider(fmt.Sprintf("adjust/%d", at), sr, &f.values[at], p.lo, p.hi, true)
 		if p.whole {
-			f.values[i] = math.Round(f.values[i])
+			f.values[at] = math.Round(f.values[at])
 		}
-		text := strconvFloat(f.values[i], p.decimals) + p.unit
+		text := strconvFloat(f.values[at], p.decimals) + p.unit
 		u.label(u.face(12.5), gfx.Rect{X: sr.Right() + u.px(12), Y: y, W: u.px(78), H: u.px(28)}, text, colText, 0)
 		y += u.px(40)
+	}
+	for i, s := range k.colours {
+		a.drawAdjustSwatch(gfx.Rect{X: in.X, Y: y, W: in.W, H: u.px(28)}, s.label, i, f.values[len(f.values)-3*(len(k.colours)-i):])
+		y += u.px(36)
 	}
 	if k.toggle != "" {
 		f.on = u.checkbox("adjust/toggle", gfx.Rect{X: in.X, Y: y, W: in.W, H: u.px(28)}, k.toggle, f.on)
@@ -391,15 +512,17 @@ func (a *App) drawAdjustDialog() {
 	f.preview = u.checkbox("adjust/preview", gfx.Rect{X: in.X, Y: foot, W: u.px(110), H: u.px(34)}, u.t("Preview"), f.preview)
 	cancel := u.button("adjust/cancel", gfx.Rect{X: in.Right() - u.px(210), Y: foot, W: u.px(100), H: u.px(34)}, "", u.t("Cancel"), ghost, true)
 	ok := u.button("adjust/ok", gfx.Rect{X: in.Right() - u.px(100), Y: foot, W: u.px(100), H: u.px(34)}, "", u.t("OK"), primary, true)
-	for _, key := range u.keys {
-		switch key.Code {
-		case keyEscape:
-			cancel = true
-		case keyEnter:
-			ok = true
+	if !listed {
+		for _, key := range u.keys {
+			switch key.Code {
+			case keyEscape:
+				cancel = true
+			case keyEnter:
+				ok = true
+			}
 		}
+		u.keys = nil
 	}
-	u.keys = nil
 	switch {
 	case ok:
 		a.closeAdjust(true)
@@ -407,6 +530,25 @@ func (a *App) drawAdjustDialog() {
 		a.closeAdjust(false)
 	default:
 		a.refreshPreview(f)
+	}
+}
+
+// drawAdjustSwatch is a colour among the settings, c its three values; a click takes the foreground colour, as the
+// layer style dialog's do.
+func (a *App) drawAdjustSwatch(r gfx.Rect, label string, i int, c []float64) {
+	u := &a.u
+	id := fmt.Sprintf("adjust/colour/%d", i)
+	u.label(u.face(12.5), gfx.Rect{X: r.X, Y: r.Y, W: u.px(110), H: r.H}, label, colDim, 0)
+	sw := gfx.Rect{X: r.X + u.px(110), Y: r.Y + u.px(2), W: u.px(44), H: r.H - u.px(4)}
+	u.c.Fill(sw.Inset(-max(1, u.px(1))), colBorder)
+	u.c.Fill(sw, color.RGBA{uint8(c[0]), uint8(c[1]), uint8(c[2]), 255})
+	u.hint(id, u.tf("%s: click to use the foreground colour", label), sw)
+	if u.hover(id, sw) {
+		u.cursor = CursorHand
+	}
+	if u.clicked(id, sw) {
+		fg := a.brush.Color
+		c[0], c[1], c[2] = float64(fg.R), float64(fg.G), float64(fg.B)
 	}
 }
 

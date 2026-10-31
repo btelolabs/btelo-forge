@@ -222,6 +222,10 @@ func kindLook(k assets.Kind) (string, color.RGBA) {
 		return icMusic, gfx.Hex(0x3fc28a)
 	case assets.MindMap:
 		return icMind, gfx.Hex(0x4fb3ff)
+	case assets.Office:
+		return icOfficeWord, gfx.Hex(0x4d8bf0)
+	case assets.Model:
+		return icModel, modelHue
 	case assets.Canvas:
 		return icBrush, gfx.Hex(0xf2994a)
 	case assets.Markdown:

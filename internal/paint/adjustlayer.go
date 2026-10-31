@@ -24,11 +24,17 @@ const (
 	AdjustThreshold                    // Values: level (1 to 255)
 	AdjustInvert
 	AdjustBlackWhite
+	AdjustColorBalance   // Values: as ColorBalance; On: preserve luminosity
+	AdjustVibrance       // Values: vibrance, saturation
+	AdjustSelectiveColor // Values: as SelectiveColor; On: relative
+	AdjustPhotoFilter    // Values: density, red, green, blue; On: preserve luminosity
+	AdjustGradientMap    // Values: midpoint, then the two colours' red, green and blue
+	AdjustExposure       // Values: stops, offset, gamma
 	adjustKindCount
 )
 
 // adjustValues is how many values each kind takes.
-var adjustValues = [adjustKindCount]int{2, 5, 0, 3, 1, 1, 0, 0}
+var adjustValues = [adjustKindCount]int{2, 5, 0, 3, 1, 1, 0, 0, 9, 2, selectiveCount * 4, 4, 7, 3}
 
 // Adjustment is an adjustment layer's adjustment and its settings. It is a value never changed in place.
 type Adjustment struct {
@@ -88,6 +94,18 @@ func (a Adjustment) Filter() Filter {
 		return Invert()
 	case AdjustBlackWhite:
 		return Desaturate()
+	case AdjustColorBalance:
+		return ColorBalance([9]float64(a.Values), a.On)
+	case AdjustVibrance:
+		return Vibrance(v(0), v(1))
+	case AdjustSelectiveColor:
+		return SelectiveColor([selectiveCount * 4]float64(a.Values), a.On)
+	case AdjustPhotoFilter:
+		return PhotoFilter(v(0), v(1), v(2), v(3), a.On)
+	case AdjustGradientMap:
+		return GradientMap(v(0), [3]float64{v(1), v(2), v(3)}, [3]float64{v(4), v(5), v(6)})
+	case AdjustExposure:
+		return Exposure(v(0), v(1), v(2))
 	}
 	return Filter{apply: func(src *image.RGBA, r image.Rectangle) *image.RGBA {
 		out := image.NewRGBA(r)

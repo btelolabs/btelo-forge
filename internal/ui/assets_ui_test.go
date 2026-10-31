@@ -109,7 +109,7 @@ func assetFolder(t *testing.T, x *harness) string {
 	d.Snapshot().Save(cf)
 	cf.Close()
 	src := project.Source{Path: clip, Duration: 4, Width: 640, Height: 360, FPS: 30, HasVideo: true, HasAudio: true}
-	if err := project.WriteFile(filepath.Join(dir, "cut"+project.EditExt), project.New(src, project.Export{})); err != nil {
+	if err := project.WriteFile(filepath.Join(dir, "cut"+project.EditExt), project.New(src, project.Export{}), nil); err != nil {
 		t.Fatal(err)
 	}
 	return dir

@@ -307,7 +307,7 @@ func TestTheNewTabOffersStreamingAndTheCamera(t *testing.T) {
 	}
 
 	// In a window too low for every card, the page scrolls down to the last one.
-	x.c.Resize(560, 900)
+	x.c.Resize(560, 300)
 	x.frame(Input{})
 	live, body := x.startCard("empty/live"), x.a.layout().body
 	if live.Bottom() <= body.Bottom() {

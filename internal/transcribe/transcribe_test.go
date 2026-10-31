@@ -7,13 +7,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/locale"
 )
@@ -49,14 +53,14 @@ func TestDefaultConfigIsValid(t *testing.T) {
 func TestConfigErrorsArePrecise(t *testing.T) {
 	base := string(DefaultJSON)
 	for data, want := range map[string]string{
-		strings.Replace(base, `"defaultModel": "small"`, `"defaultModel": "huge"`, 1):          "defaultModel",
-		strings.Replace(base, `"-of", "{output}"`, `"-of", "{out}"`, 1):                        "unknown placeholder {out}",
-		strings.Replace(base, `"{model}", "-f"`, `"x", "-f"`, 1):                               "must use {model}",
-		strings.Replace(base, `whisper-bin-x64.zip"`, `whisper-bin-x64.tar"`, 1):               ".zip",
-		strings.Replace(base, `"executable": "whisper-cli.exe"`, `"executable": "a/b.exe"`, 1): "file name",
-		strings.Replace(base, `"id": "base"`, `"id": "tiny"`, 1):                               "models[1] (tiny)",
-		strings.Replace(base, `"progress": "progress =\\s*(\\d+)%"`, `"progress": "("`, 1):     "progress",
-		strings.Replace(base, `"version": 1`, `"version": 1, "colour": 2`, 1):                  "unknown field",
+		strings.Replace(base, `"defaultModel": "small"`, `"defaultModel": "huge"`, 1):           "defaultModel",
+		strings.Replace(base, `"-of", "{output}"`, `"-of", "{out}"`, 1):                         "unknown placeholder {out}",
+		strings.Replace(base, `"{model}", "-f"`, `"x", "-f"`, 1):                                "must use {model}",
+		strings.Replace(base, `whisper-bin-x64.zip"`, `whisper-bin-x64.tar"`, 1):                ".zip",
+		strings.Replace(base, `"executable": "whisper-cli.exe"`, `"executable": "../b.exe"`, 1): "file name",
+		strings.Replace(base, `"id": "base"`, `"id": "tiny"`, 1):                                "models[1] (tiny)",
+		strings.Replace(base, `"progress": "progress =\\s*(\\d+)%"`, `"progress": "("`, 1):      "progress",
+		strings.Replace(base, `"version": 1`, `"version": 1, "colour": 2`, 1):                   "unknown field",
 	} {
 		if _, err := ParseConfig([]byte(data)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("error %v, want %q", err, want)
@@ -202,5 +206,139 @@ func TestUnzipKeepsFoldersUnderOneTopFolder(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, "evil.exe")); err == nil {
 			t.Errorf("%s escaped the folder", evil)
 		}
+	}
+}
+
+// rangeServer serves body, honouring Range requests like a file server; the first request is cut off after cut
+// bytes when cut is above zero.
+func rangeServer(t *testing.T, body []byte, cut int, ranges bool) (*httptest.Server, *[]string) {
+	t.Helper()
+	var asked []string
+	first := true
+	s := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.Header.Get("Range"))
+		start := 0
+		if h := r.Header.Get("Range"); h != "" && ranges {
+			if _, err := fmt.Sscanf(h, "bytes=%d-", &start); err != nil || start > len(body) {
+				rw.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+				return
+			}
+			rw.Header().Set("Content-Length", strconv.Itoa(len(body)-start))
+			rw.WriteHeader(http.StatusPartialContent)
+		} else {
+			rw.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		}
+		if first && cut > 0 {
+			first = false
+			rw.Write(body[start : start+cut])
+			rw.(http.Flusher).Flush()
+			conn, _, _ := rw.(http.Hijacker).Hijack()
+			conn.Close() // the connection drops before the end
+			return
+		}
+		rw.Write(body[start:])
+	}))
+	t.Cleanup(s.Close)
+	return s, &asked
+}
+
+func TestDownloadContinuesAfterAnInterruption(t *testing.T) {
+	body := bytes.Repeat([]byte("0123456789"), 5000)
+	sum := sha256.Sum256(body)
+	s, asked := rangeServer(t, body, 12345, true)
+	m := NewManager(t.TempDir())
+	path := filepath.Join(t.TempDir(), "m", "model.gguf")
+	if err := m.Download(context.Background(), s.URL, path, 0, hex.EncodeToString(sum[:]), func(float64) {}); err == nil {
+		t.Fatal("an interrupted download succeeded")
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("the unfinished file was kept as the model")
+	}
+	if st, err := os.Stat(path + ".part"); err != nil || st.Size() != 12345 {
+		t.Fatalf("part kept: %v %v", st, err)
+	}
+	if err := m.Download(context.Background(), s.URL, path, 0, hex.EncodeToString(sum[:]), func(float64) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, body) {
+		t.Fatal("the continued file differs")
+	}
+	if want := []string{"", "bytes=12345-"}; !slices.Equal(*asked, want) {
+		t.Fatalf("requests %q, want %q", *asked, want)
+	}
+	if _, err := os.Stat(path + ".part"); err == nil {
+		t.Fatal("part left behind")
+	}
+}
+
+func TestDownloadStartsOverWhenTheServerIgnoresRange(t *testing.T) {
+	body := bytes.Repeat([]byte("abc"), 4000)
+	s, _ := rangeServer(t, body, 5000, false)
+	m := NewManager(t.TempDir())
+	path := filepath.Join(t.TempDir(), "model.gguf")
+	m.Download(context.Background(), s.URL, path, 0, "", func(float64) {})
+	if err := m.Download(context.Background(), s.URL, path, 0, "", func(float64) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, body) {
+		t.Fatalf("the file has %d bytes, want %d", len(got), len(body))
+	}
+}
+
+func TestDownloadDropsAPartTheServerCannotContinue(t *testing.T) {
+	body := []byte("short model")
+	s, _ := rangeServer(t, body, 0, true)
+	m := NewManager(t.TempDir())
+	path := filepath.Join(t.TempDir(), "model.gguf")
+	os.WriteFile(path+".part", bytes.Repeat([]byte("x"), 1000), 0o644) // longer than the file: 416
+	if err := m.Download(context.Background(), s.URL, path, 0, "", func(float64) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, body) {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDownloadRefusesAWrongChecksumAndForgetsThePart(t *testing.T) {
+	s, _ := rangeServer(t, []byte("model"), 0, true)
+	m := NewManager(t.TempDir())
+	path := filepath.Join(t.TempDir(), "model.gguf")
+	err := m.Download(context.Background(), s.URL, path, 0, strings.Repeat("0", 64), func(float64) {})
+	if err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatalf("err = %v", err)
+	}
+	for _, p := range []string{path, path + ".part"} {
+		if _, err := os.Stat(p); err == nil {
+			t.Fatalf("%s kept", p)
+		}
+	}
+}
+
+func TestDownloadRefusesTheSameFileTwice(t *testing.T) {
+	release := make(chan struct{})
+	s := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		<-release
+		rw.Write([]byte("model"))
+	}))
+	defer s.Close()
+	m := NewManager(t.TempDir())
+	path := filepath.Join(t.TempDir(), "model.gguf")
+	done := make(chan error, 1)
+	go func() { done <- m.Download(context.Background(), s.URL, path, 0, "", func(float64) {}) }()
+	for {
+		m.mu.Lock()
+		busy := m.active[path]
+		m.mu.Unlock()
+		if busy {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := m.Download(context.Background(), s.URL, path, 0, "", func(float64) {}); !errors.Is(err, errDownloading) {
+		t.Fatalf("second download: %v", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

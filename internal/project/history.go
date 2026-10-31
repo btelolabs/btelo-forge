@@ -67,11 +67,15 @@ func SavePath(dir, source string) string {
 }
 
 // Save writes p atomically.
-func Save(path string, p *Project) error {
+func Save(path string, p *Project) error { return write(path, p, nil) }
+
+// write saves p atomically, with the bytes of tail after it.
+func write(path string, p *Project, tail []byte) error {
 	data, err := json.Marshal(saved{Version: saveVersion, Project: p})
 	if err != nil {
 		return err
 	}
+	data = append(data, tail...)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

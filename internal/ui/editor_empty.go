@@ -92,7 +92,7 @@ func (a *App) drawEmptyEditor(l layout) {
 }
 
 // videoListPane is the video editor's list of folders and videos, made the first time it is shown: in the folder it
-// showed last, else where the app keeps its videos, else the videos folder, else home.
+// showed last, else where recordings are kept, else the videos folder, else home.
 func (a *App) videoListPane() *filesPane {
 	if a.videoList != nil {
 		return a.videoList
@@ -105,7 +105,7 @@ func (a *App) videoListPane() *filesPane {
 		if runtime.GOOS == "darwin" {
 			videos = filepath.Join(home, "Movies")
 		}
-		mine, _ := a.uploadDir()
+		mine, _ := a.categoryDir(categoryTools)
 		for _, d := range []string{mine, videos, home} {
 			if d != "" && isFolder(d) {
 				dir = d

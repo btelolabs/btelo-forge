@@ -29,10 +29,12 @@ const (
 	Code
 	Text
 	MindMap // a mind map saved by the app
+	Office  // a Word, Excel, PowerPoint or PDF document
+	Model   // a 3D model
 )
 
 // Kinds lists the kinds files are filtered by, in the order the asset manager shows them.
-var Kinds = []Kind{Image, Animation, Video, Audio, Canvas, Edit, MindMap, Markdown, Code, Text, Other}
+var Kinds = []Kind{Image, Animation, Video, Audio, Canvas, Edit, MindMap, Office, Model, Markdown, Code, Text, Other}
 
 // Extensions of each kind; a file whose extension is in none of them is Other.
 var (
@@ -45,7 +47,9 @@ var (
 		".sh", ".bash", ".zsh", ".ps1", ".psm1", ".bat", ".cmd", ".sql", ".json", ".jsonc", ".yaml", ".yml", ".toml", ".xml",
 		".html", ".htm", ".css", ".scss", ".less", ".vue", ".svelte", ".svg", ".ini", ".cfg", ".conf", ".gradle", ".r", ".pl",
 		".vb", ".fs", ".zig", ".nim", ".ex", ".exs", ".erl", ".hs", ".clj", ".proto", ".graphql", ".tf", ".dockerfile", ".mod"}
-	TextExtensions = []string{".txt", ".log", ".csv", ".tsv", ".srt", ".vtt", ".ass", ".lrc", ".nfo", ".rst", ".tex", ".env"}
+	OfficeExtensions = []string{".docx", ".doc", ".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".pptx", ".ppt", ".pdf"}
+	ModelExtensions  = []string{".glb", ".gltf", ".fbx"}
+	TextExtensions   = []string{".txt", ".log", ".srt", ".vtt", ".ass", ".lrc", ".nfo", ".rst", ".tex", ".env"}
 )
 
 // codeNames are files without an extension that hold code.
@@ -69,6 +73,10 @@ func KindOf(name string) Kind {
 		return Edit
 	case ext == mind.Ext:
 		return MindMap
+	case slices.Contains(OfficeExtensions, ext):
+		return Office
+	case slices.Contains(ModelExtensions, ext):
+		return Model
 	case slices.Contains(MarkdownExtensions, ext):
 		return Markdown
 	case slices.Contains(CodeExtensions, ext), slices.Contains(codeNames, strings.ToLower(filepath.Base(name))):

@@ -58,7 +58,8 @@ func TestTaskCardShowsADownloadAndCancelsIt(t *testing.T) {
 	if len(tasks) != 1 || tasks[0].title != "Adding Slow Song" || tasks[0].status != "Downloading" || tasks[0].fraction != 0.5 {
 		t.Fatalf("tasks %+v", tasks)
 	}
-	cards, cancels := x.a.taskBoxes(1)
+	l := x.a.layoutTasks()
+	cards, cancels := l.cards, l.cancels
 	if c := cards[0]; c.Right() != x.a.screen.W-16 || c.Bottom() != x.a.screen.H-16 {
 		t.Fatalf("the card is at %+v, not in the bottom right corner of %+v", c, x.a.screen)
 	}
@@ -111,7 +112,8 @@ func TestTaskCardsWaitWhileADialogHoldsTheWindow(t *testing.T) {
 		tasks[1].title != "Generating speech" || tasks[1].status != "Loading the model into memory" || tasks[1].fraction >= 0 {
 		t.Fatalf("tasks %+v", tasks)
 	}
-	cards, cancels := x.a.taskBoxes(2)
+	l := x.a.layoutTasks()
+	cards, cancels := l.cards, l.cancels
 	if cards[1].Bottom() > cards[0].Y {
 		t.Fatal("the cards overlap")
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/matting"
 	"github.com/btelolabs/btelo-forge/internal/ui"
 	"github.com/btelolabs/btelo-forge/internal/update"
 )
@@ -38,7 +39,17 @@ func main() {
 	background := flag.Bool("background", false, "open without taking the focus (on a secondary display on Windows), for automated runs")
 	capture := flag.String("capture", "", "save the window to this PNG once everything has loaded, then quit")
 	deadline := flag.Duration("deadline", 2*time.Minute, "with -capture, give up after this long")
+	mattingPort := flag.Int("matting-server", 0, "run as the engine that finds a picture's subject, on this port")
+	mattingEngine := flag.String("matting-engine", "", "with -matting-server, the ONNX Runtime library")
+	mattingModel := flag.String("matting-model", "", "with -matting-server, the model")
 	flag.Parse()
+	if *mattingPort != 0 {
+		if err := matting.Serve(*mattingPort, *mattingEngine, *mattingModel); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	ui.Version = version
 	if err := run(*background, *capture, *deadline, flag.Args()); err != nil {
 		alert(err.Error())

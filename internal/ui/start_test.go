@@ -32,9 +32,29 @@ func TestStartPageOffersEveryKind(t *testing.T) {
 				}
 			}
 		}
+		lastOfGroup := map[float32]bool{}
+		for g := range startGroups {
+			var bottom float32
+			for i, c := range x.a.startCards() {
+				if c.group == g {
+					bottom = max(bottom, p.cards[i].Y)
+				}
+			}
+			lastOfGroup[bottom] = true
+		}
 		for y, n := range rows {
-			if n < rows[p.cards[0].Y]-1 {
+			if n < rows[p.cards[0].Y]-1 && !lastOfGroup[y] { // what is left over of a group fills a row of its own
 				t.Errorf("%s: the row at %v has %d cards, the first %d", lang, y, n, rows[p.cards[0].Y])
+			}
+		}
+		// Everything shows at a common window size, and no card's text is cut short.
+		if bottom := p.foot.Bottom(); bottom > x.a.layout().body.Bottom() {
+			t.Errorf("%s: the page ends at %v, below the window's %v", lang, bottom, x.a.layout().body.Bottom())
+		}
+		cards := x.a.startCards()
+		for i, c := range cards {
+			if n := len(x.a.u.face(12).Wrap(c.text, p.cards[i].W-x.a.u.px(16+40+14+16))); n > 2 {
+				t.Errorf("%s: %s takes %d lines", lang, c.id, n)
 			}
 		}
 		x.shot(string(lang) + "-start")
@@ -54,7 +74,7 @@ func TestStartPageOffersEveryKind(t *testing.T) {
 			t.Fatalf("%s: an empty canvas was saved as %s", lang, path)
 		}
 
-		x.c.Resize(560, 900)
+		x.c.Resize(400, 900)
 		x.a.newTab()
 		x.frame(Input{})
 		p = x.a.startLayout(x.a.layout().body, x.a.startCards())
@@ -99,6 +119,7 @@ func TestEditCardOpensTheEditorFirst(t *testing.T) {
 	first, second := x.fixture(), clipFile(t, x.mediaDir(), "second.mp4", "testsrc2=size=640x360", "3")
 	x.h.chosen = []string{first, second}
 	x.click(a.emptyEditorLayout(a.layout()).choose)
+	x.fromSystem()
 	x.pump(time.Minute, func() bool { return a.p != nil && a.opening == "" && len(a.doc.queued) == 0 && len(a.p.Sources) == 2 })
 	if a.p == nil || len(a.p.Sources) != 2 || len(a.docs) != 1 {
 		t.Fatalf("the videos did not open here: %d tabs, project %v", len(a.docs), a.p)
@@ -127,9 +148,9 @@ func TestCanvasIsSavedOnlyOnceSomethingIsOnIt(t *testing.T) {
 	}
 }
 
-// TestResourceCardOpensTheDesktop checks that the one card for files comes first and, the first time, opens the
-// desktop as a list on the left and as pictures on the right.
-func TestResourceCardOpensTheDesktop(t *testing.T) {
+// TestResourceCardOpensTheResourceFolder checks that the one card for files comes first and, the first time, opens the
+// resource folder as a list on the left and as pictures on the right.
+func TestResourceCardOpensTheResourceFolder(t *testing.T) {
 	x := newHarness(t)
 	a := x.a
 	if cards := a.startCards(); cards[0].id != "empty/resources" {
@@ -142,10 +163,10 @@ func TestResourceCardOpensTheDesktop(t *testing.T) {
 	if fd == nil || len(fd.panes) != 2 {
 		t.Fatal("the card did not open the resource manager with two lists")
 	}
-	desktop := defaultFolder()
-	if fd.panes[0].dir != desktop || fd.panes[0].grid || fd.panes[1].dir != desktop || !fd.panes[1].grid {
+	root, _ := a.resourceDir()
+	if fd.panes[0].dir != root || fd.panes[0].grid || fd.panes[1].dir != root || !fd.panes[1].grid {
 		t.Fatalf("lists %s (pictures %v) and %s (pictures %v), want %s as a list and as pictures",
-			fd.panes[0].dir, fd.panes[0].grid, fd.panes[1].dir, fd.panes[1].grid, desktop)
+			fd.panes[0].dir, fd.panes[0].grid, fd.panes[1].dir, fd.panes[1].grid, root)
 	}
 	x.frame(Input{})
 	x.shot("resources-first")

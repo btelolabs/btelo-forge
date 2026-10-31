@@ -286,6 +286,7 @@ func (a *App) drawVectorGradientOptions(ad *artDoc, n *paint.Node, p paint.Vecto
 	}
 	x += u.px(10)
 	for i, kind := range paintKinds {
+		a.optRow(&x, &r, u.px(32))
 		b := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
 		id := fmt.Sprintf("art/vgrad/kind/%d", i)
 		bg := colSurface
@@ -305,9 +306,11 @@ func (a *App) drawVectorGradientOptions(ad *artDoc, n *paint.Node, p paint.Vecto
 	}
 	x += u.px(10)
 	if p.Gradient() {
+		a.optRow(&x, &r, u.px(220))
 		x = a.drawStopsBar(ad, n, p, gfx.Rect{X: x, Y: r.Y, W: u.px(220), H: r.H}) + u.px(10)
 		label := u.t("Reverse")
 		w := u.buttonWidth("", label)
+		a.optRow(&x, &r, w)
 		if u.button("art/vgrad/reverse", gfx.Rect{X: x, Y: r.Y, W: w, H: r.H}, "", label, ghost, true) {
 			next := *n.Vector
 			q := targetPaint(&next, a.pickBackground)
@@ -320,8 +323,7 @@ func (a *App) drawVectorGradientOptions(ad *artDoc, n *paint.Node, p paint.Vecto
 		}
 		x += w + u.px(10)
 	}
-	u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H},
-		u.t("Drag across the shape for a gradient; drag its handles, click a stop to colour it, double-click the line to add one"), colDim, 0)
+	a.optHint(x, r, u.t("Drag across the shape for a gradient; drag its handles, click a stop to colour it, double-click the line to add one"))
 }
 
 // stopsDrag is a stop being dragged along the options bar's gradient: the stops as the drag began, and which.

@@ -1,10 +1,10 @@
 """Makes Btelo Forge's icons: an anvil with a spark struck off it, one flat colour on a dark tile tinted with it, as
 the symbols of the start page's cards are drawn.
 
-  packaging/icon.png     the app icon, 1024 square with rounded, transparent corners: the source of the macOS icon
+  packaging/icon.png     the app icon, 1024 square, with square corners and no outline: the source of the macOS icon
   docs/logo.png          the same at 512, for the README
   cmd/btelo-forge/winres/icon.png   the same at 256, for the Windows icon (go-winres)
-  internal/ui/assets/logo.jpg       the mark as a square, which the app and its phone page round as they show it
+  internal/ui/assets/logo.jpg       the same at 512, which the app and its phone page show
 
 Run it from the repository's root with Pillow: python packaging/make_icon.py
 Then, in cmd/btelo-forge, remake the Windows resources from the new icon:
@@ -14,9 +14,8 @@ Then, in cmd/btelo-forge, remake the Windows resources from the new icon:
 """
 from PIL import Image, ImageDraw
 
-ROUNDING = 0.18  # ui.LogoRounding
 HUE = (0xff, 0x8a, 0x3d)  # the forge's ember
-PANEL, BORDER = (0x13, 0x14, 0x18), (0x25, 0x27, 0x2d)  # ui.colPanel, ui.colBorder
+PANEL = (0x13, 0x14, 0x18)  # ui.colPanel
 N, SS = 1024, 4  # the icon's side, and how many times larger the shapes are drawn before they are reduced
 
 
@@ -57,13 +56,10 @@ SYMBOL = 0.66  # the symbol's width as a share of the tile's
 
 
 def mark():
-    """The icon as an opaque square: the tinted tile, its hairline and the symbol."""
+    """The icon as an opaque square: the tinted tile and the symbol."""
     S = N * SS
     img = Image.new('RGB', (S, S), mix(PANEL, HUE, 0.1))
     d = ImageDraw.Draw(img)
-    line = round(S * 0.008)
-    d.rounded_rectangle((line // 2, line // 2, S - 1 - line // 2, S - 1 - line // 2), radius=round(S * ROUNDING),
-                        outline=mix(BORDER, HUE, 0.35), width=line)
     x0, y0, x1, y1 = GRID_BOX
     k = S * SYMBOL / (x1 - x0)
     ox, oy = (S - (x1 - x0) * k) / 2 - x0 * k, (S - (y1 - y0) * k) / 2 - y0 * k
@@ -74,11 +70,6 @@ def mark():
 
 icon = mark()
 icon.resize((512, 512), Image.LANCZOS).save('internal/ui/assets/logo.jpg', quality=92, optimize=True)
-# Rounded corners, drawn four times larger and reduced, so their edge is smooth.
-big = Image.new('L', (N * 4, N * 4), 0)
-ImageDraw.Draw(big).rounded_rectangle((0, 0, N * 4 - 1, N * 4 - 1), radius=round(N * 4 * ROUNDING), fill=255)
-icon = icon.convert('RGBA')
-icon.putalpha(big.resize((N, N), Image.LANCZOS))
 icon.save('packaging/icon.png', optimize=True)
 icon.resize((512, 512), Image.LANCZOS).save('docs/logo.png', optimize=True)
 icon.resize((256, 256), Image.LANCZOS).save('cmd/btelo-forge/winres/icon.png', optimize=True)

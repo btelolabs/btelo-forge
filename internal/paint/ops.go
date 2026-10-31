@@ -33,6 +33,17 @@ func (d *Doc) AddLayer(name string) *Node {
 	return n
 }
 
+// Wipe takes every layer and group away, leaving one empty layer called name, chosen, and no selection; one step
+// of history undoes it.
+func (d *Doc) Wipe(name string) {
+	m := d.Mark()
+	l := d.newLayer(name)
+	d.Root.Children = []*Node{l}
+	d.Active, d.EditMask = l.ID, false
+	d.setSelection(nil)
+	d.Commit("Wipe", m)
+}
+
 // AddGroup adds an empty, open group above the chosen node and chooses it.
 func (d *Doc) AddGroup(name string) *Node {
 	m := d.Mark()
@@ -468,6 +479,26 @@ func (d *Doc) SetBlend(id int, mode Blend) {
 // SetLockAlpha locks or unlocks a layer's transparent pixels.
 func (d *Doc) SetLockAlpha(id int, on bool) {
 	d.set(id, "Lock transparent pixels", func(n *Node) { n.LockAlpha = on })
+}
+
+// MaskBackground hides what m leaves out with the chosen layer or group's mask, as Remove Background does: over a mask
+// it already has, it takes away from what that shows. Nothing is lost: the pixels stay under the mask.
+func (d *Doc) MaskBackground(m *image.Alpha) error {
+	n := d.Node(d.Active)
+	if n == nil {
+		return ErrNoLayer
+	}
+	if n.Adjust != nil {
+		return ErrAdjustmentLayer
+	}
+	mark := d.Mark()
+	shape := MaskFrom(m, 0)
+	if n.Mask != nil {
+		shape = combine(n.Mask, shape, func(a, b uint32) uint32 { return mul8(a, b) })
+	}
+	n.Mask, n.MaskOff = shape, false
+	d.Commit("Remove background", mark)
+	return nil
 }
 
 // AddMask gives the chosen layer or group a mask: from the selection when there is one (hiding the rest), or

@@ -7,10 +7,10 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
-// Moving around the canvas whatever tool is chosen, as Photoshop allows: the wheel zooms at the pointer (Shift
-// with it scrolls sideways, Ctrl up and down), holding Space drags the view, and holding the zoom tool's key zooms
-// by dragging sideways or by clicking (Alt+click zooms out). Letting the zoom key go returns to the tool in use;
-// tapping it without zooming chooses the zoom tool, as a tool key does.
+// Moving around the canvas whatever tool is chosen: the wheel zooms at the pointer (Shift with it scrolls sideways,
+// Ctrl up and down), moving the mouse with Space held moves the view, and with the zoom tool's key held it zooms by
+// going sideways, no button needed; a click with that key zooms too (Alt+click zooms out). Letting the zoom key go
+// returns to the tool in use; tapping it without zooming chooses the zoom tool, as a tool key does.
 
 // What a navigation drag is doing.
 const (
@@ -19,7 +19,7 @@ const (
 	navZoom
 )
 
-// zoomScrub is how far, in logical pixels, a sideways drag goes to double the zoom.
+// zoomScrub is how far, in logical pixels, going sideways goes to double the zoom.
 const zoomScrub = 120
 
 // zoomHold is the zoom tool's key held down for a moment's zoom.
@@ -32,6 +32,9 @@ type zoomHold struct {
 // reports whether it took the pointer, which the chosen tool then leaves alone.
 func (a *App) navigate(ad *artDoc, vp gfx.Rect) bool {
 	u := &a.u
+	if ad.onScreen {
+		return false // the drawing on the screen stays where it is drawn
+	}
 	const id = "art/view"
 	if u.hover(id, vp) && u.wheel != 0 {
 		switch {
@@ -46,14 +49,17 @@ func (a *App) navigate(ad *artDoc, vp gfx.Rect) bool {
 		}
 		u.wheel = 0
 	}
+	if a.navigateHeld(ad, vp, id) {
+		return true
+	}
 	kind := ad.nav
 	if kind == navNone {
 		switch {
 		case u.active != "" || ad.text != nil:
 			return false // a drag of the tool's own goes on, or Space types
-		case u.isHeld(keySpace) || a.artTool == toolHand && ad.xf == nil:
+		case a.artTool == toolHand && ad.xf == nil:
 			kind = navPan
-		case a.zoomHeld != nil || a.artTool == toolZoom && ad.xf == nil:
+		case a.artTool == toolZoom && ad.xf == nil:
 			kind = navZoom
 		default:
 			return false
@@ -69,9 +75,6 @@ func (a *App) navigate(ad *artDoc, vp gfx.Rect) bool {
 		ad.nav = kind
 		ad.panFrom = [4]float64{float64(u.mx), float64(u.my), ad.panX, ad.panY}
 		ad.navZoom = ad.zoom
-		if kind == navZoom && a.zoomHeld != nil {
-			a.zoomHeld.used = true
-		}
 	}
 	if u.dragging(id) && ad.nav != navNone {
 		switch ad.nav {
@@ -96,6 +99,60 @@ func (a *App) navigate(ad *artDoc, vp gfx.Rect) bool {
 			ad.zoomAt(vp, u.mx, u.my, z)
 		}
 		ad.nav = navNone
+	}
+	return true
+}
+
+// navigateHeld moves the view while Space or the zoom key is held, by the mouse alone. A press in the meantime is the
+// view's too, so that no tool starts, and with the zoom key a click that went nowhere zooms. It reports whether a key
+// is at work.
+func (a *App) navigateHeld(ad *artDoc, vp gfx.Rect, id string) bool {
+	u := &a.u
+	kind := navNone
+	switch {
+	case ad.nav != navNone || ad.text != nil || u.focus != "" || u.active != "" && u.active != id:
+	case u.isHeld(keySpace):
+		kind = navPan
+	case a.zoomHeld != nil:
+		kind = navZoom
+	}
+	if kind == navNone || ad.held == navNone && !u.hover(id, vp) {
+		ad.held = navNone
+		return false
+	}
+	if kind != ad.held {
+		ad.held, ad.heldMoved, ad.navZoom = kind, false, ad.zoom
+		ad.panFrom = [4]float64{float64(u.mx), float64(u.my), ad.panX, ad.panY}
+	}
+	dx, dy := float64(u.mx)-ad.panFrom[0], float64(u.my)-ad.panFrom[1]
+	if math.Hypot(dx, dy) >= float64(u.px(2)) {
+		ad.heldMoved = true
+		if a.zoomHeld != nil {
+			a.zoomHeld.used = true
+		}
+	}
+	u.cursor = CursorMove
+	if kind == navZoom {
+		u.cursor = CursorCross
+	}
+	if ad.heldMoved {
+		if kind == navPan {
+			ad.panX, ad.panY, ad.fit = ad.panFrom[2]-dx/ad.zoom, ad.panFrom[3]-dy/ad.zoom, false
+		} else {
+			ad.zoomKeeping(vp, ad.panFrom, ad.navZoom*math.Pow(2, dx/float64(u.px(zoomScrub))))
+		}
+	}
+	u.press(id, vp)
+	if u.letGo(id) && kind == navZoom && !ad.heldMoved {
+		z := ad.zoom * 2
+		if u.alt {
+			z = ad.zoom / 2
+		}
+		ad.zoomAt(vp, u.mx, u.my, z)
+		ad.held = navNone // the next frame starts from here
+		if a.zoomHeld != nil {
+			a.zoomHeld.used = true
+		}
 	}
 	return true
 }

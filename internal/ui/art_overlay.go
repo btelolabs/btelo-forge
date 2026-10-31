@@ -55,7 +55,7 @@ func (a *App) addDrawing() {
 		a.toast(u.tf("The drawing could not be made: %s", a.describe(err)), true)
 		return
 	}
-	path, err := a.capturePath(u.t("Drawing %s"), paint.Ext, time.Now())
+	path, err := a.capturePath(categoryCreative, u.t("Drawing %s"), paint.Ext, time.Now())
 	if err == nil {
 		// The overlay needs its picture from the start: an empty one until something is drawn.
 		err = writePNG(drawingImage(path), image.NewRGBA(image.Rect(0, 0, w, h)))
@@ -139,6 +139,20 @@ func writePNG(path string, img image.Image) error {
 	return writeFileWhole(path, buf.Bytes())
 }
 
+// readCanvas reads a canvas file.
+func readCanvas(path string) (*paint.Doc, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return paint.Load(f, st.Size())
+}
+
 // openCanvasFileWith opens a saved canvas, drawing it over backdrop when there is one; a canvas already open is
 // shown.
 func (a *App) openCanvasFileWith(path string, backdrop *image.RGBA) {
@@ -151,16 +165,11 @@ func (a *App) openCanvasFileWith(path string, backdrop *image.RGBA) {
 			return
 		}
 	}
+	if backdrop == nil && a.showRestoring(path) {
+		return
+	}
 	a.background(func(ctx context.Context) {
-		f, err := os.Open(path)
-		var d *paint.Doc
-		if err == nil {
-			var st os.FileInfo
-			if st, err = f.Stat(); err == nil {
-				d, err = paint.Load(f, st.Size())
-			}
-			f.Close()
-		}
+		d, err := readCanvas(path)
 		a.post(func() {
 			if err != nil {
 				a.toast(a.u.tf("Cannot open %s: %s", filepath.Base(path), a.describe(err)), true)

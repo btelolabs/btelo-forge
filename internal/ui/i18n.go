@@ -11,6 +11,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/media"
 	"github.com/btelolabs/btelo-forge/internal/paint"
 	"github.com/btelolabs/btelo-forge/internal/project"
+	"github.com/btelolabs/btelo-forge/internal/psd"
 	"github.com/btelolabs/btelo-forge/internal/render"
 	"github.com/btelolabs/btelo-forge/internal/transcribe"
 	"github.com/btelolabs/btelo-forge/internal/update"
@@ -142,6 +143,11 @@ var knownErrors = []struct {
 	{render.ErrEncoderMissing, "This ffmpeg cannot encode the chosen format; pick another format or install a full ffmpeg build"},
 	{render.ErrCredits, "The video was exported, but its credits file could not be written"},
 	{paint.ErrHidden, "The chosen layer is hidden; show it to paint on it"},
+	{errNoMatting, "Finding a subject works on Windows for now"},
+	{psd.ErrNotPSD, "This is not a Photoshop file, or it is damaged"},
+	{psd.ErrUnsupported, "This Photoshop file is CMYK, Lab, 32-bit or a large document, which cannot be opened"},
+	{paint.ErrNothingToSample, "There is too little picture around the area to fill it from"},
+	{paint.ErrHealNeedsPixels, "Healing works on a layer's pixels; leave the mask to heal them"},
 	{paint.ErrGroup, "Choose a layer, not a group, in the layers panel"},
 	{paint.ErrNoLayer, "Choose a layer in the layers panel"},
 	{paint.ErrNothingBelow, "There is no layer below to merge into"},

@@ -21,24 +21,34 @@ const Repository = "https://github.com/btelolabs/btelo-forge"
 
 // settings are the preferences kept between runs.
 type settings struct {
-	Language    Language            `json:"language"`
-	Export      project.Export      `json:"export"`
-	ExportDir   string              `json:"exportDir"`
-	Exported    []exportRecord      `json:"exported"`
-	MCP         bool                `json:"mcp"`
-	Phone       bool                `json:"phone"`
-	PhoneKey    string              `json:"phoneKey"`
-	PanelHidden bool                `json:"panelHidden"`
-	Zoom        float32             `json:"zoom,omitempty"` // the window's zoom; none is its own size
-	Record      recordSettings      `json:"record"`
-	Live        liveSettings        `json:"live"`
-	Camera      cameraSettings      `json:"camera"`
-	Hotkeys     hotkeySettings      `json:"hotkeys"`
-	Keys        map[string][]Hotkey `json:"keys,omitempty"`      // the in-window shortcuts chosen, by command id; none means the defaults
-	FileTypes   []string            `json:"fileTypes,omitempty"` // the groups of file types opened from Explorer (fileTypeGroups)
-	Paint       paintSettings       `json:"paint"`
-	Files       filesSettings       `json:"files"`
-	Updates     updateSettings      `json:"updates"`
+	Language     Language            `json:"language"`
+	Export       project.Export      `json:"export"`
+	ExportDir    string              `json:"exportDir"`              // where videos are exported, when not to the resource folder
+	ExportBeside bool                `json:"exportBeside,omitempty"` // videos are exported beside their originals
+	ResourceDir  string              `json:"resourceDir,omitempty"`  // the folder the user's work is kept in; none is the default one
+	Exported     []exportRecord      `json:"exported"`
+	MCP          bool                `json:"mcp"`
+	Phone        bool                `json:"phone"`
+	PhoneKey     string              `json:"phoneKey"`
+	VerticalTabs bool                `json:"verticalTabs,omitempty"` // the tabs run down the left side instead of along the top
+	Zoom         float32             `json:"zoom,omitempty"`         // the window's zoom; none is its own size
+	Record       recordSettings      `json:"record"`
+	Live         liveSettings        `json:"live"`
+	Camera       cameraSettings      `json:"camera"`
+	Hotkeys      hotkeySettings      `json:"hotkeys"`
+	Keys         map[string][]Hotkey `json:"keys,omitempty"`      // the in-window shortcuts chosen, by command id; none means the defaults
+	FileTypes    []string            `json:"fileTypes,omitempty"` // the groups of file types opened from Explorer (fileTypeGroups)
+	Paint        paintSettings       `json:"paint"`
+	Files        filesSettings       `json:"files"`
+	Updates      updateSettings      `json:"updates"`
+	PinnedTabs   []savedTab          `json:"pinnedTabs,omitempty"` // the pinned tabs, in their order, opened again with the app
+
+	AIModel   string `json:"aiModel,omitempty"`   // the model last chosen in the chat: a local model's id, or provider/model
+	AIEngine  string `json:"aiEngine,omitempty"`  // where chat models compute: an engine's id
+	MailModel string `json:"mailModel,omitempty"` // the model that reads mail, one of this computer
+	MailEvery int    `json:"mailEvery,omitempty"` // minutes between looks for new mail; 0 is 15, and -1 only when asked
+
+	KeyboardRules bool `json:"keyboardRules,omitempty"` // the user turned the keyboard rules on; nothing else may
 
 	SubtitleModel    string `json:"subtitleModel"`
 	SubtitleLanguage string `json:"subtitleLanguage"`
@@ -131,15 +141,6 @@ func (a *App) setLanguage(l Language) {
 // showPanel opens the side panel on a page, for actions whose result is edited there.
 func (a *App) showPanel(tab int) {
 	a.tab = tab
-	a.setPanelHidden(false)
-}
-
-// setPanelHidden collapses or expands the side panel and remembers it.
-func (a *App) setPanelHidden(hidden bool) {
-	if a.settings.PanelHidden != hidden {
-		a.settings.PanelHidden = hidden
-		a.saveSettings()
-	}
 }
 
 // Title is the window title in the current language.
@@ -155,8 +156,8 @@ func newKey() string {
 
 // chooseExportDir asks for the default export folder.
 func (a *App) chooseExportDir() {
-	if dir := a.host.ChooseFolder(a.u.t("Default export folder")); dir != "" {
-		a.settings.ExportDir = dir
+	a.pickDir(pickRequest{title: a.u.t("Default export folder"), dir: a.settings.ExportDir}, func(dir string) {
+		a.settings.ExportDir, a.settings.ExportBeside = dir, false
 		a.saveSettings()
-	}
+	})
 }

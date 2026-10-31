@@ -112,32 +112,51 @@ func TestMarchingAntsAreWholeAtAnyZoom(t *testing.T) {
 	}
 }
 
-// Along an edge running any way, the ants are black and white by turns: a 45° edge too.
+// Along an edge running any way, the ants are black and white by turns: a 45° edge too, however the view lies on the
+// window's pixels.
 func TestMarchingAntsAlternateOnEveryEdge(t *testing.T) {
 	x, ad := canvasHarness(t)
 	d := ad.d
-	d.SelectShape(d.PolygonMask([][2]float64{{50, 250}, {250, 50}, {350, 250}}), paint.SelectNew)
-	ad.zoom, ad.panX, ad.panY, ad.fit = 1, 200, 150, false
-	x.frame(Input{})
-	ants := ad.ants
-	l := x.a.artLayout(x.a.layout().body)
-	sx, sy := ad.origin(l.view) // on the window, where the ants lie
-	// Along the edge from (50, 250) up to (250, 50), a little inside: count the colour changes.
-	changes, last := 0, color.RGBA{}
-	for k := 10; k < 190; k++ {
-		vx, vy := int(sx)+50+k, int(sy)+250-k
-		for o := -3; o <= 3; o++ { // the edge pixel nearest
-			c := ants.img.RGBAAt(vx+o-ants.at.X, vy-ants.at.Y)
-			if c.A != 0 {
-				if c != last && last.A != 0 {
-					changes++
+	for _, edge := range []struct {
+		name         string
+		shape        [][2]float64
+		fromX, fromY int
+		stepX, stepY int
+	}{
+		{"rising", [][2]float64{{50, 250}, {250, 50}, {350, 250}}, 50, 250, 1, -1},
+		{"falling", [][2]float64{{50, 50}, {250, 250}, {50, 250}}, 50, 50, 1, 1},
+		{"level", [][2]float64{{50, 50}, {250, 50}, {250, 250}, {50, 250}}, 50, 50, 1, 0},
+		{"upright", [][2]float64{{50, 50}, {250, 50}, {250, 250}, {50, 250}}, 50, 50, 0, 1},
+	} {
+		d.SelectShape(d.PolygonMask(edge.shape), paint.SelectNew)
+		for pan := range 40 { // more than a whole turn of the pattern, at any dash
+			ad.zoom, ad.panX, ad.panY, ad.fit = 1, 200+float64(pan), 150, false
+			x.frame(Input{})
+			ants := ad.ants
+			l := x.a.artLayout(x.a.layout().body)
+			sx, sy := ad.origin(l.view) // on the window, where the ants lie
+			// Along the edge, a little from its ends: count the colour changes.
+			changes, last := 0, color.RGBA{}
+			for k := 10; k < 190; k++ {
+				vx, vy := int(sx)+edge.fromX+k*edge.stepX, int(sy)+edge.fromY+k*edge.stepY
+				for o := -3; o <= 3; o++ { // the edge pixel nearest
+					px, py := vx+o, vy
+					if edge.stepY == 0 {
+						px, py = vx, vy+o
+					}
+					c := ants.img.RGBAAt(px-ants.at.X, py-ants.at.Y)
+					if c.A != 0 {
+						if c != last && last.A != 0 {
+							changes++
+						}
+						last = c
+						break
+					}
 				}
-				last = c
-				break
+			}
+			if changes < 10 {
+				t.Errorf("%s edge, panned by %d: the ants change colour %d times", edge.name, pan, changes)
 			}
 		}
-	}
-	if changes < 10 {
-		t.Errorf("along the 45° edge the ants change colour %d times", changes)
 	}
 }

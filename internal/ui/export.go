@@ -29,9 +29,9 @@ type lastExport struct {
 	at  time.Time
 }
 
-// destination is where the current edit exports to: the default folder from the settings, or beside the source.
+// destination is where the current edit exports to: the export folder, or beside the source.
 func (a *App) destination(p *project.Project) string {
-	return render.Destination(p.Sources[0].Path, a.settings.ExportDir, render.Extension(p.Export))
+	return render.Destination(p.Sources[0].Path, a.exportDir(), render.Extension(p.Export))
 }
 
 // setExport changes the edit's export settings and remembers them as the default for new edits.
@@ -64,7 +64,7 @@ func (a *App) startExport() (string, error) {
 	a.audition.Stop()
 	snapshot := a.p.Clone()
 	out := a.destination(snapshot)
-	if dir := filepath.Dir(out); a.settings.ExportDir != "" {
+	if dir := filepath.Dir(out); a.exportDir() != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			a.toast(a.u.tf("Export failed: %s", err), true)
 			return "", err

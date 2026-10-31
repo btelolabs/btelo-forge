@@ -238,12 +238,13 @@ func drawGuide(u *ctx, ad *artDoc, vp gfx.Rect, p, q [2]float64) {
 }
 
 // drawTransformModes are the mode buttons at the start of Free Transform's options; it returns where the rest go.
-func (a *App) drawTransformModes(ad *artDoc, x float32, r gfx.Rect) float32 {
+func (a *App) drawTransformModes(ad *artDoc, x float32, r *gfx.Rect) float32 {
 	u := &a.u
 	xf := ad.xf
 	for i, name := range xfModeNames {
 		label := u.t(name)
 		w := u.buttonWidth("", label)
+		a.optRow(&x, r, w)
 		br := gfx.Rect{X: x, Y: r.Y, W: w, H: r.H}
 		// Free Transform cannot come back once the shape is no longer a box, nor a quadrilateral from a warp.
 		enabled := i == xf.mode || i != xfFree && xf.mode != xfWarp

@@ -10,7 +10,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
-var settingsPages = msgs("General", "AI (MCP)", "Phone", "Hotkeys", "File types", "Extensions", "About")
+var settingsPages = msgs("General", "AI (MCP)", "Phone", "Hotkeys", "File types", "AI models", "Extensions", "About")
 
 // The settings pages, by their place in settingsPages.
 const (
@@ -19,6 +19,7 @@ const (
 	settingsPhonePage
 	settingsHotkeysPage
 	settingsFileTypesPage
+	settingsAIPage
 	settingsExtensionsPage
 	settingsAboutPage
 )
@@ -86,6 +87,8 @@ func (a *App) drawSettings() {
 		a.settingsHotkeys(body)
 	case settingsFileTypesPage:
 		a.settingsFileTypes(body)
+	case settingsAIPage:
+		a.settingsAI(body)
 	case settingsExtensionsPage:
 		a.settingsExtensions(body)
 	case settingsAboutPage:
@@ -111,6 +114,9 @@ func (a *App) paragraph(x, y, w float32, text string, size float32, col color.RG
 	return y
 }
 
+// tabPlaces are where the tabs can run, in the order of the choice in Settings.
+var tabPlaces = msgs("Along the top", "Down the left side")
+
 func (a *App) settingsGeneral(r gfx.Rect) {
 	u := &a.u
 	y := r.Y
@@ -121,21 +127,55 @@ func (a *App) settingsGeneral(r gfx.Rect) {
 		a.setLanguage(languages[pick])
 	}
 	y += u.px(52)
+	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Tabs"))
+	y += u.px(28)
+	place := 0
+	if a.settings.VerticalTabs {
+		place = 1
+	}
+	if pick := u.chips("settings/tabs", rectAt(r.X, y, min(r.W, u.px(280)), u.px(32)), u.ts(tabPlaces), place, true); pick != place {
+		a.settings.VerticalTabs = pick == 1
+		a.saveSettings()
+	}
+	y += u.px(52)
+	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Resource folder"))
+	y += u.px(28)
+	root, err := a.resourceDir()
+	if err != nil {
+		root = err.Error()
+	}
+	box := rectAt(r.X, y, r.W, u.px(36))
+	u.c.Fill(box, colSurface)
+	u.label(u.face(12.5), box.Inset(u.px(10)), root, colText, 0)
+	y += u.px(44)
+	if u.button("settings/resources", rectAt(r.X, y, u.px(150), u.px(32)), icFolder, u.t("Choose folder…"), plain, true) {
+		a.chooseResourceDir()
+	}
+	if a.settings.ResourceDir != "" && u.button("settings/resources/reset", rectAt(r.X+u.px(158), y, u.px(200), u.px(32)), "", u.t("Use the default folder"), ghost, true) {
+		a.setResourceDir("")
+	}
+	y += u.px(42)
+	y = a.paragraph(r.X, y, r.W, u.t("New work is saved in its folder here: Tools, Creative, Documents or Intelligence. Changing this moves nothing that is already saved."), 12, colFaint)
+	y += u.px(18)
 	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Default export folder"))
 	y += u.px(28)
-	dir := a.settings.ExportDir
+	dir := a.exportDir()
 	if dir == "" {
 		dir = u.t("Next to the original video")
 	}
-	box := rectAt(r.X, y, r.W, u.px(36))
+	box = rectAt(r.X, y, r.W, u.px(36))
 	u.c.Fill(box, colSurface)
 	u.label(u.face(12.5), box.Inset(u.px(10)), dir, colText, 0)
 	y += u.px(44)
 	if u.button("settings/dir", rectAt(r.X, y, u.px(150), u.px(32)), icFolder, u.t("Choose folder…"), plain, true) {
 		a.chooseExportDir()
 	}
-	if a.settings.ExportDir != "" && u.button("settings/dir/reset", rectAt(r.X+u.px(158), y, u.px(200), u.px(32)), "", u.t("Next to the original video"), ghost, true) {
-		a.settings.ExportDir = ""
+	if !a.settings.ExportBeside && u.button("settings/dir/beside", rectAt(r.X+u.px(158), y, u.px(200), u.px(32)), "", u.t("Next to the original video"), ghost, true) {
+		a.settings.ExportDir, a.settings.ExportBeside = "", true
+		a.saveSettings()
+	}
+	if (a.settings.ExportBeside || a.settings.ExportDir != "") && u.button("settings/dir/reset", rectAt(r.X+u.px(366), y, u.px(200), u.px(32)), "", u.t("In the resource folder"), ghost, true) {
+		a.settings.ExportDir, a.settings.ExportBeside = "", false
 		a.saveSettings()
 	}
 	y += u.px(48)
@@ -277,7 +317,7 @@ func (a *App) settingsPhone(r gfx.Rect) {
 	}
 	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Uploads from the phone are saved in"))
 	y += u.px(26)
-	dir, err := a.uploadDir()
+	dir, err := a.categoryDir(categoryTools)
 	if err != nil {
 		dir = err.Error()
 	}
@@ -285,10 +325,10 @@ func (a *App) settingsPhone(r gfx.Rect) {
 	u.c.Fill(box, colSurface)
 	u.label(u.face(12), box.Inset(u.px(10)), dir, colText, 0)
 	if u.button("settings/phone/dir", rectAt(box.Right()+u.px(8), y, u.px(152), u.px(32)), icFolder, u.t("Choose folder…"), plain, true) {
-		a.chooseExportDir()
+		a.chooseResourceDir()
 	}
 	y += u.px(38)
-	y = a.paragraph(r.X, y, r.W, u.t("This is the default export folder (Settings → General); when exports go beside each original, uploads go to your videos folder."), 11.5, colFaint)
+	y = a.paragraph(r.X, y, r.W, u.t("This is the Tools folder of the resource folder (Settings → General)."), 11.5, colFaint)
 	a.paragraph(r.X, y+u.px(6), r.W, u.tf("%d exported videos are listed.", len(a.exports())), 12, colFaint)
 }
 

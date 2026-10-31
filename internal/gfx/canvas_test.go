@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"math"
 	"math/rand/v2"
+	"strings"
 	"testing"
 )
 
@@ -172,6 +173,21 @@ func TestPieOfOneWholeTurnHasNoSeam(t *testing.T) {
 		for x := 15; x < 45; x++ {
 			if dx, dy := float64(x)+0.5-30, float64(y)+0.5-30; math.Hypot(dx, dy) < 19 && c.Img.RGBAAt(x, y) != Hex(0x00ff00) {
 				t.Fatalf("(%d,%d) inside the disc is %v", x, y, c.Img.RGBAAt(x, y))
+			}
+		}
+	}
+}
+
+func TestWrapNeverStartsALineWithClosingPunctuation(t *testing.T) {
+	fonts, err := LoadSystemFonts()
+	if err != nil {
+		t.Skip(err)
+	}
+	face := fonts.Regular.Face(14)
+	for width := float32(30); width < 200; width += 7 {
+		for _, line := range face.Wrap("自动换行也可以。这是第二句，继续检查（括号）！", width)[1:] {
+			if strings.ContainsRune(closingMarks, []rune(line)[0]) {
+				t.Fatalf("at %v a line starts with punctuation: %q", width, line)
 			}
 		}
 	}

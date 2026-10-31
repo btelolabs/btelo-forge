@@ -15,7 +15,9 @@ import (
 // name, as its link id names the file; an edit's file, saved under the name the first time.
 
 // renameable reports whether a tab holds something a name can be given: a canvas, an edit or a mind map.
-func (d *doc) renameable() bool { return d.art != nil || d.p != nil || d.board != nil }
+func (d *doc) renameable() bool {
+	return d.art != nil || d.p != nil || d.board != nil || d.office != nil
+}
 
 // tabName is the name a tab's thing has now, as its name box starts.
 func (a *App) tabName(d *doc) string {
@@ -24,6 +26,8 @@ func (a *App) tabName(d *doc) string {
 		return d.art.d.SmartName()
 	case d.board != nil:
 		return d.board.title()
+	case d.office != nil:
+		return strings.TrimSuffix(d.office.title(), filepath.Ext(d.office.path))
 	case d.art != nil:
 		return strings.TrimSuffix(filepath.Base(d.art.path), paint.Ext)
 	case d.file != "":
@@ -52,6 +56,8 @@ func (a *App) renameTab(d *doc, name string) {
 		err = a.renameCanvas(d.art, safeFileName(name))
 	case d.board != nil:
 		err = a.renameMindFile(d.board, safeFileName(name))
+	case d.office != nil:
+		err = a.renameOfficeFile(d.office, safeFileName(name))
 	case d.p != nil:
 		err = a.renameEdit(d, safeFileName(name))
 	}
@@ -103,7 +109,7 @@ func (a *App) renameCanvas(ad *artDoc, name string) error {
 // renameEdit names an edit's file: it is moved, or saved under the name the first time.
 func (a *App) renameEdit(d *doc, name string) error {
 	if d.file == "" {
-		dir, err := a.uploadDir()
+		dir, err := a.categoryDir(categoryCreative)
 		if err != nil {
 			return err
 		}
@@ -114,7 +120,7 @@ func (a *App) renameEdit(d *doc, name string) error {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
-		if err := project.WriteFile(to, d.p); err != nil {
+		if err := project.WriteFile(to, d.p, editPicture(d, to)); err != nil {
 			return err
 		}
 		d.file = to

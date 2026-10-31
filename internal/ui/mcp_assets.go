@@ -31,7 +31,7 @@ type assetView struct {
 }
 
 // kindIDs name the kinds for the MCP tools, in assets.Kinds' order.
-var kindIDs = []string{"image", "animation", "video", "audio", "canvas", "edit", "markdown", "code", "text", "other"}
+var kindIDs = []string{"image", "animation", "video", "audio", "canvas", "edit", "mind_map", "office", "markdown", "code", "text", "other"}
 
 func kindID(k assets.Kind) string {
 	if k == assets.Folder {
@@ -45,7 +45,7 @@ func kindID(k assets.Kind) string {
 
 func (a *App) addAssetTools(s *mcp.Server) {
 	type browseIn struct {
-		Dir string `json:"dir,omitempty" jsonschema:"folder to show; the default export folder when omitted"`
+		Dir string `json:"dir,omitempty" jsonschema:"folder to show; the resource folder when omitted"`
 	}
 	tool(s, a, "assets_browse", "Show a folder in the file manager tab as a grid of pictures with tags (Eagle-like: pictures, videos, sounds, canvases, .btcut edits, Markdown, code and texts), opening the tab if needed.",
 		func(in browseIn) (any, error) {
@@ -76,7 +76,7 @@ func (a *App) addAssetTools(s *mcp.Server) {
 				dir = a.files.pane().dir
 			}
 			if dir == "" {
-				d, err := a.uploadDir()
+				d, err := a.ensureResourceFolders()
 				if err != nil {
 					return nil, err
 				}

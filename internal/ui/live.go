@@ -499,7 +499,7 @@ func (a *App) liveCard() startCard {
 		cameraHint = u.t("The camera is on the screen — open its settings")
 	}
 	return startCard{id: "empty/live", glyph: icLive, hue: gfx.Hex(0xe8618c), title: u.t("Go live"),
-		text:   u.t("Stream the screen to several platforms at once, such as Bilibili, Douyin and YouTube, with your camera in a corner."),
+		text:   u.t("Stream to several platforms at once, with your camera."),
 		action: action, enabled: capture.Supported() && !l.starting && a.export == nil, hint: hint, run: a.openLive,
 		extra: &startExtra{id: "empty/camera", glyph: icVideo, hint: cameraHint, enabled: capture.Supported() && overlays && a.export == nil,
 			run: func() {
@@ -515,7 +515,7 @@ func (a *App) liveControlRect(end, y, h float32) gfx.Rect {
 	if a.onAir.stream == nil || a.liveTab {
 		return gfx.Rect{X: end, Y: y, H: h}
 	}
-	return gfx.Rect{X: end - a.u.px(4) - a.u.px(178), Y: y, W: a.u.px(178), H: h}
+	return gfx.Rect{X: end - a.u.px(4) - a.u.px(168), Y: y, W: a.u.px(168), H: h}
 }
 
 // drawLiveControl is, while live, the stream's time, destinations and stop button in the tab strip, so that it can

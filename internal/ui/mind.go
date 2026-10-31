@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/mind"
+	"github.com/btelolabs/btelo-forge/internal/thumb"
 )
 
 // Mind maps: a tab whose board holds mind maps, flowcharts, tables, words, pictures, videos, canvases' smart objects
@@ -66,6 +67,10 @@ type mindDoc struct {
 	saving  bool
 	saveErr error
 	saved   uint64 // the map's version when it was last saved
+
+	thumb      []byte    // what the file ended with at the last save (thumb.Encode)
+	thumbAt    time.Time // when it was drawn
+	thumbStale bool      // the file was saved since with the picture as it was
 }
 
 // title is the tab's: the map's file name.
@@ -91,7 +96,7 @@ func (a *App) openMindDoc(m *mind.Map, path string) *mindDoc {
 
 // newMindMap makes a map with one central topic, saved at once so it is never only in memory.
 func (a *App) newMindMap() error {
-	path, err := a.capturePath(a.u.t("Mind map %s"), mind.Ext, time.Now())
+	path, err := a.capturePath(categoryCreative, a.u.t("Mind map %s"), mind.Ext, time.Now())
 	if err != nil {
 		return err
 	}
@@ -121,6 +126,9 @@ func (a *App) openMindFile(path string) {
 			a.switchTab(i)
 			return
 		}
+	}
+	if a.showRestoring(path) {
+		return
 	}
 	measure := a.mindMeasure()
 	a.background(func(ctx context.Context) {
@@ -173,10 +181,15 @@ func (md *mindDoc) mindChanged() {
 	md.dirty, md.changed = true, time.Now()
 }
 
+// mindThumbEvery is how often the small picture of a map being changed is drawn again: drawing it reads every picture
+// on the board, which must not happen at each save of a long session. The last picture is kept until then, and
+// the map is saved once more when the changes stop, or on closing, so the file ends with what it holds.
+const mindThumbEvery = 30 * time.Second
+
 // saveMind writes the map: read here, compressed and written on another goroutine, or here when wait is true
 // (closing). Every open map showing it draws it again once it is written.
 func (a *App) saveMind(md *mindDoc, wait bool) error {
-	if !md.dirty || md.saving && !wait {
+	if !md.dirty && !(wait && md.thumbStale) || md.saving && !wait {
 		return nil
 	}
 	snap, err := mind.Snapshot(md.m, filepath.Dir(md.path))
@@ -185,18 +198,34 @@ func (a *App) saveMind(md *mindDoc, wait bool) error {
 	}
 	md.dirty, md.saving = false, true
 	version, path := md.m.Version(), md.path
+	redraw := wait || time.Since(md.thumbAt) >= mindThumbEvery
+	if redraw {
+		md.thumbAt = time.Now()
+	}
+	md.thumbStale = !redraw
+	end := md.thumb
+	fonts, labels, src := a.u.fonts, a.mindLabels(), mindSource{a}
 	write := func() error {
 		var buf bytes.Buffer
 		if err := snap.Write(&buf); err != nil {
 			return err
 		}
+		if redraw {
+			// A map whose picture cannot be made is saved all the same, with the last one.
+			if img, err := mind.DrawFrom(bytes.NewReader(buf.Bytes()), path, thumb.Box, fonts, labels, src); err == nil {
+				if e, err := thumb.Encode(img, thumb.Meta{W: img.Rect.Dx(), H: img.Rect.Dy()}); err == nil {
+					end = e
+				}
+			}
+		}
+		buf.Write(end)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
 		return writeFileWhole(path, buf.Bytes())
 	}
 	done := func(err error) {
-		md.saving, md.saveErr = false, err
+		md.saving, md.saveErr, md.thumb = false, err, end
 		if err != nil {
 			md.dirty, md.changed = true, time.Now() // tried again after the usual delay
 			a.toast(a.u.tf("The mind map could not be saved: %s", a.describe(err)), true)
@@ -227,6 +256,9 @@ func (a *App) autosaveMind() {
 		}
 		if md.m.Version() != md.saved && !md.dirty && !md.saving && md.text == nil && md.act == nil {
 			md.mindChanged()
+		}
+		if md.thumbStale && !md.dirty && !md.saving && md.text == nil && md.act == nil && time.Since(md.thumbAt) >= mindThumbEvery {
+			md.dirty, md.changed = true, time.Time{}
 		}
 		if due, ok := mindSaveDue(md); ok && !time.Now().Before(due) {
 			a.saveMind(md, false)

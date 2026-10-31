@@ -70,10 +70,14 @@ var artTools = []struct {
 	{toolPicker, icPicker, 'I', false},
 	{toolBrush, icBrush, 'B', false},
 	{toolClone, icClone, 'S', false},
+	{toolSpot, icSpot, 'S', false},
+	{toolHeal, icHeal, 'S', false},
+	{toolPatch, icPatch, 'S', false},
 	{toolEraser, "", 'E', false},
 	{toolBlur, icBlurTool, 'R', true},
 	{toolSharpen, icSharpenTool, 'R', true},
 	{toolSmudge, icSmudge, 'R', true},
+	{toolLiquify, icLiquify, 'R', true},
 	{toolDodge, icDodge, 'O', false},
 	{toolBurn, icBurn, 'O', false},
 	{toolSponge, icSponge, 'O', false},
@@ -91,7 +95,7 @@ var artTools = []struct {
 // artToolNames name the tools, by artTool.
 var artToolNames = msgs("Move", "Rectangular marquee", "Lasso", "Magic wand", "Eyedropper", "Brush", "Eraser", "Hand", "Zoom",
 	"Clone stamp", "Gradient", "Paint bucket", "Shape", "Text", "Pen", "Node", "Artboard", "Vector brush", "Dodge", "Burn", "Sponge", "Blur", "Sharpen", "Smudge",
-	"Mask gradient")
+	"Mask gradient", "Spot healing brush", "Healing brush", "Patch", "Liquify")
 
 // toolDefaultKeys are the keys that pick tool t before others are chosen in Settings: its place's, unless the place
 // is unbound.
@@ -341,8 +345,16 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 				from, _ := a.snapped(ad, paint.Pt{X: cx, Y: cy}, ad.snapTo)
 				ad.drawFrom, ad.drawTo = pt2(from), pt2(from)
 			}
-		case toolClone:
+		case toolClone, toolHeal:
 			a.beginClone(ad, cx, cy)
+		case toolSpot:
+			a.beginSpot(ad, cx, cy)
+		case toolPatch:
+			if ad.d.Selection != nil && ad.d.Selection.At(at.X, at.Y) != 0 {
+				ad.patching, ad.patchFrom = true, [2]float64{cx, cy}
+			} else {
+				ad.lasso = [][2]float64{{cx, cy}}
+			}
 		}
 	}
 	if u.dragging(id) {
@@ -355,9 +367,10 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 			}
 		}
 		switch a.artTool {
-		case toolBrush, toolEraser, toolClone, toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge:
+		case toolBrush, toolEraser, toolClone, toolSpot, toolHeal, toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge, toolLiquify:
 			if ad.stroke != nil {
 				ad.touched(ad.stroke.To(cx, cy))
+				ad.touched(ad.stroke.Hold())
 			}
 		case toolMarquee:
 			ad.selNow = at
@@ -366,7 +379,10 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 				d := max(abs(ad.selNow.X-ad.selFrom.X), abs(ad.selNow.Y-ad.selFrom.Y))
 				ad.selNow = ad.selFrom.Add(image.Pt(d*sign(ad.selNow.X-ad.selFrom.X), d*sign(ad.selNow.Y-ad.selFrom.Y)))
 			}
-		case toolLasso:
+		case toolLasso, toolPatch:
+			if len(ad.lasso) == 0 {
+				break // the Patch tool dragging the selection
+			}
 			last := ad.lasso[len(ad.lasso)-1]
 			if math.Hypot(cx-last[0], cy-last[1])*ad.zoom >= 2 {
 				ad.lasso = append(ad.lasso, [2]float64{cx, cy})
@@ -387,6 +403,8 @@ func (a *App) artPointer(ad *artDoc, vp gfx.Rect) {
 		case ad.stroke != nil:
 			ad.touched(ad.stroke.End())
 			ad.stroke = nil
+		case ad.patching:
+			a.finishPatch(ad, cx, cy)
 		case ad.selDrag:
 			ad.selDrag = false
 			r := image.Rectangle{Min: ad.selFrom, Max: ad.selNow}.Canon()
@@ -500,7 +518,7 @@ func (a *App) drawArtOverlay(ad *artDoc, vp gfx.Rect) {
 	}
 	a.drawFillOverlay(ad, vp)
 	a.drawVectorGradientOverlay(ad, vp)
-	if ad.over && (a.artTool == toolBrush || a.artTool == toolEraser || a.artTool == toolClone || a.artTool == toolPencil || a.retouching()) && u.active == "" ||
+	if ad.over && (a.artTool == toolBrush || a.artTool == toolEraser || a.artTool == toolClone || a.artTool == toolSpot || a.artTool == toolHeal || a.artTool == toolPencil || a.retouching()) && u.active == "" ||
 		ad.stroke != nil || ad.vstroke != nil {
 		a.drawBrushOutline(ad)
 	}
@@ -570,31 +588,39 @@ func (a *App) drawArtTools(r gfx.Rect) {
 	// The places shrink to fit a short window.
 	step := min(u.px(36), (r.H-u.px(16))/float32(len(places)))
 	for _, place := range places {
-		t := a.slotTool(place)
 		b := gfx.Rect{X: r.X + u.px(8), Y: y, W: u.px(32), H: min(u.px(32), step-u.px(2))}
-		name := u.t(artToolNames[t])
-		if t == toolMarquee && a.marqueeEllipse {
-			name = u.t("Elliptical marquee")
-		}
-		label := a.keyHint(toolID(t), toolDefaultKeys(t))
-		if label != "" && nextInSlot(t) != t {
-			label += ", Shift+" + label // to the next tool with the same key
-		}
-		id := fmt.Sprintf("art/tool/%c", place)
-		if u.iconButton(id, b, a.toolGlyph(t), withKey(name, label), a.artTool == t, true) {
-			switch {
-			case t == toolMarquee && a.artTool == toolMarquee:
-				a.marqueeEllipse = !a.marqueeEllipse // clicking the chosen marquee switches its shape
-			case a.artTool == t:
-				t = nextInSlot(t) // clicking the chosen tool of a shared place goes to the next
-			}
-			a.setArtTool(t)
-		}
-		if t == toolEraser {
-			drawEraserGlyph(u, b, a.artTool == toolEraser)
-		}
+		a.artToolButton(fmt.Sprintf("art/tool/%c", place), a.slotTool(place), b, true)
 		y += step
 	}
+}
+
+// artToolButton is a tool's button: its symbol, its name and keys as the hint; a click chooses it. Clicking the
+// chosen marquee switches its shape; with shared, clicking the chosen tool of a place shared with others goes to the
+// next of them. It reports a click.
+func (a *App) artToolButton(id string, t artTool, b gfx.Rect, shared bool) bool {
+	u := &a.u
+	name := u.t(artToolNames[t])
+	if t == toolMarquee && a.marqueeEllipse {
+		name = u.t("Elliptical marquee")
+	}
+	label := a.keyHint(toolID(t), toolDefaultKeys(t))
+	if label != "" && shared && nextInSlot(t) != t {
+		label += ", Shift+" + label // to the next tool with the same key
+	}
+	clicked := u.iconButton(id, b, a.toolGlyph(t), withKey(name, label), a.artTool == t, true)
+	if clicked {
+		switch {
+		case t == toolMarquee && a.artTool == toolMarquee:
+			a.marqueeEllipse = !a.marqueeEllipse // clicking the chosen marquee switches its shape
+		case shared && a.artTool == t:
+			t = nextInSlot(t) // clicking the chosen tool of a shared place goes to the next
+		}
+		a.setArtTool(t)
+	}
+	if t == toolEraser {
+		drawEraserGlyph(u, b, a.artTool == toolEraser)
+	}
+	return clicked
 }
 
 // drawEraserGlyph draws the eraser's icon, a block eraser lying at an angle.
@@ -637,17 +663,25 @@ func (a *App) drawArtBar(ad *artDoc, r, view gfx.Rect) {
 	u.c.Fill(gfx.Rect{X: r.X, Y: r.Bottom() - max(1, u.px(1)), W: r.W, H: max(1, u.px(1))}, colBorder)
 	y, h := r.Y+u.px(7), u.px(30)
 	x := r.X + u.px(12)
-	icon := gfx.Rect{X: x, Y: y, W: u.px(30), H: h}
-	glyph := a.toolGlyph(a.artTool)
-	if a.artTool == toolEraser {
-		drawEraserGlyph(u, icon, true)
-	} else {
-		u.icon(glyph, icon, 18, colText)
+	if !a.over.flow.on { // the narrow panel on the screen shows the chosen tool in its tool box, right above
+		icon := gfx.Rect{X: x, Y: y, W: u.px(30), H: h}
+		glyph := a.toolGlyph(a.artTool)
+		if a.artTool == toolEraser {
+			drawEraserGlyph(u, icon, true)
+		} else {
+			u.icon(glyph, icon, 18, colText)
+		}
+		x = icon.Right() + u.px(10)
+		u.c.Fill(gfx.Rect{X: x, Y: y + u.px(4), W: max(1, u.px(1)), H: h - u.px(8)}, colBorder)
+		x += u.px(12)
 	}
-	x = icon.Right() + u.px(10)
-	u.c.Fill(gfx.Rect{X: x, Y: y + u.px(4), W: max(1, u.px(1)), H: h - u.px(8)}, colBorder)
-	x += u.px(12)
+	if a.over.flow.on { // its name and keys, there being little to tell its small symbols apart by
+		name := withKey(u.t(artToolNames[a.artTool]), a.keyHint(toolID(a.artTool), toolDefaultKeys(a.artTool)))
+		u.label(u.face(12), gfx.Rect{X: x, Y: y, W: r.W - u.px(24), H: u.px(screenToolNameH - 2)}, name, colText, 0)
+		y += u.px(screenToolNameH)
+	}
 	area := gfx.Rect{X: x, Y: y, W: r.Right() - x - u.px(12), H: h}
+	a.over.flow.left = area.X
 	switch {
 	case ad.xf != nil:
 		a.drawTransformOptions(ad, area)
@@ -656,9 +690,9 @@ func (a *App) drawArtBar(ad *artDoc, r, view gfx.Rect) {
 	switch a.artTool {
 	case toolBrush, toolEraser:
 		a.drawBrushOptions(area)
-	case toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge:
+	case toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge, toolLiquify:
 		a.drawRetouchOptions(area)
-	case toolMarquee, toolLasso, toolWand:
+	case toolMarquee, toolLasso, toolWand, toolPatch:
 		a.drawSelectOptions(ad, area)
 	case toolBucket:
 		a.drawBucketOptions(area)
@@ -670,7 +704,7 @@ func (a *App) drawArtBar(ad *artDoc, r, view gfx.Rect) {
 			break
 		}
 		a.drawGradientOptions(area)
-	case toolClone:
+	case toolClone, toolSpot, toolHeal:
 		a.drawCloneOptions(area)
 	case toolShape:
 		a.drawShapeOptions(ad, area)
@@ -687,11 +721,29 @@ func (a *App) drawArtBar(ad *artDoc, r, view gfx.Rect) {
 	case toolMove:
 		a.drawMoveOptions(ad, area)
 	case toolZoom:
-		u.label(u.face(12), area, u.tf("Click to zoom in, Alt+click to zoom out, drag sideways to zoom; hold Z with any tool to zoom for a moment; %s fits the picture to the window", a.keyHint("draw.fit-on-screen", keys(fitKey))), colDim, 0)
+		a.optHint(area.X, area, u.tf("Click to zoom in, Alt+click to zoom out, drag sideways to zoom; hold Z with any tool to zoom for a moment; %s fits the picture to the window", a.keyHint("draw.fit-on-screen", keys(fitKey))))
 	case toolHand:
-		u.label(u.face(12), area, u.t("Drag to move around the picture, or hold Space with any tool; the wheel zooms, Shift+wheel scrolls sideways, Ctrl+wheel up and down"), colDim, 0)
+		a.optHint(area.X, area, u.t("Drag to move around the picture, or hold Space with any tool; the wheel zooms, Shift+wheel scrolls sideways, Ctrl+wheel up and down"))
 	case toolPicker:
-		u.label(u.face(12), area, u.t("Click to take the foreground colour from the picture, Alt+click for the background colour"), colDim, 0)
+		a.optHint(area.X, area, u.t("Click to take the foreground colour from the picture, Alt+click for the background colour"))
+	}
+}
+
+// optRow goes on to a new row of the options for a control w wide that does not fit in what is left of this one, in
+// the narrow panel on the screen; the canvas's bar stays one row, each control leaving out what does not fit.
+func (a *App) optRow(x *float32, r *gfx.Rect, w float32) {
+	f := &a.over.flow
+	if f.on && *x > f.left && *x+w > r.Right() {
+		*x = f.left
+		r.Y += r.H + a.u.px(optRowGap)
+		f.rows++
+	}
+}
+
+// optHint is a line of advice at the end of the options, from x; the narrow panel on the screen has no room for it.
+func (a *App) optHint(x float32, r gfx.Rect, text string) {
+	if !a.over.flow.on {
+		a.u.label(a.u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H}, text, colDim, 0)
 	}
 }
 
@@ -737,7 +789,8 @@ func (a *App) drawBrushOptions(r gfx.Rect) {
 		}
 		x += tr.W + u.px(4)
 	}
-	x = a.drawTipButtons(x, r)
+	x = a.drawTipButtons(x, &r)
+	a.optRow(&x, &r, u.px(30))
 	shape := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
 	if u.iconButton("art/tipshape", shape, "\ue429", u.t("Brush tip shape: angle, roundness and spacing"), a.menuOpen("art/tipshape"), true) {
 		a.openMenu("art/tipshape", shape, nil) // drawn by drawTipShape: a panel rather than a list
@@ -757,6 +810,7 @@ func (a *App) drawBrushOptions(r gfx.Rect) {
 		{"flow", u.t("Flow"), &b.Flow, 0.01, 1, pct},
 		{"smooth", u.t("Smoothing"), &b.Smooth, 0, 1, pct},
 	} {
+		a.optRow(&x, &r, u.px(190))
 		if x+u.px(190) > r.Right() {
 			break
 		}
@@ -764,7 +818,7 @@ func (a *App) drawBrushOptions(r gfx.Rect) {
 		x, done = a.labelledSlider("art/"+s.id, x, r.Y, r.H, s.label, s.value, s.lo, s.hi, s.format)
 		saved = saved || done
 		if s.id == "size" {
-			x = a.drawSameSize(x, r) + u.px(16)
+			x = a.drawSameSize(x, &r) + u.px(16)
 		}
 	}
 	if saved {
@@ -885,15 +939,18 @@ func (a *App) drawSelectOptions(ad *artDoc, r gfx.Rect) {
 		x += u.px(32)
 	}
 	x += u.px(12)
+	a.optRow(&x, &r, u.px(190))
 	if a.artTool == toolWand {
 		tol := float64(p.WandTolerance)
 		nx, done := a.labelledSlider("art/tolerance", x, r.Y, r.H, u.t("Tolerance"), &tol, 0, 255, func(v float64) string { return fmt.Sprintf("%.0f", v) })
 		p.WandTolerance = int(math.Round(tol))
 		x = nx
+		a.optRow(&x, &r, u.px(116))
 		if on := u.checkbox("art/contiguous", gfx.Rect{X: x, Y: r.Y, W: u.px(110), H: r.H}, u.t("Contiguous"), p.WandContiguous); on != p.WandContiguous {
 			p.WandContiguous, done = on, true
 		}
 		x += u.px(116)
+		a.optRow(&x, &r, u.px(176))
 		if on := u.checkbox("art/alllayers", gfx.Rect{X: x, Y: r.Y, W: u.px(170), H: r.H}, u.t("Sample all layers"), p.WandAllLayers); on != p.WandAllLayers {
 			p.WandAllLayers, done = on, true
 		}
@@ -918,6 +975,7 @@ func (a *App) drawSelectOptions(ad *artDoc, r gfx.Rect) {
 		{"inverse", u.t("Inverse"), ad.d.InvertSelection},
 	} {
 		w := u.buttonWidth("", c.label)
+		a.optRow(&x, &r, w)
 		if x+w > r.Right() {
 			break
 		}

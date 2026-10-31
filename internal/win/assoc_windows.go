@@ -16,12 +16,14 @@ import (
 // for it; the app's own file types, which no other program claims, it makes the default outright.
 
 // Association is a kind of file the app opens: its ProgID, the name Explorer shows for it, and its extensions;
-// Own says the app's own formats, whose default it may set.
+// Own says the app's own formats, whose default it may set; Preview that its files end with a small picture
+// (internal/thumb), which Explorer is to show.
 type Association struct {
-	ProgID string
-	Name   string
-	Exts   []string
-	Own    bool
+	ProgID  string
+	Name    string
+	Exts    []string
+	Own     bool
+	Preview bool
 }
 
 // AssocRoot is where associations are written: Software under the current user. Tests point it elsewhere.
@@ -30,6 +32,8 @@ type AssocRoot struct {
 	App      string // the application's key under Software, such as BteloLabs\BteloForge
 	Name     string // the application's name in RegisteredApplications and Default apps
 	Exe      string // the program, its full path
+
+	Thumbnailer string // the thumbnail DLL, its full path; empty when there is none
 }
 
 // UserRoot is the real place, for the program at exe.
@@ -45,7 +49,11 @@ func (r AssocRoot) application() string {
 }
 
 func setString(path, name, value string) error {
-	k, _, err := registry.CreateKey(registry.CURRENT_USER, path, registry.SET_VALUE)
+	return setStringIn(registry.CURRENT_USER, path, name, value)
+}
+
+func setStringIn(root registry.Key, path, name, value string) error {
+	k, _, err := registry.CreateKey(root, path, registry.SET_VALUE)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
@@ -53,8 +61,10 @@ func setString(path, name, value string) error {
 	return k.SetStringValue(name, value)
 }
 
-func getString(path, name string) string {
-	k, err := registry.OpenKey(registry.CURRENT_USER, path, registry.QUERY_VALUE)
+func getString(path, name string) string { return getStringIn(registry.CURRENT_USER, path, name) }
+
+func getStringIn(root registry.Key, path, name string) string {
+	k, err := registry.OpenKey(root, path, registry.QUERY_VALUE)
 	if err != nil {
 		return ""
 	}
@@ -82,8 +92,10 @@ func deleteValue(path, name string) error {
 }
 
 // deleteTree removes a key with everything under it.
-func deleteTree(path string) error {
-	k, err := registry.OpenKey(registry.CURRENT_USER, path, registry.ENUMERATE_SUB_KEYS)
+func deleteTree(path string) error { return deleteTreeIn(registry.CURRENT_USER, path) }
+
+func deleteTreeIn(root registry.Key, path string) error {
+	k, err := registry.OpenKey(root, path, registry.ENUMERATE_SUB_KEYS)
 	if errors.Is(err, registry.ErrNotExist) {
 		return nil
 	}
@@ -96,11 +108,11 @@ func deleteTree(path string) error {
 		return err
 	}
 	for _, s := range subs {
-		if err := deleteTree(path + `\` + s); err != nil {
+		if err := deleteTreeIn(root, path+`\`+s); err != nil {
 			return err
 		}
 	}
-	if err := registry.DeleteKey(registry.CURRENT_USER, path); err != nil && !errors.Is(err, registry.ErrNotExist) {
+	if err := registry.DeleteKey(root, path); err != nil && !errors.Is(err, registry.ErrNotExist) {
 		return err
 	}
 	return nil
@@ -137,6 +149,11 @@ func Register(r AssocRoot, list []Association, description string) error {
 				}
 			}
 		}
+		if a.Preview {
+			if err := registerThumbnails(r, a); err != nil {
+				return err
+			}
+		}
 	}
 	for _, kv := range [][3]string{
 		{r.capabilities(), "ApplicationName", r.Name},
@@ -157,6 +174,11 @@ func Register(r AssocRoot, list []Association, description string) error {
 // Unregister takes the associations back; once none is left, the app's declaration goes too.
 func Unregister(r AssocRoot, list []Association) error {
 	for _, a := range list {
+		if a.Preview {
+			if err := unregisterThumbnails(r, a); err != nil {
+				return err
+			}
+		}
 		for _, ext := range a.Exts {
 			if err := deleteValue(r.classes()+`\`+ext+`\OpenWithProgids`, a.ProgID); err != nil {
 				return err
@@ -199,7 +221,8 @@ func Unregister(r AssocRoot, list []Association) error {
 // Registered reports whether the association is declared for this very program (a moved program declares nothing
 // until it registers again).
 func Registered(r AssocRoot, a Association) bool {
-	return strings.EqualFold(getString(r.classes()+`\`+a.ProgID+`\shell\open\command`, ""), r.command())
+	return strings.EqualFold(getString(r.classes()+`\`+a.ProgID+`\shell\open\command`, ""), r.command()) &&
+		(!a.Preview || thumbnailsRegistered(r))
 }
 
 // DefaultFor reports whether the user's choice for the extension is the ProgID, or, with no choice made, whether

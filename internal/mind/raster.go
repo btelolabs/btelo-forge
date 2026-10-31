@@ -27,6 +27,17 @@ func fillPath(c *gfx.Canvas, contours [][]pt, col color.RGBA) {
 	if col.A == 0 {
 		return
 	}
+	if rec := c.Recorder(); rec != nil {
+		out := make([][][2]float32, len(contours))
+		for i, ct := range contours {
+			out[i] = make([][2]float32, len(ct))
+			for j, p := range ct {
+				out[i][j] = [2]float32{p.x, p.y}
+			}
+		}
+		rec.Polygon(out, col)
+		return
+	}
 	box := image.Rectangle{}
 	first := true
 	for _, ct := range contours {

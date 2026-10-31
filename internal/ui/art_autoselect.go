@@ -100,9 +100,8 @@ func (a *App) drawMoveOptions(ad *artDoc, r gfx.Rect) {
 	}
 	u.hint("art/move/autoselect", u.t("A press chooses what is there, the outermost group or artboard first; a click on the chosen group goes into it"),
 		gfx.Rect{X: r.X, Y: r.Y, W: w, H: r.H})
-	x := a.drawCombineButtons(ad, r.X+w+u.px(16), r)
-	hint := u.t("Drag to move the layer, or the selected pixels; the arrow keys nudge by a pixel, with Shift by ten")
-	u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H}, hint, colDim, 0)
+	x := a.drawCombineButtons(ad, r.X+w+u.px(16), &r)
+	a.optHint(x, r, u.t("Drag to move the layer, or the selected pixels; the arrow keys nudge by a pixel, with Shift by ten"))
 }
 
 // Working on an artboard works on what is in it: a press with a painting or drawing tool on a board other than the
@@ -123,7 +122,7 @@ func (ad *artDoc) noteBoardLayer() {
 // targetsBoards reports whether the chosen tool works on the board it is pressed on.
 func (a *App) targetsBoards() bool {
 	switch a.artTool {
-	case toolBrush, toolEraser, toolClone, toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge,
+	case toolBrush, toolEraser, toolClone, toolSpot, toolHeal, toolPatch, toolDodge, toolBurn, toolSponge, toolBlur, toolSharpen, toolSmudge, toolLiquify,
 		toolBucket, toolGradient, toolMaskGradient, toolShape, toolPen, toolPencil, toolText:
 		return true
 	}

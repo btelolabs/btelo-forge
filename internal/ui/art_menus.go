@@ -108,14 +108,18 @@ func (a *App) artCommands(ad *artDoc, vp gfx.Rect) []artCommand {
 	}
 	hasClip := func() bool { n := d.Node(d.Active); return n != nil && n.Clip != nil }
 	isSmart := func() bool { n := d.Node(d.Active); return n != nil && n.IsSmart() }
+	filterable := func() bool { return isLayer() || isSmart() }
 	smartObjects, vectorMask := u.t("Smart objects"), u.t("Vector mask")
+	modify := u.t("Modify")
 	cmds := []artCommand{
 		{id: "draw.new-canvas", menu: menuFile, label: u.t("New canvas"), key: key('N', "ca"), run: a.newCanvasNow},
 		{id: "draw.save", menu: menuFile, label: u.t("Save"), key: key('S', "c"), run: func() { a.saveArtNow(ad) }},
 		{id: "draw.export-as-png", menu: menuFile, label: u.t("Export as PNG"), key: key('S', "cs"), run: func() { a.exportArt(ad, false) }, sepBefore: true},
 		{id: "draw.export-the-selection-as-png", menu: menuFile, label: u.t("Export the selection as PNG"), run: func() { a.exportArt(ad, true) }, enabled: selected},
-		{id: "draw.export-slices", menu: menuFile, label: u.t("Export slices"), key: key('P', "c"), run: func() { a.exportSlices(ad) }},
+		{id: "draw.export-as-psd", menu: menuFile, label: u.t("Export as PSD"), run: func() { a.exportPSD(ad) }},
+		{id: "draw.export-slices", menu: menuFile, label: u.t("Export slices"), key: key('P', "cs"), run: func() { a.exportSlices(ad) }},
 		{id: "draw.export-artboards", menu: menuFile, label: u.t("Export artboards"), run: func() { a.exportBoards(ad, 0) }, enabled: func() bool { return len(d.Boards()) > 0 }},
+		{id: "draw.print", menu: menuFile, label: u.t("Print…"), key: key('P', "c"), run: plain(func() { a.printCanvas(ad) }), sepBefore: true},
 		{id: "draw.show-in-folder", menu: menuFile, label: u.t("Show in folder"), run: func() { a.host.Reveal(ad.path) }, sepBefore: true},
 		{id: "draw.show-smart-objects-folder", menu: menuFile, label: u.t("Show the smart objects folder"), run: func() { a.showSmartFolder() }},
 
@@ -131,6 +135,8 @@ func (a *App) artCommands(ad *artDoc, vp gfx.Rect) []artCommand {
 		{id: "draw.paste-exclude", menu: menuEdit, sub: pasteShape, label: u.tc("boolean", "Exclude"), run: func() { a.artPaste(ad, paint.OpExclude, false) }, enabled: shapeCopied},
 		{id: "draw.fill-with-the-foreground-colour", menu: menuEdit, label: u.t("Fill with the foreground colour"), key: key(keyBack, "a"), run: run(func() error { return d.Fill(a.brush.Color) }), enabled: isLayer, sepBefore: true},
 		{id: "draw.fill-with-the-background-colour", menu: menuEdit, label: u.t("Fill with the background colour"), key: key(keyBack, "c"), run: run(func() error { return d.Fill(a.backgroundColor()) }), enabled: isLayer},
+		{id: "draw.content-aware-fill", menu: menuEdit, label: u.t("Content-aware fill"), key: key(0x74, "s"), run: func() { a.contentFill(ad) },
+			enabled: func() bool { return selected() && isLayer() && !ad.filling }},
 		{id: "draw.clear", menu: menuEdit, label: u.t("Clear"), key: key(keyDelete, ""), also: []*Key{key(keyBack, "")}, run: run(d.Clear), enabled: isLayer},
 		{id: "draw.free-transform", menu: menuEdit, label: u.t("Free transform"), key: key('T', "c"), run: func() { a.beginTransform(ad) },
 			enabled: func() bool { return isLayer() && idle() }, sepBefore: true},
@@ -144,13 +150,20 @@ func (a *App) artCommands(ad *artDoc, vp gfx.Rect) []artCommand {
 		{id: "draw.rotate-90-clockwise", menu: menuEdit, sub: transform, label: u.t("Rotate 90° clockwise"), run: run(func() error { return d.RotateLayer(1) }), enabled: isLayer},
 		{id: "draw.rotate-90-counter-clockwise", menu: menuEdit, sub: transform, label: u.t("Rotate 90° counter clockwise"), run: run(func() error { return d.RotateLayer(-1) }), enabled: isLayer},
 
-		{id: "draw.brightness-contrast", menu: menuImage, sub: adjustments, label: u.t("Brightness/Contrast…"), run: adjust(adjustBrightness), enabled: isLayer},
-		{id: "draw.levels", menu: menuImage, sub: adjustments, label: u.t("Levels…"), key: key('L', "c"), run: adjust(adjustLevels), enabled: isLayer},
-		{id: "draw.curves", menu: menuImage, sub: adjustments, label: u.t("Curves…"), key: key('M', "c"), run: adjust(adjustCurves), enabled: isLayer},
-		{id: "draw.hue-saturation", menu: menuImage, sub: adjustments, label: u.t("Hue/Saturation…"), key: key('U', "c"), run: adjust(adjustHue), enabled: isLayer, sepBefore: true},
+		{id: "draw.brightness-contrast", menu: menuImage, sub: adjustments, label: u.t("Brightness/Contrast…"), run: adjust(adjustBrightness), enabled: filterable},
+		{id: "draw.levels", menu: menuImage, sub: adjustments, label: u.t("Levels…"), key: key('L', "c"), run: adjust(adjustLevels), enabled: filterable},
+		{id: "draw.curves", menu: menuImage, sub: adjustments, label: u.t("Curves…"), key: key('M', "c"), run: adjust(adjustCurves), enabled: filterable},
+		{id: "draw.exposure", menu: menuImage, sub: adjustments, label: u.t("Exposure…"), run: adjust(adjustExposure), enabled: filterable},
+		{id: "draw.vibrance", menu: menuImage, sub: adjustments, label: u.t("Vibrance…"), run: adjust(adjustVibrance), enabled: filterable, sepBefore: true},
+		{id: "draw.hue-saturation", menu: menuImage, sub: adjustments, label: u.t("Hue/Saturation…"), key: key('U', "c"), run: adjust(adjustHue), enabled: filterable},
+		{id: "draw.color-balance", menu: menuImage, sub: adjustments, label: u.t("Color balance…"), key: key('B', "c"), run: adjust(adjustColorBalance), enabled: filterable},
+		{id: "draw.photo-filter", menu: menuImage, sub: adjustments, label: u.t("Photo filter…"), run: adjust(adjustPhotoFilter), enabled: filterable},
 		{id: "draw.invert", menu: menuImage, sub: adjustments, label: u.t("Invert"), key: key('I', "c"), run: run(func() error { return d.Run("Invert", paint.Invert()) }), enabled: isLayer, sepBefore: true},
-		{id: "draw.posterize", menu: menuImage, sub: adjustments, label: u.t("Posterize…"), run: adjust(adjustPosterize), enabled: isLayer},
-		{id: "draw.threshold", menu: menuImage, sub: adjustments, label: u.t("Threshold…"), run: adjust(adjustThreshold), enabled: isLayer},
+		{id: "draw.posterize", menu: menuImage, sub: adjustments, label: u.t("Posterize…"), run: adjust(adjustPosterize), enabled: filterable},
+		{id: "draw.threshold", menu: menuImage, sub: adjustments, label: u.t("Threshold…"), run: adjust(adjustThreshold), enabled: filterable},
+		{id: "draw.gradient-map", menu: menuImage, sub: adjustments, label: u.t("Gradient map…"), run: adjust(adjustGradientMap), enabled: filterable},
+		{id: "draw.selective-color", menu: menuImage, sub: adjustments, label: u.t("Selective color…"), run: adjust(adjustSelective), enabled: filterable},
+		{id: "draw.shadows-highlights", menu: menuImage, sub: adjustments, label: u.t("Shadows/Highlights…"), run: adjust(adjustShadowsHighlights), enabled: filterable, sepBefore: true},
 		{id: "draw.desaturate", menu: menuImage, sub: adjustments, label: u.t("Desaturate"), key: key('U', "cs"), run: run(func() error { return d.Run("Desaturate", paint.Desaturate()) }), enabled: isLayer, sepBefore: true},
 		{id: "draw.image-size", menu: menuImage, label: u.t("Image size…"), key: key('I', "ca"), run: func() { a.openDialog(dialogImageSize) }, sepBefore: true},
 		{id: "draw.canvas-size", menu: menuImage, label: u.t("Canvas size…"), key: key('C', "ca"), run: func() { a.openDialog(dialogCanvasSize) }},
@@ -170,11 +183,17 @@ func (a *App) artCommands(ad *artDoc, vp gfx.Rect) []artCommand {
 		{id: "draw.adjustment-layer-brightness", menu: menuLayer, sub: newAdjustment, label: u.t("Brightness/Contrast…"), run: adjustLayer(adjustBrightness)},
 		{id: "draw.adjustment-layer-levels", menu: menuLayer, sub: newAdjustment, label: u.t("Levels…"), run: adjustLayer(adjustLevels)},
 		{id: "draw.adjustment-layer-curves", menu: menuLayer, sub: newAdjustment, label: u.t("Curves…"), run: adjustLayer(adjustCurves)},
-		{id: "draw.adjustment-layer-hue", menu: menuLayer, sub: newAdjustment, label: u.t("Hue/Saturation…"), run: adjustLayer(adjustHue), sepBefore: true},
+		{id: "draw.adjustment-layer-exposure", menu: menuLayer, sub: newAdjustment, label: u.t("Exposure…"), run: adjustLayer(adjustExposure)},
+		{id: "draw.adjustment-layer-vibrance", menu: menuLayer, sub: newAdjustment, label: u.t("Vibrance…"), run: adjustLayer(adjustVibrance), sepBefore: true},
+		{id: "draw.adjustment-layer-hue", menu: menuLayer, sub: newAdjustment, label: u.t("Hue/Saturation…"), run: adjustLayer(adjustHue)},
+		{id: "draw.adjustment-layer-color-balance", menu: menuLayer, sub: newAdjustment, label: u.t("Color balance…"), run: adjustLayer(adjustColorBalance)},
 		{id: "draw.adjustment-layer-black-white", menu: menuLayer, sub: newAdjustment, label: u.t("Black & White"), run: plainLayer(paint.AdjustBlackWhite, u.t("Black & White"))},
+		{id: "draw.adjustment-layer-photo-filter", menu: menuLayer, sub: newAdjustment, label: u.t("Photo filter…"), run: adjustLayer(adjustPhotoFilter)},
 		{id: "draw.adjustment-layer-invert", menu: menuLayer, sub: newAdjustment, label: u.t("Invert"), run: plainLayer(paint.AdjustInvert, u.t("Invert")), sepBefore: true},
 		{id: "draw.adjustment-layer-posterize", menu: menuLayer, sub: newAdjustment, label: u.t("Posterize…"), run: adjustLayer(adjustPosterize)},
 		{id: "draw.adjustment-layer-threshold", menu: menuLayer, sub: newAdjustment, label: u.t("Threshold…"), run: adjustLayer(adjustThreshold)},
+		{id: "draw.adjustment-layer-gradient-map", menu: menuLayer, sub: newAdjustment, label: u.t("Gradient map…"), run: adjustLayer(adjustGradientMap)},
+		{id: "draw.adjustment-layer-selective-color", menu: menuLayer, sub: newAdjustment, label: u.t("Selective color…"), run: adjustLayer(adjustSelective)},
 		{id: "draw.layer-style", menu: menuLayer, label: u.t("Layer style…"), key: key('Q', ""), run: func() { a.openStyle(ad) }, sepBefore: true,
 			enabled: func() bool { n := d.Node(d.Active); return n != nil && !n.IsGroup() && n.Adjust == nil }},
 		{id: "draw.clear-layer-style", menu: menuLayer, label: u.t("Clear layer style"), run: run(func() error { return d.SetStyle(d.Active, nil) }),
@@ -187,6 +206,8 @@ func (a *App) artCommands(ad *artDoc, vp gfx.Rect) []artCommand {
 		{id: "draw.new-group", menu: menuLayer, label: u.t("New group"), run: plain(func() { d.AddGroup(a.groupName()) })},
 		{id: "draw.duplicate-layer", menu: menuLayer, label: u.t("Duplicate layer"), key: key('J', "c"), run: run(func() error { _, err := d.Duplicate(u.t(" copy")); return err }), enabled: chosen},
 		{id: "draw.delete-layer", menu: menuLayer, label: u.t("Delete layer"), run: run(d.Delete), enabled: chosen},
+		{id: "draw.remove-background", menu: menuLayer, label: u.t("Remove background"), run: func() { a.removeBackground(ad) },
+			enabled: func() bool { return chosen() && !ad.matting }, sepBefore: true},
 		{id: "draw.add-layer-mask", menu: menuLayer, label: u.t("Add layer mask"), key: key('M', "s"), run: run(d.AddMask), enabled: func() bool { return chosen() && !hasMask() }, sepBefore: true},
 		{id: "draw.apply-layer-mask", menu: menuLayer, label: u.t("Apply layer mask"), run: run(d.ApplyMask), enabled: func() bool { return hasMask() && isLayer() }},
 		{id: "draw.delete-layer-mask", menu: menuLayer, label: u.t("Delete layer mask"), run: run(d.DeleteMask), enabled: hasMask},
@@ -201,6 +222,8 @@ func (a *App) artCommands(ad *artDoc, vp gfx.Rect) []artCommand {
 			enabled: func() bool { n := d.Node(d.Active); return n != nil && !n.IsSmart() && !n.IsBoard() }},
 		{id: "draw.open-smart-object-file", menu: menuLayer, label: u.t("Open the smart object's file"), run: func() { a.openSmartFile(ad) }, enabled: isSmart},
 		{id: "draw.copy-link-id", menu: menuLayer, sub: smartObjects, label: u.t("Copy the link id"), run: func() { a.copyLinkID(ad) }, enabled: isSmart},
+		{id: "draw.smart-filters", menu: menuLayer, sub: smartObjects, label: u.t("Smart filters…"), run: func() { a.smartList = ad },
+			enabled: func() bool { n := d.Node(d.Active); return n != nil && n.Filters != nil }},
 		{id: "draw.break-the-link", menu: menuLayer, sub: smartObjects, label: u.t("Break the link"), run: run(func() error { _, err := d.UnlinkSmart(); return err }), enabled: isSmart},
 		{id: "draw.convert-smart-to-group", menu: menuLayer, sub: smartObjects, label: u.t("Convert to a plain group"), key: key('F', "cs"), run: run(d.ReleaseSmart), enabled: isSmart},
 		{id: "draw.define-brush-tip", menu: menuLayer, sepBefore: true, label: u.t("Define brush tip"), run: func() { a.defineTip(ad) },
@@ -224,14 +247,20 @@ func (a *App) artCommands(ad *artDoc, vp gfx.Rect) []artCommand {
 		{id: "draw.deselect", menu: menuSelect, label: u.t("Deselect"), key: key('D', "c"), run: plain(d.Deselect), enabled: selected},
 		{id: "draw.reselect", menu: menuSelect, label: u.t("Reselect"), key: key('D', "cs"), run: plain(d.Reselect)},
 		{id: "draw.inverse", menu: menuSelect, label: u.t("Inverse"), key: key('I', "cs"), run: plain(d.InvertSelection)},
+		{id: "draw.select-subject", menu: menuSelect, label: u.t("Subject"), run: func() { a.selectSubject(ad) }, enabled: func() bool { return !ad.matting }, sepBefore: true},
 		{id: "draw.feather", menu: menuSelect, label: u.t("Feather…"), key: key(0x76, "s"), run: func() { a.openDialog(dialogFeather) }, enabled: selected, sepBefore: true},
+		{id: "draw.select-expand", menu: menuSelect, sub: modify, label: u.t("Expand…"), run: func() { a.openDialog(dialogExpand) }, enabled: selected},
+		{id: "draw.select-contract", menu: menuSelect, sub: modify, label: u.t("Contract…"), run: func() { a.openDialog(dialogContract) }, enabled: selected},
+		{id: "draw.select-smooth", menu: menuSelect, sub: modify, label: u.t("Smooth…"), run: func() { a.openDialog(dialogSmooth) }, enabled: selected},
+		{id: "draw.select-border", menu: menuSelect, sub: modify, label: u.t("Border…"), run: func() { a.openDialog(dialogBorder) }, enabled: selected},
 		{id: "draw.edit-the-layer-mask", menu: menuSelect, label: u.t("Edit the layer mask"), key: key(0xdc, "c"), run: func() { d.EditMask = !d.EditMask && hasMask() }, enabled: hasMask,
 			checked: func() bool { return d.EditMask }, sepBefore: true},
 
-		{id: "draw.gaussian-blur", menu: menuFilter, sub: u.t("Blur"), label: u.t("Gaussian blur…"), run: adjust(filterBlur), enabled: isLayer},
-		{id: "draw.add-noise", menu: menuFilter, sub: u.t("Noise"), label: u.t("Add noise…"), run: adjust(filterNoise), enabled: isLayer},
-		{id: "draw.mosaic", menu: menuFilter, sub: u.t("Pixelate"), label: u.t("Mosaic…"), run: adjust(filterMosaic), enabled: isLayer},
-		{id: "draw.unsharp-mask", menu: menuFilter, sub: u.t("Sharpen"), label: u.t("Unsharp mask…"), run: adjust(filterSharpen), enabled: isLayer},
+		{id: "draw.develop", menu: menuFilter, label: u.t("Develop…"), key: key('A', "cs"), run: adjust(filterDevelop), enabled: filterable},
+		{id: "draw.gaussian-blur", menu: menuFilter, sepBefore: true, sub: u.t("Blur"), label: u.t("Gaussian blur…"), run: adjust(filterBlur), enabled: filterable},
+		{id: "draw.add-noise", menu: menuFilter, sub: u.t("Noise"), label: u.t("Add noise…"), run: adjust(filterNoise), enabled: filterable},
+		{id: "draw.mosaic", menu: menuFilter, sub: u.t("Pixelate"), label: u.t("Mosaic…"), run: adjust(filterMosaic), enabled: filterable},
+		{id: "draw.unsharp-mask", menu: menuFilter, sub: u.t("Sharpen"), label: u.t("Unsharp mask…"), run: adjust(filterSharpen), enabled: filterable},
 
 		{id: "draw.zoom-in", menu: menuView, label: u.t("Zoom in"), key: key(keyEquals, "ca"), run: centre(ad.zoom * 1.25)},
 		{id: "draw.zoom-out", menu: menuView, label: u.t("Zoom out"), key: key(keyMinus, "ca"), run: centre(ad.zoom / 1.25)},
@@ -247,6 +276,9 @@ func (a *App) artCommands(ad *artDoc, vp gfx.Rect) []artCommand {
 	for i := range cmds {
 		run := cmds[i].run
 		cmds[i].run = func() { a.applyTransform(ad); a.commitText(ad); a.finishPen(ad); run() }
+	}
+	if ad.onScreen {
+		cmds = slices.DeleteFunc(cmds, func(c artCommand) bool { return screenLeavesOut[c.id] })
 	}
 	return cmds
 }
@@ -381,9 +413,10 @@ func (a *App) antsOf(ad *artDoc, vp gfx.Rect, sel *paint.Mask) selectionAnts {
 			if !in[k] || in[k-1] && in[k+1] && in[k-w] && in[k+w] {
 				continue
 			}
-			// Black and white in squares of the dash's size, so an edge running any way alternates.
+			// Black and white in tiles a pixel taller than wide, so an edge running any way alternates: in squares, a 45°
+			// edge can cross from tile to tile at corners only, and keep one colour all along.
 			c := colBlack
-			if ((area.Min.X+i)/dash+(area.Min.Y+j)/dash)%2 == 1 {
+			if ((area.Min.X+i)/dash+(area.Min.Y+j)/(dash+1))%2 == 1 {
 				c = colWhite
 			}
 			out.img.SetRGBA(i-1, j-1, c)

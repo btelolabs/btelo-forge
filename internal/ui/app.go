@@ -12,10 +12,14 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/caption"
 	"github.com/btelolabs/btelo-forge/internal/capture"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/gpufx"
 	"github.com/btelolabs/btelo-forge/internal/library"
 	"github.com/btelolabs/btelo-forge/internal/media"
+	"github.com/btelolabs/btelo-forge/internal/office/flow"
 	"github.com/btelolabs/btelo-forge/internal/paint"
 	"github.com/btelolabs/btelo-forge/internal/playback"
+	"github.com/btelolabs/btelo-forge/internal/printing"
+	"github.com/btelolabs/btelo-forge/internal/render3d"
 	"github.com/btelolabs/btelo-forge/internal/transcribe"
 )
 
@@ -33,16 +37,21 @@ type App struct {
 	*doc
 	docs []*doc
 
-	host     Host
-	u        ctx
-	lib      *library.Library
-	player   *playback.Player
-	audition *playback.Audition
-	captions *caption.Renderer
-	saveDir  string
-	stateDir string
-	cacheDir string
-	jobs     chan func()
+	host        Host
+	u           ctx
+	lib         *library.Library
+	player      *playback.Player
+	audition    *playback.Audition
+	captions    *caption.Renderer
+	saveDir     string
+	stateDir    string
+	officeFonts *flow.Book // what Office documents are drawn with, once one is open
+	print       *printDialog
+	printTarget *printing.Target // the printer last chosen, with its settings
+	printJobs   []*printJob
+	printSeq    int
+	cacheDir    string
+	jobs        chan func()
 
 	life     context.Context // ends when the app closes
 	stopLife context.CancelFunc
@@ -55,6 +64,9 @@ type App struct {
 	music           musicPanel
 	subtitles       subtitlePanel
 	speech          speechPanel
+	ai              aiState
+	mail            mailState
+	orb             orbState
 	export          *exportJob
 	last            lastExport
 	known           map[string]library.Track
@@ -77,6 +89,7 @@ type App struct {
 	mcpDomain       int         // the domain whose AI setup the MCP page shows
 	keysScroll      float32     // how far its list is scrolled
 	keyCapture      *keyCapture // the command whose new key the Hotkeys page waits for
+	keys            keyboardState
 	brush           paint.Brush // shared by every canvas
 	artTool         artTool
 	marqueeEllipse  bool               // the marquee draws ellipses
@@ -93,9 +106,11 @@ type App struct {
 	pickBackground  bool                       // the colour panel sets the background colour
 	fillStrokeSwap  bool                       // the fill and stroke were swapped: their swatches trade places
 	picker          colorPicker
+	filePicker      *filePick // the dialog that opens and saves files
 	menu            *popupMenu
 	dialog          artDialog     // the canvas editor's open dialog
 	adjust          *adjustDialog // an adjustment or filter being tried
+	smartList       *artDoc       // the canvas whose smart object's filters are listed
 	style           *styleDialog  // a layer's effects being edited
 	sidePage        int           // the canvas side panel's lower page: layers or history
 	layerOpacity    float64       // the layer opacity slider while it is dragged
@@ -118,6 +133,8 @@ type App struct {
 	mindClip        *mindClipboard          // nodes copied from a mind map
 	mindThemeShots  map[string]*image.RGBA  // the theme panel's previews, by theme and size
 	upd             updateState             // the newest release and the update under way
+	tabDrag         *tabDrag                // the tab held by the mouse, if any
+	models          modelState              // what the 3D tabs share
 }
 
 // New builds the editor; cacheDir holds downloads and models, stateDir remembers settings and unfinished edits.
@@ -154,16 +171,23 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	a.subtitles.config = transcribe.DefaultConfig()
 	a.subtitles.manager = transcribe.NewManager(filepath.Join(cacheDir, "whisper"))
 	a.speech.init(cacheDir, stateDir)
+	a.ai.init(cacheDir, stateDir, host.Wake)
+	paint.SetAccelerator(gpufx.New(newModelDevice, &modelCardTurn))
+	a.mail.init(stateDir, host.Wake)
+	a.ai.rt.Track("speech", a.speechPid)
 	a.tools.config = media.DefaultToolsConfig()
+	a.models.skies, _ = render3d.ParseSkies(render3d.DefaultSkiesJSON)
 	a.onAir.platforms = capture.DefaultPlatforms()
+	a.initKeyboard()
 	a.loadConfigs()
+	a.startKeyboard()
 	a.prepareTools()
-	a.newTab()
 	a.applyServices()
 	a.hotkeys.capturing = -1
 	a.keysDomain = domainRecording // the Hotkeys page opens on its first tab, the system-wide hotkeys
 	a.applyHotkeys()
 	a.refreshFileTypes()
+	a.restoreTabs()
 	return a
 }
 
@@ -203,7 +227,13 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	a.handleDrops(in.Dropped)
 	a.syncPlayback()
 	a.preToasts()
-	u.blocked = a.export != nil || a.settingsOpen || a.rec.open || a.cam.open || a.menu != nil || a.dialog.kind != dialogNone || a.adjust != nil || a.style != nil
+	// The file picker is over everything: what is behind it, a dialog that opened it included, gets no input.
+	pick := a.filePicker != nil
+	var pickIn pickInput
+	if pick {
+		pickIn = u.takeInput()
+	}
+	u.blocked = pick || a.export != nil || a.settingsOpen || a.rec.open || a.cam.open || a.menu != nil || a.dialog.kind != dialogNone || a.adjust != nil || a.style != nil || a.print != nil || a.smartList != nil
 	held := u.blocked
 	a.preTasks()
 
@@ -215,6 +245,8 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	switch {
 	case a.watching():
 		a.drawWatching(a.screen)
+	case a.slideshowOn():
+		a.drawSlideshow(a.screen)
 	case a.art != nil:
 		a.drawTabs(l.tabs)
 		a.drawArt(l.body)
@@ -224,9 +256,24 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	case a.board != nil:
 		a.drawTabs(l.tabs)
 		a.drawMind(l.body)
+	case a.office != nil:
+		a.drawTabs(l.tabs)
+		a.drawOffice(l.body)
 	case a.liveTab:
 		a.drawTabs(l.tabs)
 		a.drawLiveTab(l.body)
+	case a.keyboardTab:
+		a.drawTabs(l.tabs)
+		a.drawKeyboardTab(l.body)
+	case a.model != nil:
+		a.drawTabs(l.tabs)
+		a.drawModel(l.body)
+	case a.aiTab:
+		a.drawTabs(l.tabs)
+		a.drawAITab(l.body)
+	case a.mailTab:
+		a.drawTabs(l.tabs)
+		a.drawMailTab(l.body)
 	case a.p == nil && a.editing:
 		a.drawTabs(l.tabs)
 		a.drawEmptyEditor(l)
@@ -238,9 +285,7 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 		a.drawPreview(l.preview)
 		a.drawTransport(l.transport)
 		a.drawTimeline(l.timeline)
-		if !a.settings.PanelHidden {
-			a.drawPanel(l.panel)
-		}
+		a.drawPanel(l.panel)
 	}
 	// A dialog or menu that is open takes the keys (Esc, Enter), so the window's shortcuts wait.
 	if u.focus == "" && a.hotkeys.capturing < 0 && a.keyCapture == nil && !u.blocked {
@@ -259,19 +304,18 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 		a.drawCameraDialog()
 		a.drawArtDialog()
 		a.drawAdjustDialog()
+		a.drawSmartFilters()
 		a.drawStyleDialog()
+		a.drawPrintDialog()
 	}
-	if a.menu != nil && a.dialog.kind == dialogNone && a.adjust == nil && a.style == nil {
-		switch a.menu.id {
-		case "art/tipshape":
-			a.drawTipShape()
-		case "art/presets":
-			a.drawPresets()
-		case "art/slice-info":
-			a.drawSliceInfo()
-		default:
-			a.drawMenu()
-		}
+	if pick {
+		u.giveInput(pickIn)
+		u.blocked = a.menu != nil
+		a.drawFilePick()
+		u.blocked = false
+	}
+	if pick || a.dialog.kind == dialogNone && (a.adjust == nil || a.menuOpen("adjust/page")) && a.style == nil && a.smartList == nil {
+		a.drawOpenMenu()
 	}
 	a.drawToasts()
 	wait := u.drawTip(a.screen)
@@ -279,6 +323,9 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	a.pumpThumbs()
 
 	if u.focus != "" {
+		if f, ok := a.host.(imeFontHost); ok {
+			f.TextInputFont(u.imeFont, u.imeFamily)
+		}
 		a.host.TextInput(true, u.imeAt[0], u.imeAt[1], u.imeAt[2])
 	} else {
 		a.host.TextInput(false, 0, 0, 0)
@@ -288,6 +335,8 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	a.syncSmart()
 	a.autosaveArt()
 	a.autosaveMind()
+	a.autosaveOffice()
+	a.rememberTabs()
 	return a.nextFrame(wait, in.acted())
 }
 
@@ -313,6 +362,12 @@ func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 	if key, _ := a.audition.Playing(); key != "" || a.music.downloading() || a.subtitles.busy() || a.speech.busy() {
 		sooner(time.Second / 10)
 	}
+	if d := a.orbFrame(); d > 0 {
+		sooner(d)
+	}
+	if a.ai.animating() && (a.aiTab || a.settingsOpen) {
+		sooner(time.Second / 20)
+	}
 	if a.u.blinking && !a.u.inactive { // a caret only blinks in the window being typed in
 		sooner(265 * time.Millisecond)
 	}
@@ -331,8 +386,14 @@ func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 				sooner(max(time.Until(due), redrawNow))
 			}
 		}
+		if od := d.office; od != nil {
+			if due, ok := officeSaveDue(od); ok {
+				sooner(max(time.Until(due), redrawNow))
+			}
+		}
 	}
 	sooner(a.mindWait())
+	sooner(a.officeWait())
 	if a.upd.job != nil {
 		sooner(time.Second / 10) // the update's progress
 	}
@@ -345,6 +406,12 @@ func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 	if a.pieMoving() {
 		sooner(time.Second / 60) // a pie turning to the item under the cursor
 	}
+	if a.tabsMoving() {
+		sooner(time.Second / 60) // tabs sliding to their places
+	}
+	if a.modelMoving() {
+		sooner(time.Second / 60) // the 3D view easing, or being moved by keys held down
+	}
 	if a.files != nil && a.files.sweep != nil && a.u.rightDown {
 		sooner(time.Second / 60) // a sweep scrolls past the list's edge, and opens the menu once the button rests
 	}
@@ -352,6 +419,9 @@ func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 	// out. Work that posts its result (opening a video, checking the screen recorder) wakes the window itself.
 	if a.export != nil || len(a.toasts) > 0 || a.recording() || a.streaming() || a.cameraSettling() || a.over.bar != nil || a.fileWork() || a.thumbsBusy() {
 		sooner(time.Second / 10)
+	}
+	if sd := a.over.draw; sd != nil {
+		sooner(sd.wait) // a hint on the drawing's panel
 	}
 	sooner(a.previewWait())
 	return next
@@ -377,12 +447,14 @@ func (a *App) layout() layout {
 	u := &a.u
 	s := a.screen
 	var l layout
-	l.tabs = gfx.Rect{X: 0, Y: 0, W: s.W, H: u.px(40)}
-	l.body = gfx.Rect{X: 0, Y: l.tabs.H, W: s.W, H: s.H - l.tabs.H}
-	panelW := min(u.px(380), s.W*0.34)
-	if a.settings.PanelHidden {
-		panelW = 0
+	if a.settings.VerticalTabs {
+		l.tabs = gfx.Rect{W: min(u.px(180), s.W*0.4), H: s.H}
+		l.body = gfx.Rect{X: l.tabs.W, W: s.W - l.tabs.W, H: s.H}
+	} else {
+		l.tabs = gfx.Rect{W: s.W, H: u.px(40)}
+		l.body = gfx.Rect{Y: l.tabs.H, W: s.W, H: s.H - l.tabs.H}
 	}
+	panelW := min(u.px(380), l.body.W*0.34)
 	// The timeline is as tall as its tracks need, between a usual height and half the window; the preview gets the rest.
 	timelineH := min(u.px(300), l.body.H*0.46)
 	if a.p != nil {
@@ -390,8 +462,8 @@ func (a *App) layout() layout {
 		timelineH = max(timelineH, min(a.timelineChrome()+lanes, l.body.H*0.5))
 	}
 	l.panel = gfx.Rect{X: s.W - panelW, Y: l.body.Y, W: panelW, H: l.body.H - timelineH}
-	l.timeline = gfx.Rect{X: 0, Y: s.H - timelineH, W: s.W, H: timelineH}
-	main := gfx.Rect{X: 0, Y: l.body.Y, W: s.W - panelW, H: l.body.H - timelineH}
+	l.timeline = gfx.Rect{X: l.body.X, Y: s.H - timelineH, W: l.body.W, H: timelineH}
+	main := gfx.Rect{X: l.body.X, Y: l.body.Y, W: l.body.W - panelW, H: l.body.H - timelineH}
 	l.transport = gfx.Rect{X: main.X, Y: main.Bottom() - u.px(52), W: main.W, H: u.px(52)}
 	l.preview = gfx.Rect{X: main.X, Y: main.Y, W: main.W, H: main.H - l.transport.H}
 	return l
@@ -403,12 +475,17 @@ func (a *App) Close() {
 	if a.life.Err() != nil {
 		return
 	}
+	a.keys.service.Close()
 	a.finishRecordingForClose()
 	a.finishLiveForClose()
 	a.closeCamera()
 	a.closeScreen()
 	a.stopFileWork()
 	a.rememberPosition()
+	a.rememberTabs()
+	for _, d := range a.docs {
+		a.keepModel(d.model)
+	}
 	a.stopLife()
 	a.player.Stop()
 	a.audition.Stop()
@@ -420,6 +497,8 @@ func (a *App) Close() {
 	}
 	a.subtitles.cancel()
 	a.speech.close()
+	a.ai.close()
+	a.mail.close()
 	for _, d := range a.docs {
 		d.save(a.saveDir)
 		if d.art != nil {
@@ -427,6 +506,9 @@ func (a *App) Close() {
 		}
 		if d.board != nil {
 			a.closeMind(d.board)
+		}
+		if d.office != nil {
+			a.closeOffice(d.office)
 		}
 	}
 	if a.services != nil {
@@ -473,7 +555,7 @@ func (a *App) Idle() bool {
 	if a.p != nil && !a.media.settled(a.p) {
 		return false
 	}
-	if a.thumbsBusy() || a.preview.loading {
+	if a.thumbsBusy() || a.preview.loading || !a.modelSettled() {
 		return false
 	}
 	return !a.music.downloading() && !a.pieMoving()

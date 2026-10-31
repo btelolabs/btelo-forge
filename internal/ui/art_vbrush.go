@@ -9,20 +9,19 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
-// The vector brush draws with a brush's tip as vector shapes: the tip's outline, worked out once, is swept along
-// the line drawn, and each stroke is a shape added to the chosen vector layer (or to a new one, when none is
-// chosen), filled with the foreground colour, so a drawing of many strokes is one layer that stays sharp at any
-// size. Its tip, size, angle and roundness are its own, round by default; D and F make it smaller and larger.
+// The vector brush draws with a brush's tip as vector shapes: the area its dabs cover along the line drawn
+// (paint.BrushSweep) is a shape added to the chosen vector layer (or to a new one, when none is chosen), filled with
+// the foreground colour, so a drawing of many strokes is one layer that stays sharp at any size. Its tip, size, angle
+// and roundness are its own, round by default; D and F make it smaller and larger.
 
 const icVectorBrush = ""
 
-// vectorStroke is the vector brush's stroke under way: its layer's object before it, the tip's outline, the line
-// so far in canvas pixels, and the canvas area the stroke last showed over.
+// vectorStroke is the vector brush's stroke under way: its layer's object before it, the area swept so far, and the
+// canvas area the stroke last showed over.
 type vectorStroke struct {
 	s     *paint.VectorSession
 	base  paint.Vector
-	tip   []paint.Pt
-	line  []paint.Pt
+	sweep *paint.BrushSweep
 	shown image.Rectangle
 }
 
@@ -74,15 +73,13 @@ func (a *App) vectorBrushPointer(ad *artDoc, vp gfx.Rect) {
 	}
 	if u.dragging(id) {
 		// A point every couple of screen pixels: the hand's tremor finer than that is not drawn.
-		if last := vs.line[len(vs.line)-1]; last.Dist(p)*ad.zoom >= float64(u.px(2)) {
-			vs.line = append(vs.line, p)
+		if vs.sweep.Last().Dist(p)*ad.zoom >= float64(u.px(2)) {
+			vs.sweep.To(p)
 			a.showVectorStroke(ad, false)
 		}
 	}
 	if u.letGo(id) {
-		if last := vs.line[len(vs.line)-1]; last != p {
-			vs.line = append(vs.line, p)
-		}
+		vs.sweep.End(p)
 		a.showVectorStroke(ad, true)
 		vs.s.End()
 		ad.vstroke = nil
@@ -94,7 +91,7 @@ func (a *App) vectorBrushPointer(ad *artDoc, vp gfx.Rect) {
 // colour.
 func (a *App) beginVectorStroke(ad *artDoc, p paint.Pt) {
 	u := &a.u
-	vs := &vectorStroke{tip: paint.TipOutline(a.vectorBrush()), line: []paint.Pt{p}}
+	vs := &vectorStroke{sweep: paint.NewBrushSweep(a.vectorBrush(), p)}
 	var err error
 	if n := ad.paintedVector(); n != nil {
 		vs.base = *n.Vector
@@ -113,19 +110,10 @@ func (a *App) beginVectorStroke(ad *artDoc, p paint.Pt) {
 	a.showVectorStroke(ad, false)
 }
 
-// shape is the stroke so far as a shape: the tip swept along its line, as a polygon while it is drawn, fitted with
-// curves when it ends.
+// shape is the stroke so far as a shape: as polygons while it is drawn, fitted with curves when it ends. A polygon
+// may cross itself, which only a layer filled by its winding shows whole.
 func (vs *vectorStroke) shape(fitted bool) paint.Vector {
-	ring := paint.Sweep(vs.line, vs.tip)
-	sub := paint.Subpath{Closed: true}
-	if fitted {
-		sub = paint.FitPath(ring, true, 0.25)
-	} else {
-		for _, q := range ring {
-			sub.Nodes = append(sub.Nodes, paint.PathNode{P: q, In: q, Out: q})
-		}
-	}
-	return paint.Vector{Kind: paint.VectorCurve, M: paint.Identity, Path: []paint.Subpath{sub}}
+	return paint.Vector{Kind: paint.VectorCurve, M: paint.Identity, Path: vs.sweep.Outline(fitted || vs.base.Rule == paint.EvenOdd)}
 }
 
 // showVectorStroke shows the stroke on its layer, redrawing only where it was and is.
@@ -172,8 +160,9 @@ func (a *App) drawVectorBrushOptions(r gfx.Rect) {
 		if tip == nil {
 			continue
 		}
+		a.optRow(&x, &r, u.px(30))
 		tr := gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}
-		if tr.Right() > r.Right()-u.px(400) {
+		if tr.Right() > r.Right()-u.px(400) && !a.over.flow.on {
 			break
 		}
 		id := "art/vbrush/shape/" + name
@@ -196,16 +185,19 @@ func (a *App) drawVectorBrushOptions(r gfx.Rect) {
 	size, angle, round := b.Size, b.Angle, b.Round
 	saved := false
 	var done bool
+	a.optRow(&x, &r, u.px(190))
 	x, done = a.labelledSlider("art/vbrush/size", x, r.Y, r.H, u.t("Brush size"), &size, 0.5, 200, func(v float64) string { return fmt.Sprintf("%.1f px", v) })
 	saved = saved || done
 	if size != b.Size {
 		p.VBrushSize = math.Round(size*10) / 10
 	}
+	a.optRow(&x, &r, u.px(190))
 	if x+u.px(190) < r.Right() {
 		x, done = a.labelledSlider("art/vbrush/angle", x, r.Y, r.H, u.t("Angle"), &angle, -180, 180, func(v float64) string { return fmt.Sprintf("%.0f°", v) })
 		saved = saved || done
 		p.VBrushAngle = math.Round(angle)
 	}
+	a.optRow(&x, &r, u.px(190))
 	if x+u.px(190) < r.Right() {
 		x, done = a.labelledSlider("art/vbrush/round", x, r.Y, r.H, u.t("Roundness"), &round, 0.05, 1, percent)
 		saved = saved || done
@@ -215,7 +207,6 @@ func (a *App) drawVectorBrushOptions(r gfx.Rect) {
 		a.saveSettings()
 	}
 	if x+u.px(200) < r.Right() {
-		u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H},
-			u.t("Draw: each stroke is a vector shape added to the chosen vector layer; D and F size the brush"), colDim, 0)
+		a.optHint(x, r, u.t("Draw: each stroke is a vector shape added to the chosen vector layer; D and F size the brush"))
 	}
 }

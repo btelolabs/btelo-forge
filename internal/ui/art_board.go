@@ -336,6 +336,9 @@ func (a *App) drawBoardOptions(ad *artDoc, vp, r gfx.Rect) {
 	}
 	x += pw + u.px(10)
 	if !has {
+		if len(ad.d.Boards()) > 0 {
+			a.optRow(&x, &r, u.px(170))
+		}
 		if len(ad.d.Boards()) > 0 && x+u.px(170) < r.Right() {
 			bw := u.buttonWidth(icDownload, u.t("Export artboards"))
 			if u.button("art/board/exportall", gfx.Rect{X: x, Y: r.Y, W: bw, H: r.H}, icDownload, u.t("Export artboards"), plain, true) {
@@ -343,10 +346,11 @@ func (a *App) drawBoardOptions(ad *artDoc, vp, r gfx.Rect) {
 			}
 			x += bw + u.px(10)
 		}
-		u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: r.Right() - x, H: r.H}, u.t("Drag to make an artboard; click one to choose it"), colDim, 0)
+		a.optHint(x, r, u.t("Drag to make an artboard; click one to choose it"))
 		return
 	}
 	// The name, kept when the box is left.
+	a.optRow(&x, &r, u.px(150))
 	if u.focus != "art/board/name" {
 		ad.boardName = b.Name
 	}
@@ -369,6 +373,7 @@ func (a *App) drawBoardOptions(ad *artDoc, vp, r gfx.Rect) {
 			return image.Rect(b.Rect.Min.X, b.Rect.Min.Y, b.Rect.Max.X, b.Rect.Min.Y+n)
 		}},
 	} {
+		a.optRow(&x, &r, u.px(90))
 		u.label(u.face(12), gfx.Rect{X: x, Y: r.Y, W: u.px(16), H: r.H}, f.label, colDim, 0)
 		x += u.px(18)
 		text, editing := ad.boardSize[f.id]
@@ -394,6 +399,7 @@ func (a *App) drawBoardOptions(ad *artDoc, vp, r gfx.Rect) {
 	// The background: on with the swatch's colour, which a click sets to the foreground colour.
 	on := b.Fill.A > 0
 	cw := checkboxWidth(u, u.t("Background"))
+	a.optRow(&x, &r, cw+u.px(36))
 	if now := u.checkbox("art/board/fill", gfx.Rect{X: x, Y: r.Y, W: cw, H: r.H}, u.t("Background"), on); now != on {
 		next := b
 		next.Fill = color.NRGBA{}
@@ -418,12 +424,14 @@ func (a *App) drawBoardOptions(ad *artDoc, vp, r gfx.Rect) {
 		a.artRun(ad, func() error { return ad.d.SetBoard(next, "Artboard") })
 	}
 	x += u.px(32)
+	a.optRow(&x, &r, u.px(36))
 	if u.iconButton("art/board/delete", gfx.Rect{X: x, Y: r.Y, W: u.px(30), H: r.H}, icDelete, withKey(u.t("Delete the artboard, keeping what is drawn on it"), "Delete"), false, true) {
 		a.boardKeys(ad, Key{Code: keyDelete})
 		return
 	}
 	x += u.px(36)
 	bw := u.buttonWidth(icDownload, u.t("Export"))
+	a.optRow(&x, &r, bw)
 	if x+bw <= r.Right() && u.button("art/board/export", gfx.Rect{X: x, Y: r.Y, W: bw, H: r.H}, icDownload, u.t("Export"), plain, true) {
 		a.exportBoards(ad, b.ID)
 	}

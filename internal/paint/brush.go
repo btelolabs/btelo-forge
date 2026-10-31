@@ -119,11 +119,7 @@ type dabShape struct {
 // shape is the brush made ready for its dabs.
 func (b Brush) shape() dabShape {
 	s := dabShape{b: b, r: b.Size / 2}
-	// The tip is turned by its angle and squashed by its roundness; the flat tip is a narrow ellipse at 45° more.
-	angle, round := b.Angle, b.Round
-	if b.Tip == TipFlat {
-		angle, round = angle+45, round*0.3
-	}
+	angle, round := b.turn()
 	if angle != 0 {
 		s.sn, s.cs = math.Sincos(-angle * math.Pi / 180)
 		s.turned = true
@@ -135,6 +131,15 @@ func (b Brush) shape() dabShape {
 		s.tipScale = float64(max(b.Shape.W, b.Shape.H)) / b.Size
 	}
 	return s
+}
+
+// turn is how far the tip is turned, in degrees, and squashed: by its angle and roundness, the flat tip being a
+// narrow ellipse at 45° more.
+func (b Brush) turn() (angle, round float64) {
+	if b.Tip == TipFlat {
+		return b.Angle + 45, b.Round * 0.3
+	}
+	return b.Angle, b.Round
 }
 
 // at is how much of the dab centred at (cx, cy) covers the pixel whose centre is (px, py), from 0 to 1.

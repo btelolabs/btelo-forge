@@ -1,0 +1,456 @@
+{
+  "version": 1,
+  "defaultModel": "qwen3-4b",
+  "engines": [
+    {
+      "id": "onnx-directml",
+      "api": "matting-server",
+      "backend": "vulkan",
+      "name": {"en": "ONNX Runtime (DirectML)", "zh": "ONNX Runtime（DirectML）"},
+      "note": {"en": "Any graphics card on Windows; runs on the processor when there is none (25 MB download)", "zh": "Windows 上的显卡都能用；没有显卡时自动用处理器（下载 25 MB）"},
+      "os": ["windows"],
+      "arch": ["amd64"],
+      "url": "https://files.pythonhosted.org/packages/60/53/2bd2696fac19cf8ca55496a0bcfe431f3aff9579eabbb0e231dc238acf6f/onnxruntime_directml-1.24.4-cp313-cp313-win_amd64.whl",
+      "size": 25112253,
+      "sha256": "2f1031cb2281e5b27cca9efe0b9399317c7286e4d226f7a79d4ab79bbd94d19e",
+      "executable": "onnxruntime/capi/onnxruntime.dll",
+      "arguments": ["-matting-server", "{port}", "-matting-engine", "{engine}", "-matting-model", "{model}"]
+    },
+    {
+      "id": "vulkan",
+      "api": "llama-server",
+      "backend": "vulkan",
+      "name": {"en": "Graphics card (Vulkan)", "zh": "显卡（Vulkan）"},
+      "note": {"en": "NVIDIA, AMD and Intel graphics cards; runs on the processor when there is none (38 MB download)", "zh": "NVIDIA、AMD、Intel 显卡都能用；没有显卡时自动用处理器（下载 38 MB）"},
+      "os": ["windows"],
+      "arch": ["amd64"],
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12012/llama-b12012-bin-win-vulkan-x64.zip",
+      "size": 37515467,
+      "executable": "llama-server.exe",
+      "arguments": ["-m", "{model}", "--host", "127.0.0.1", "--port", "{port}", "-c", "{context}", "-np", "1", "-ngl", "999", "--no-webui"]
+    },
+    {
+      "id": "cpu",
+      "api": "llama-server",
+      "backend": "cpu",
+      "name": {"en": "Processor only", "zh": "仅处理器"},
+      "note": {"en": "Works on every computer, slower (25 MB download)", "zh": "所有电脑都能用，较慢（下载 25 MB）"},
+      "os": ["windows"],
+      "arch": ["amd64"],
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12012/llama-b12012-bin-win-cpu-x64.zip",
+      "size": 24574194,
+      "executable": "llama-server.exe",
+      "arguments": ["-m", "{model}", "--host", "127.0.0.1", "--port", "{port}", "-c", "{context}", "-np", "1", "-ngl", "0", "--no-webui"]
+    },
+    {
+      "id": "cpu-arm64",
+      "api": "llama-server",
+      "backend": "cpu",
+      "name": {"en": "Processor only", "zh": "仅处理器"},
+      "note": {"en": "Works on every computer, slower (13 MB download)", "zh": "所有电脑都能用，较慢（下载 13 MB）"},
+      "os": ["windows"],
+      "arch": ["arm64"],
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12012/llama-b12012-bin-win-cpu-arm64.zip",
+      "size": 13068830,
+      "executable": "llama-server.exe",
+      "arguments": ["-m", "{model}", "--host", "127.0.0.1", "--port", "{port}", "-c", "{context}", "-np", "1", "-ngl", "0", "--no-webui"]
+    },
+    {
+      "id": "homebrew",
+      "api": "llama-server",
+      "backend": "metal",
+      "name": "llama.cpp",
+      "note": {"en": "Uses llama-server from Homebrew (Metal on Apple silicon)", "zh": "使用 Homebrew 安装的 llama-server（Apple 芯片用 Metal 加速）"},
+      "os": ["darwin"],
+      "commands": ["llama-server"],
+      "paths": ["/opt/homebrew/bin/llama-server", "/usr/local/bin/llama-server"],
+      "install": "brew install llama.cpp",
+      "arguments": ["-m", "{model}", "--host", "127.0.0.1", "--port", "{port}", "-c", "{context}", "-np", "1", "-ngl", "999", "--no-webui"]
+    },
+    {
+      "id": "sd-vulkan",
+      "api": "sd-server",
+      "backend": "vulkan",
+      "name": {"en": "Graphics card (Vulkan)", "zh": "显卡（Vulkan）"},
+      "note": {"en": "NVIDIA, AMD and Intel graphics cards (30 MB download)", "zh": "NVIDIA、AMD、Intel 显卡都能用（下载 30 MB）"},
+      "os": ["windows"],
+      "arch": ["amd64"],
+      "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1028-37bc88b/sd-master-37bc88b-bin-win-vulkan-x64.zip",
+      "size": 29750499,
+      "executable": "sd-server.exe",
+      "arguments": ["--listen-ip", "127.0.0.1", "--listen-port", "{port}"]
+    },
+    {
+      "id": "sd-cpu",
+      "api": "sd-server",
+      "backend": "cpu",
+      "name": {"en": "Processor only", "zh": "仅处理器"},
+      "note": {"en": "Works on every computer, much slower (18 MB download)", "zh": "所有电脑都能用，慢很多（下载 18 MB）"},
+      "os": ["windows"],
+      "arch": ["amd64"],
+      "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1028-37bc88b/sd-master-37bc88b-bin-win-cpu-x64.zip",
+      "size": 18083263,
+      "executable": "sd-server.exe",
+      "arguments": ["--listen-ip", "127.0.0.1", "--listen-port", "{port}", "--backend", "cpu"]
+    }
+  ],
+  "models": [
+    {
+      "id": "birefnet-lite",
+      "api": "matting-server",
+      "kind": "matting",
+      "name": {"en": "BiRefNet lite", "zh": "BiRefNet lite"},
+      "note": {"en": "Finds a picture's subject, for Select › Subject and Remove background", "zh": "找出图片的主体，用于选择主体和去背景"},
+      "url": "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model.onnx",
+      "size": 224005088,
+      "sha256": "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333",
+      "license": {"en": "MIT", "zh": "MIT"},
+      "commercial": true
+    },
+    {
+      "id": "qwen3-4b",
+      "api": "llama-server",
+      "series": "Qwen3",
+      "name": "Qwen3 4B",
+      "note": {"en": "Small and quick; good for mail, summaries and everyday questions, in Chinese and English", "zh": "小而快，适合邮件、摘要和日常问答，中英文都好"},
+      "license": {"en": "Apache 2.0, commercial use allowed", "zh": "Apache 2.0，可商用"},
+      "commercial": true,
+      "url": "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
+      "size": 2497280256,
+      "context": 8192
+    },
+    {
+      "id": "qwen3-8b",
+      "api": "llama-server",
+      "series": "Qwen3",
+      "name": "Qwen3 8B",
+      "note": {"en": "The all-round choice for 8 GB or more of video memory", "zh": "显存 8 GB 以上的全能之选"},
+      "license": {"en": "Apache 2.0, commercial use allowed", "zh": "Apache 2.0，可商用"},
+      "commercial": true,
+      "url": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
+      "size": 5027783488,
+      "context": 8192
+    },
+    {
+      "id": "qwen3-14b",
+      "api": "llama-server",
+      "series": "Qwen3",
+      "name": "Qwen3 14B",
+      "note": {"en": "Steadier on long mail threads and careful extraction; needs about 12 GB", "zh": "长邮件串和精细提取更稳；约需 12 GB 内存或显存"},
+      "license": {"en": "Apache 2.0, commercial use allowed", "zh": "Apache 2.0，可商用"},
+      "commercial": true,
+      "url": "https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf",
+      "size": 9001752960,
+      "context": 8192
+    },
+    {
+      "id": "qwen3-30b-a3b",
+      "api": "llama-server",
+      "series": "Qwen3",
+      "name": "Qwen3 30B A3B",
+      "note": {"en": "Large but quick, as only 3B of it works at a time; needs about 24 GB", "zh": "体量大但很快（每次只用 3B）；约需 24 GB 内存或显存"},
+      "license": {"en": "Apache 2.0, commercial use allowed", "zh": "Apache 2.0，可商用"},
+      "commercial": true,
+      "url": "https://huggingface.co/unsloth/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf",
+      "size": 18556686912,
+      "context": 8192
+    },
+    {
+      "id": "gemma3-4b",
+      "api": "llama-server",
+      "series": "Gemma 3",
+      "name": "Gemma 3 4B",
+      "note": {"en": "Reads pictures too; natural English writing", "zh": "也能看图；英文写作自然"},
+      "license": {"en": "Gemma terms of use, commercial use allowed", "zh": "Gemma 使用条款，可商用"},
+      "commercial": true,
+      "vision": true,
+      "url": "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf",
+      "size": 2489757856,
+      "projector": {"url": "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/mmproj-model-f16.gguf", "size": 851251104},
+      "context": 8192
+    },
+    {
+      "id": "gemma3-12b",
+      "api": "llama-server",
+      "series": "Gemma 3",
+      "name": "Gemma 3 12B",
+      "note": {"en": "Reads pictures too; needs about 10 GB", "zh": "也能看图；约需 10 GB 内存或显存"},
+      "license": {"en": "Gemma terms of use, commercial use allowed", "zh": "Gemma 使用条款，可商用"},
+      "commercial": true,
+      "vision": true,
+      "url": "https://huggingface.co/ggml-org/gemma-3-12b-it-GGUF/resolve/main/gemma-3-12b-it-Q4_K_M.gguf",
+      "size": 7300574976,
+      "projector": {"url": "https://huggingface.co/ggml-org/gemma-3-12b-it-GGUF/resolve/main/mmproj-model-f16.gguf", "size": 854200224},
+      "context": 8192
+    },
+    {
+      "id": "phi4-mini",
+      "api": "llama-server",
+      "series": {"en": "Others", "zh": "其他"},
+      "name": "Phi-4 mini",
+      "note": {"en": "Small and good at reasoning; English first", "zh": "小而擅长推理；以英文为主"},
+      "license": {"en": "MIT, commercial use allowed", "zh": "MIT，可商用"},
+      "commercial": true,
+      "url": "https://huggingface.co/unsloth/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf",
+      "size": 2491874272,
+      "context": 8192
+    },
+    {
+      "id": "llama3.2-3b",
+      "api": "llama-server",
+      "series": {"en": "Others", "zh": "其他"},
+      "name": "Llama 3.2 3B",
+      "note": {"en": "The smallest here; for old computers, English first", "zh": "这里最小的一个，适合旧电脑；以英文为主"},
+      "license": {"en": "Llama 3.2 Community License, commercial use allowed with conditions", "zh": "Llama 3.2 社区许可，有条件可商用"},
+      "commercial": true,
+      "url": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "size": 2019377696,
+      "context": 8192
+    },
+    {
+      "id": "z-image-turbo",
+      "api": "sd-server",
+      "kind": "image",
+      "series": {"en": "Image models", "zh": "绘图模型"},
+      "name": "Z-Image Turbo",
+      "note": {"en": "Sharp 1024 px pictures in 8 steps, good with Chinese and English prompts; needs about 8 GB of video memory", "zh": "8 步出 1024 像素的清晰图片，中英文提示词都行；约需 8 GB 显存"},
+      "license": {"en": "Apache 2.0, commercial use allowed", "zh": "Apache 2.0，可商用"},
+      "commercial": true,
+      "url": "https://huggingface.co/leejet/Z-Image-Turbo-GGUF/resolve/main/z_image_turbo-Q4_K.gguf",
+      "size": 3864250304,
+      "parts": [
+        {"role": "vae", "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors", "size": 335304388},
+        {"role": "llm", "url": "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "size": 2497281120}
+      ],
+      "arguments": ["--diffusion-model", "{model}", "--vae", "{vae}", "--llm", "{llm}", "--cfg-scale", "1.0", "--offload-to-cpu"],
+      "imageSize": "1024x1024",
+      "steps": 8
+    },
+    {
+      "id": "sdxl-turbo",
+      "api": "sd-server",
+      "kind": "image",
+      "series": {"en": "Image models", "zh": "绘图模型"},
+      "name": "SDXL Turbo",
+      "note": {"en": "512 px pictures in 4 steps; needs about 6 GB of video memory", "zh": "4 步出 512 像素图片；约需 6 GB 显存"},
+      "license": {"en": "Stability AI non-commercial community license; commercial use needs a membership", "zh": "Stability AI 非商业社区许可，商用需另购会员"},
+      "url": "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0_fp16.safetensors",
+      "size": 6938081905,
+      "arguments": ["-m", "{model}", "--cfg-scale", "1.0", "--sampling-method", "euler_a"],
+      "imageSize": "512x512",
+      "steps": 4
+    },
+    {
+      "id": "flux1-schnell",
+      "api": "sd-server",
+      "kind": "image",
+      "series": {"en": "Image models", "zh": "绘图模型"},
+      "name": "FLUX.1 schnell",
+      "note": {"en": "Detailed 1024 px pictures in 4 steps; needs about 12 GB of video memory", "zh": "4 步出细节丰富的 1024 像素图片；约需 12 GB 显存"},
+      "license": {"en": "Apache 2.0, commercial use allowed", "zh": "Apache 2.0，可商用"},
+      "commercial": true,
+      "url": "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/flux1-schnell-Q4_0.gguf",
+      "size": 6688845536,
+      "parts": [
+        {"role": "vae", "url": "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors", "size": 335304388},
+        {"role": "clip_l", "url": "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/clip_l.safetensors", "size": 246144152},
+        {"role": "t5xxl", "url": "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/t5xxl-Q8_0.gguf", "size": 5199794784}
+      ],
+      "arguments": ["--diffusion-model", "{model}", "--vae", "{vae}", "--clip_l", "{clip_l}", "--t5xxl", "{t5xxl}", "--cfg-scale", "1.0", "--sampling-method", "euler", "--offload-to-cpu"],
+      "imageSize": "1024x1024",
+      "steps": 4
+    },
+    {
+      "id": "qwen-image",
+      "api": "sd-server",
+      "kind": "image",
+      "series": {"en": "Image models", "zh": "绘图模型"},
+      "name": "Qwen-Image",
+      "note": {"en": "Writes Chinese and English text in pictures; large and slow, needs about 14 GB of video memory", "zh": "能在图里写中英文；体积大、速度慢，约需 14 GB 显存"},
+      "license": {"en": "Apache 2.0, commercial use allowed", "zh": "Apache 2.0，可商用"},
+      "commercial": true,
+      "url": "https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q3_K_M.gguf",
+      "size": 9679567392,
+      "parts": [
+        {"role": "vae", "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors", "size": 253806246},
+        {"role": "llm", "url": "https://huggingface.co/mradermacher/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf", "size": 4683072512}
+      ],
+      "arguments": ["--diffusion-model", "{model}", "--vae", "{vae}", "--llm", "{llm}", "--cfg-scale", "2.5", "--sampling-method", "euler", "--flow-shift", "3", "--offload-to-cpu"],
+      "imageSize": "1024x1024",
+      "steps": 20
+    },
+    {
+      "id": "sd15",
+      "api": "sd-server",
+      "kind": "image",
+      "series": {"en": "Image models", "zh": "绘图模型"},
+      "name": "Stable Diffusion 1.5",
+      "note": {"en": "Small and quick, 512 px pictures; runs on 4 GB of video memory", "zh": "小而快，512 像素图片；4 GB 显存就能跑"},
+      "license": {"en": "CreativeML Open RAIL-M, commercial use allowed with use restrictions", "zh": "CreativeML Open RAIL-M，可商用，有使用限制"},
+      "commercial": true,
+      "url": "https://huggingface.co/second-state/stable-diffusion-v1-5-GGUF/resolve/main/stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf",
+      "size": 1763578176,
+      "arguments": ["-m", "{model}"],
+      "imageSize": "512x512",
+      "steps": 20
+    },
+    {
+      "id": "wan2.2-ti2v-5b",
+      "api": "sd-server",
+      "kind": "video",
+      "series": {"en": "Video models", "zh": "视频模型"},
+      "name": "Wan 2.2 TI2V 5B",
+      "note": {"en": "Short videos from a description or a first frame; needs about 10 GB of video memory", "zh": "按描述或首帧图生成短视频；约需 10 GB 显存"},
+      "license": {"en": "Apache 2.0, commercial use allowed", "zh": "Apache 2.0，可商用"},
+      "commercial": true,
+      "url": "https://huggingface.co/QuantStack/Wan2.2-TI2V-5B-GGUF/resolve/main/Wan2.2-TI2V-5B-Q4_K_M.gguf",
+      "size": 3433116000,
+      "parts": [
+        {"role": "vae", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors", "size": 1409400960},
+        {"role": "t5xxl", "url": "https://huggingface.co/city96/umt5-xxl-encoder-gguf/resolve/main/umt5-xxl-encoder-Q4_K_M.gguf", "size": 3655145312}
+      ],
+      "arguments": ["--diffusion-model", "{model}", "--vae", "{vae}", "--t5xxl", "{t5xxl}", "--cfg-scale", "6.0", "--sampling-method", "euler", "--flow-shift", "3.0", "--offload-to-cpu", "--vae-tiling"],
+      "imageSize": "704x480",
+      "steps": 40,
+      "frames": 33,
+      "fps": 24
+    },
+    {
+      "id": "minimax-h3-q4",
+      "api": "sd-server",
+      "kind": "video",
+      "series": {"en": "Video models", "zh": "视频模型"},
+      "name": "MiniMax H3",
+      "note": {"en": "5-second videos with sound, from a description or a first frame; needs about 12 GB of video memory and 32 GB of RAM; not licensed in the US, EU, UK or South Korea", "zh": "按描述或首帧图生成 5 秒有声视频；约需 12 GB 显存和 32 GB 内存；授权不含美国、欧盟、英国和韩国"},
+      "license": {"en": "MiniMax H3 Community License: not licensed in the US, EU, UK or South Korea, and its videos may not be used there; show the MiniMax H3 name in a commercial product; companies earning over 20 million US dollars a year need MiniMax's permission", "zh": "MiniMax H3 社区许可：不含美国、欧盟、英国和韩国，生成的视频也不得在这些地区使用；商用产品须显示 MiniMax H3 名称；年收入超过 2000 万美元的公司须获 MiniMax 授权"},
+      "url": "https://huggingface.co/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q4_K.gguf",
+      "size": 11420663904,
+      "sha256": "dd948e08ad0ba3c71bd42f368e283dd82e790f5122a63b276e22a3e0283d0c10",
+      "parts": [
+        {"role": "llm", "url": "https://huggingface.co/unsloth/MiniMax-H3-GGUF/resolve/main/qwen3vl_32b_minimax_h3-Q4_K_M.gguf", "size": 18218065024, "sha256": "11e6efe70a57ce7f4838c47bdbd1a1c4b8ce10e2b7747f1b065990b70f4b05fc"},
+        {"role": "vae", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors", "size": 5207808496, "sha256": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522"},
+        {"role": "audio_vae", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors", "size": 605254808, "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48"}
+      ],
+      "arguments": ["--diffusion-model", "{model}", "--llm", "{llm}", "--vae", "{vae}", "--audio-vae", "{audio_vae}", "--cfg-scale", "1.0", "--sampling-method", "euler", "--backend", "te=cpu", "--offload-to-cpu", "--vae-tiling", "--max-vram", "6"],
+      "imageSize": "864x480",
+      "steps": 8,
+      "frames": 124,
+      "fps": 24
+    }
+  ],
+  "providers": [
+    {
+      "id": "gemini",
+      "name": "Google Gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "keyUrl": "https://aistudio.google.com/apikey",
+      "models": [
+        {"id": "gemini-4-argon", "model": "gemini-4-argon", "name": "Gemini 4 Argon", "note": {"en": "The most capable, reads pictures", "zh": "最强，能看图"}, "vision": true},
+        {"id": "gemini-3.8-flash", "model": "gemini-3.8-flash", "name": "Gemini 3.8 Flash", "note": {"en": "Fast and capable, reads pictures", "zh": "快而强，能看图"}, "vision": true},
+        {"id": "gemini-3.5-flash-lite", "model": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash-Lite", "note": {"en": "The fastest and cheapest, reads pictures", "zh": "最快最便宜，能看图"}, "vision": true},
+        {"id": "gemini-3-pro-image", "model": "gemini-3-pro-image", "kind": "image", "name": "Nano Banana Pro", "note": {"en": "Google's best pictures from a description", "zh": "Google 画质最好的绘图模型"}},
+        {"id": "gemini-3.1-flash-lite-image", "model": "gemini-3.1-flash-lite-image", "kind": "image", "name": "Nano Banana 2 Lite", "note": {"en": "Quick pictures from a description", "zh": "快速按描述画图"}}
+      ]
+    },
+    {
+      "id": "grok",
+      "name": "xAI Grok",
+      "baseUrl": "https://api.x.ai/v1",
+      "keyUrl": "https://console.x.ai",
+      "models": [
+        {"id": "grok-4.7", "model": "grok-4.7", "name": "Grok 4.7", "note": {"en": "The most capable, reads pictures", "zh": "最强，能看图"}, "vision": true},
+        {"id": "grok-build-0.1", "model": "grok-build-0.1", "name": "Grok Build 0.1", "note": {"en": "The cheapest, for code", "zh": "最便宜，适合写代码"}},
+        {"id": "grok-imagine-image-2.0", "model": "grok-imagine-image-2.0", "kind": "image", "edits": true, "name": "Grok Imagine Image 2.0", "note": {"en": "Pictures from a description, or a new version of one attached", "zh": "按描述画图，也能改附上的图"}}
+      ]
+    },
+    {
+      "id": "minimax",
+      "name": {"en": "MiniMax", "zh": "MiniMax（国际站）"},
+      "note": {"en": "Videos from a description or a picture", "zh": "按描述或图片生成视频"},
+      "baseUrl": "https://api.minimax.io/v1",
+      "keyUrl": "https://platform.minimax.io/user-center/basic-information/interface-key",
+      "models": [
+        {"id": "minimax-h3", "model": "MiniMax-H3", "kind": "video", "task": "minimax-video", "name": "MiniMax H3", "note": {"en": "The newest, from a description or a first frame", "zh": "最新一代，可按描述或首帧图生成"}},
+        {"id": "hailuo-2.3", "model": "MiniMax-Hailuo-2.3", "kind": "video", "task": "minimax-video", "name": "Hailuo 2.3", "note": {"en": "From a description or a first frame, 6 seconds", "zh": "按描述或首帧图生成，6 秒"}},
+        {"id": "hailuo-2.3-fast", "model": "MiniMax-Hailuo-2.3-Fast", "kind": "video", "task": "minimax-video", "name": "Hailuo 2.3 Fast", "note": {"en": "Quicker; needs a first frame", "zh": "更快；必须附首帧图"}}
+      ]
+    },
+    {
+      "id": "minimax-cn",
+      "name": {"en": "MiniMax (China)", "zh": "MiniMax（中国站）"},
+      "note": {"en": "Videos from a description or a picture", "zh": "按描述或图片生成视频"},
+      "baseUrl": "https://api.minimax.cn/v1",
+      "keyUrl": "https://platform.minimax.cn/user-center/basic-information/interface-key",
+      "models": [
+        {"id": "minimax-h3", "model": "MiniMax-H3", "kind": "video", "task": "minimax-video", "name": "MiniMax H3", "note": {"en": "The newest, from a description or a first frame", "zh": "最新一代，可按描述或首帧图生成"}},
+        {"id": "hailuo-2.3", "model": "MiniMax-Hailuo-2.3", "kind": "video", "task": "minimax-video", "name": "Hailuo 2.3", "note": {"en": "From a description or a first frame, 6 seconds", "zh": "按描述或首帧图生成，6 秒"}},
+        {"id": "hailuo-2.3-fast", "model": "MiniMax-Hailuo-2.3-Fast", "kind": "video", "task": "minimax-video", "name": "Hailuo 2.3 Fast", "note": {"en": "Quicker; needs a first frame", "zh": "更快；必须附首帧图"}}
+      ]
+    },
+    {
+      "id": "tripo",
+      "name": "Tripo",
+      "note": {"en": "3D models from a picture", "zh": "按图片生成 3D 模型"},
+      "baseUrl": "https://openapi.tripo3d.ai/v3",
+      "keyUrl": "https://platform.tripo3d.ai/api-keys",
+      "models": [
+        {"id": "v3.1", "model": "tripo", "version": "v3.1-20260211", "kind": "model3d", "task": "tripo", "name": "Tripo 3.1", "note": {"en": "The best quality", "zh": "质量最好"}},
+        {"id": "p1", "model": "tripo", "version": "P1-20260311", "kind": "model3d", "task": "tripo", "name": "Tripo P1", "note": {"en": "Few polygons, for games", "zh": "低多边形，适合游戏"}}
+      ]
+    },
+    {
+      "id": "tripo-cn",
+      "name": {"en": "Tripo (China)", "zh": "Tripo（中国站）"},
+      "note": {"en": "3D models from a picture", "zh": "按图片生成 3D 模型"},
+      "baseUrl": "https://openapi.tripo3d.com/v3",
+      "models": [
+        {"id": "v3.1", "model": "tripo", "version": "v3.1-20260211", "kind": "model3d", "task": "tripo", "name": "Tripo 3.1", "note": {"en": "The best quality", "zh": "质量最好"}},
+        {"id": "p1", "model": "tripo", "version": "P1-20260311", "kind": "model3d", "task": "tripo", "name": "Tripo P1", "note": {"en": "Few polygons, for games", "zh": "低多边形，适合游戏"}}
+      ]
+    },
+    {
+      "id": "meshy",
+      "name": "Meshy",
+      "note": {"en": "3D models from a picture", "zh": "按图片生成 3D 模型"},
+      "baseUrl": "https://api.meshy.ai/openapi/v1",
+      "keyUrl": "https://www.meshy.ai/settings/api",
+      "models": [
+        {"id": "meshy-7.1", "model": "meshy-7.1", "kind": "model3d", "task": "meshy", "name": "Meshy 7.1", "note": {"en": "The newest, with textures", "zh": "最新一代，带贴图"}}
+      ]
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "keyUrl": "https://platform.deepseek.com/api_keys",
+      "models": [
+        {"id": "deepseek-v4-pro", "model": "deepseek-v4-pro", "name": "DeepSeek V4 Pro", "note": {"en": "The most capable", "zh": "最强"}},
+        {"id": "deepseek-v4-flash", "model": "deepseek-v4-flash", "name": "DeepSeek V4 Flash", "note": {"en": "Fast and cheap", "zh": "快而便宜"}}
+      ]
+    },
+    {
+      "id": "qwen",
+      "name": {"en": "Qwen (Alibaba Cloud, China)", "zh": "通义千问（阿里云，中国站）"},
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "keyUrl": "https://bailian.console.aliyun.com/?apiKey=1",
+      "models": [
+        {"id": "qwen3.8-max", "model": "qwen3.8-max", "name": "Qwen 3.8 Max", "note": {"en": "The most capable", "zh": "最强"}},
+        {"id": "qwen3.7-plus", "model": "qwen3.7-plus", "name": "Qwen 3.7 Plus", "note": {"en": "Balanced in speed and price", "zh": "速度和价格均衡"}},
+        {"id": "qwen-flash", "model": "qwen-flash", "name": "Qwen Flash", "note": {"en": "Fast and cheap", "zh": "快而便宜"}},
+        {"id": "qwen-vl-max", "model": "qwen-vl-max", "name": "Qwen VL Max", "note": {"en": "Reads pictures", "zh": "能看图"}, "vision": true}
+      ]
+    },
+    {
+      "id": "qwen-intl",
+      "name": {"en": "Qwen (Alibaba Cloud, international)", "zh": "通义千问（阿里云，国际站）"},
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "keyUrl": "https://modelstudio.console.alibabacloud.com/?tab=playground#/api-key",
+      "models": [
+        {"id": "qwen3.8-max", "model": "qwen3.8-max", "name": "Qwen 3.8 Max", "note": {"en": "The most capable", "zh": "最强"}},
+        {"id": "qwen3.7-plus", "model": "qwen3.7-plus", "name": "Qwen 3.7 Plus", "note": {"en": "Balanced in speed and price", "zh": "速度和价格均衡"}},
+        {"id": "qwen-flash", "model": "qwen-flash", "name": "Qwen Flash", "note": {"en": "Fast and cheap", "zh": "快而便宜"}},
+        {"id": "qwen-vl-max", "model": "qwen-vl-max", "name": "Qwen VL Max", "note": {"en": "Reads pictures", "zh": "能看图"}, "vision": true}
+      ]
+    }
+  ]
+}

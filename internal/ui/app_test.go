@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -78,7 +79,8 @@ func TestEditorCutsSpeedsCaptionsAndExports(t *testing.T) {
 	}
 	x.shot("04-exporting")
 	x.pump(60*time.Second, func() bool { return x.a.export == nil })
-	out := strings.TrimSuffix(src, ".mp4") + ".cut.mp4"
+	creative, _ := x.a.categoryDir(categoryCreative)
+	out := filepath.Join(creative, strings.TrimSuffix(filepath.Base(src), ".mp4")+".cut.mp4")
 	info, err := media.Probe(context.Background(), out)
 	if err != nil {
 		t.Fatalf("export result: %v (toasts %+v)", err, x.a.toasts)

@@ -189,6 +189,9 @@ func decodeDIB(data []byte) (image.Image, error) {
 	return img, nil
 }
 
+// ForgetButtons drops the mouse buttons held as a system dialog opened, as the dialog ate their release.
+func (w *Window) ForgetButtons() { w.input.Down = [3]bool{} }
+
 // ChooseFolder shows the system folder picker and returns the chosen folder, or "" when cancelled.
 func (w *Window) ChooseFolder(title string) string {
 	const apartment = 0x2

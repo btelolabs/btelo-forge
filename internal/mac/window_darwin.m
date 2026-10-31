@@ -75,6 +75,14 @@ static int modifierBits(NSEventModifierFlags f) {
 	NSPoint p = [self pixels:e];
 	goPointer(p.x, p.y, 1, 0, 0);
 }
+- (void)otherMouseDown:(NSEvent *)e {
+	NSPoint p = [self pixels:e];
+	goPointer(p.x, p.y, 2, 1, 0);
+}
+- (void)otherMouseUp:(NSEvent *)e {
+	NSPoint p = [self pixels:e];
+	goPointer(p.x, p.y, 2, 0, 0);
+}
 - (void)mouseMoved:(NSEvent *)e {
 	NSPoint p = [self pixels:e];
 	goMove(p.x, p.y);
@@ -83,6 +91,9 @@ static int modifierBits(NSEventModifierFlags f) {
 	[self mouseMoved:e];
 }
 - (void)rightMouseDragged:(NSEvent *)e {
+	[self mouseMoved:e];
+}
+- (void)otherMouseDragged:(NSEvent *)e {
 	[self mouseMoved:e];
 }
 - (void)scrollWheel:(NSEvent *)e {

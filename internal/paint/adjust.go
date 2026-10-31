@@ -4,7 +4,10 @@ import (
 	"image"
 	"math"
 	"math/rand/v2"
+	"runtime"
 	"sort"
+	"sync"
+	"sync/atomic"
 )
 
 // Filter is an adjustment or a filter: it makes new pixels for an area from the pixels as they were there and up to
@@ -12,6 +15,7 @@ import (
 type Filter struct {
 	reach int
 	apply func(src *image.RGBA, r image.Rectangle) *image.RGBA
+	card  func(a Accelerator, src *image.RGBA, r image.Rectangle) (*image.RGBA, error) // the same on a graphics card, if it has one
 }
 
 // FilterSession is an adjustment or filter being tried on the chosen layer (or its mask): Preview shows a filter
@@ -79,28 +83,32 @@ func (f *FilterSession) source(r image.Rectangle) *image.RGBA {
 			img.Pix[4*i], img.Pix[4*i+1], img.Pix[4*i+2], img.Pix[4*i+3] = v, v, v, 255
 		}
 	}
-	if inner == r || inner.Empty() {
-		return img
-	}
-	out := image.NewRGBA(r)
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		sy := min(max(y, inner.Min.Y), inner.Max.Y-1)
-		for x := r.Min.X; x < r.Max.X; x++ {
-			sx := min(max(x, inner.Min.X), inner.Max.X-1)
-			copy(out.Pix[out.PixOffset(x, y):][:4], img.Pix[img.PixOffset(sx, sy):][:4])
-		}
-	}
-	return out
+	return extendEdge(img, r)
 }
 
 // Compute works fn out on the pixels as they were, without showing it; it only reads, so it may run on another
 // goroutine while the picture is drawn.
 func (f *FilterSession) Compute(fn Filter) Result {
 	pieces := f.area(fn.reach)
-	out := make(Result, 0, len(pieces))
-	for _, r := range pieces {
-		out = append(out, fn.apply(f.source(r.Inset(-fn.reach)), r))
+	if done, ok := f.onCard(fn, pieces); ok {
+		return done
 	}
+	out := make(Result, len(pieces))
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), len(pieces)) {
+		wg.Go(func() {
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= len(pieces) {
+					return
+				}
+				r := pieces[i]
+				out[i] = fn.apply(f.source(r.Inset(-fn.reach)), r)
+			}
+		})
+	}
+	wg.Wait()
 	return out
 }
 
@@ -456,13 +464,22 @@ func blurRGBA(src *image.RGBA, r image.Rectangle, radius float64) *image.RGBA {
 
 // GaussianBlur softens by radius pixels, as Filter › Blur › Gaussian Blur.
 func GaussianBlur(radius float64) Filter {
-	return Filter{reach: blurReach(radius), apply: func(src *image.RGBA, r image.Rectangle) *image.RGBA {
+	f := Filter{reach: blurReach(radius), apply: func(src *image.RGBA, r image.Rectangle) *image.RGBA {
 		if radius < 0.1 {
 			return copyArea(src, r)
 		}
 		return blurRGBA(src, r, radius)
 	}}
+	if radius >= cardBlurRadius {
+		f.card = func(a Accelerator, src *image.RGBA, r image.Rectangle) (*image.RGBA, error) {
+			return a.Blur(src, r, radius)
+		}
+	}
+	return f
 }
+
+// cardBlurRadius is the blur from which a graphics card repays the trip there and back.
+const cardBlurRadius = 16
 
 // blurReach is how far blurRGBA reads around a pixel.
 func blurReach(radius float64) int { return int(math.Ceil(radius*3)) + 1 }

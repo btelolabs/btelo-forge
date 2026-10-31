@@ -10,16 +10,16 @@ import "strings"
 // The functions below are called by the Objective-C side while forge_poll dispatches events.
 
 //export goPointer
-func goPointer(x, y C.double, right, down, twice C.int) {
+func goPointer(x, y C.double, button, down, twice C.int) {
 	w := current
 	if w == nil {
 		return
 	}
 	w.input.next.X, w.input.next.Y = float32(x), float32(y)
-	if right == 0 {
+	if button == 0 {
 		w.input.next.Down = down != 0
 	}
-	w.input.next.Pointer = append(w.input.next.Pointer, PointerEvent{X: float32(x), Y: float32(y), Right: right != 0, Down: down != 0, Double: twice != 0})
+	w.input.next.Pointer = append(w.input.next.Pointer, PointerEvent{X: float32(x), Y: float32(y), Right: button == 1, Middle: button == 2, Down: down != 0, Double: twice != 0})
 }
 
 //export goMove

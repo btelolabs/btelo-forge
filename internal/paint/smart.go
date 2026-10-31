@@ -159,7 +159,7 @@ func (d *Doc) ReleaseSmart() error {
 		return ErrNotSmart
 	}
 	m := d.Mark()
-	n.Smart = nil
+	n.Smart, n.Filters = nil, nil
 	d.Commit("Convert to group", m)
 	return nil
 }

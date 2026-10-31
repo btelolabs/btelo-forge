@@ -15,6 +15,15 @@ type codeView struct {
 	caret            int // caret of the last frame, to scroll it into view when it moves
 	undo, redo       []codeSnap
 	lastTyped        time.Time
+
+	// complete offers what may finish the word before the caret, given the line up to it; nil for an editor with no
+	// offers. word is the part already typed, which the chosen offer replaces.
+	complete func(before string) (word string, options []string)
+	pick     int  // the offer chosen with the arrow keys
+	closed   bool // Esc closed the offers; typing opens them again
+
+	at     int  // where the caret was last, kept while something else has the keyboard
+	placed bool // the caret has been in this text
 }
 
 type codeSnap struct {
@@ -56,7 +65,15 @@ func (v *codeView) step(e *editor, from, to *[]codeSnap) bool {
 }
 
 // reset forgets the history, for when the text is replaced from outside.
-func (v *codeView) reset() { *v = codeView{} }
+func (v *codeView) reset() { *v = codeView{complete: v.complete} }
+
+// offers are what may finish the word at the caret.
+func (v *codeView) offers(e *editor) (word string, options []string) {
+	if v.complete == nil || v.closed || e.caret != e.anchor {
+		return "", nil
+	}
+	return v.complete(string(e.text[e.lineStart(e.caret):e.caret]))
+}
 
 // codeBox edits *value as fixed-width code with line numbers; errLine (1-based, 0 for none) is marked. It returns
 // true on every edit.
@@ -109,7 +126,21 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 		u.keys = nil
 		for _, k := range keys {
 			before := string(e.text)
+			word, offers := v.offers(e)
 			switch {
+			case len(offers) > 0 && k.Code == keyEscape:
+				v.closed = true
+			case len(offers) > 0 && (k.Code == keyUp || k.Code == keyDown):
+				step := 1
+				if k.Code == keyUp {
+					step = len(offers) - 1
+				}
+				v.pick = (min(v.pick, len(offers)-1) + step) % len(offers)
+			case len(offers) > 0 && !k.Ctrl && (k.Code == keyTab || k.Code == keyEnter):
+				v.remember(e, false)
+				e.anchor = e.caret - len([]rune(word))
+				e.insert(offers[min(v.pick, len(offers)-1)])
+				v.pick = 0
 			case k.Code == keyEscape:
 				u.focus, focused = "", false
 			case k.Ctrl && k.Code == 'Z' && !k.Shift, k.Ctrl && k.Code == 'Y', k.Ctrl && k.Shift && k.Code == 'Z':
@@ -159,6 +190,7 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 			}
 			if string(e.text) != before {
 				changed = true
+				v.closed = false
 			}
 		}
 		if focused && len(u.typed) > 0 {
@@ -166,6 +198,7 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 			e.typeText(string(u.typed))
 			u.typed = nil
 			changed = true
+			v.closed, v.pick = false, 0
 		}
 		if changed {
 			*value = string(e.text)
@@ -185,6 +218,7 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 	caretLine, caretCol := 0, 0
 	if focused {
 		caretLine, caretCol = position(u.edit.text, u.edit.caret)
+		v.at, v.placed = u.edit.caret, true
 		if u.edit.caret != v.caret {
 			cy := float32(caretLine) * lineH
 			v.scrollY = min(max(v.scrollY, cy+lineH-area.H), cy)
@@ -260,7 +294,46 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 		y := area.Y + (area.H-h)*v.scrollY/(content-area.H)
 		u.c.Fill(gfx.Rect{X: r.Right() - u.px(6), Y: y, W: u.px(3), H: h}, colSurfaceHi)
 	}
+	if focused {
+		if _, offers := v.offers(&u.edit); len(offers) > 0 {
+			caretX := area.X + pad - v.scrollX + f.Measure(string([]rune(lines[caretLine])[:caretCol]))
+			u.drawOffers(f, r, caretX, area.Y+float32(caretLine)*lineH-v.scrollY, lineH, offers, min(v.pick, len(offers)-1))
+		}
+	}
 	return changed
+}
+
+const maxOffers = 8
+
+// drawOffers lists the words that may finish the one being typed, under the caret, or over it where the box ends.
+// Tab or Enter takes the marked one.
+func (u *ctx) drawOffers(f *gfx.Face, box gfx.Rect, x, y, lineH float32, offers []string, pick int) {
+	first := max(pick-maxOffers+1, 0)
+	shown := offers[first:min(first+maxOffers, len(offers))]
+	w := f.Measure("Tab") + u.px(32)
+	for _, o := range shown {
+		w = max(w, f.Measure(o)+f.Measure("Tab")+u.px(40))
+	}
+	rowH := lineH + u.px(4)
+	h := float32(len(shown)) * rowH
+	top := y + lineH
+	if top+h > box.Bottom() {
+		top = max(y-h, box.Y)
+	}
+	panelBox := gfx.Rect{X: min(x, box.Right()-w-u.px(4)), Y: top, W: w, H: h}
+	u.c.Fill(panelBox, colPanel)
+	u.c.Outline(panelBox, max(1, u.px(1)), colBorderHi)
+	for i, o := range shown {
+		row := gfx.Rect{X: panelBox.X, Y: top + float32(i)*rowH, W: w, H: rowH}
+		ty := row.Y + (rowH-f.Height())/2
+		col := colDim
+		if first+i == pick {
+			u.c.Fill(row, colSelected)
+			col = colText
+			u.c.Text(f, row.Right()-f.Measure("Tab")-u.px(8), ty, "Tab", colFaint)
+		}
+		u.c.Text(f, row.X+u.px(8), ty, o, col)
+	}
 }
 
 // drawCode draws one line of JSON with strings, numbers and keywords coloured.

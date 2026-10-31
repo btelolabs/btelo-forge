@@ -1,0 +1,4 @@
+LIBRARY thumbnailer
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

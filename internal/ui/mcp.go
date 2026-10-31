@@ -23,9 +23,9 @@ const mcpDomainAll = -1
 // mcpDomains are the domains Settings offers to copy, in order, named by mcpDomainNames; mcpDomainPaths are where
 // each is served, under /mcp.
 var (
-	mcpDomains     = []int{domainVideo, domainDrawing, domainMind, domainRecording, mcpDomainAll}
-	mcpDomainNames = msgs("Video editing", "Drawing", "Mind maps", "Recording", "Everything")
-	mcpDomainPaths = map[int]string{domainVideo: "/video", domainDrawing: "/drawing", domainMind: "/mind", domainRecording: "/recording", mcpDomainAll: ""}
+	mcpDomains     = []int{domainVideo, domainDrawing, domainMind, domainRecording, domainOffice, mcpDomainAll}
+	mcpDomainNames = msgs("Video editing", "Drawing", "Mind maps", "Recording", "Office documents", "Everything")
+	mcpDomainPaths = map[int]string{domainVideo: "/video", domainDrawing: "/drawing", domainMind: "/mind", domainRecording: "/recording", domainOffice: "/office", mcpDomainAll: ""}
 )
 
 // mcpCommonTools are in every domain's server.
@@ -41,17 +41,18 @@ var mcpDomainTools = map[int][]string{
 	domainDrawing: {"canvas_new", "canvas_open", "canvas_state", "canvas_render", "canvas_save", "canvas_export",
 		"canvas_layer", "canvas_set_layer", "canvas_select", "canvas_paint", "canvas_fill", "canvas_add_shape",
 		"canvas_add_path", "canvas_set_vector", "canvas_boolean", "canvas_add_text", "canvas_filter", "canvas_transform",
-		"canvas_resize", "canvas_artboard", "canvas_history", "canvas_retouch", "canvas_adjustment", "canvas_style"},
+		"canvas_resize", "canvas_artboard", "canvas_history", "canvas_retouch", "canvas_heal", "canvas_subject", "canvas_smart_filter", "canvas_adjustment", "canvas_style", "canvas_export_pdf"},
 	domainMind: {"mind_new", "mind_open", "mind_state", "mind_add", "mind_update", "mind_set_cells", "mind_delete", "mind_move",
-		"mind_connect", "mind_update_connectors", "mind_find", "mind_outline", "mind_render", "mind_show", "mind_theme", "mind_history", "mind_save"},
+		"mind_connect", "mind_update_connectors", "mind_find", "mind_outline", "mind_render", "mind_show", "mind_theme", "mind_history", "mind_save", "mind_export_pdf"},
 	domainRecording: {"recording_status", "start_recording", "pause_recording", "stop_recording", "take_screenshot",
 		"stream_status", "show_stream", "set_stream_destination", "remove_stream_destination", "set_stream_options", "start_stream", "stop_stream", "camera_status", "set_camera"},
+	domainOffice: officeMCPTools,
 }
 
 // mcpToolsOf are the tools of a domain's server, the common ones first.
 func mcpToolsOf(domain int) []string {
 	out := slices.Clone(mcpCommonTools)
-	for _, d := range []int{domainVideo, domainDrawing, domainMind, domainRecording} {
+	for _, d := range []int{domainVideo, domainDrawing, domainMind, domainRecording, domainOffice} {
 		if domain == mcpDomainAll || domain == d {
 			out = append(out, mcpDomainTools[d]...)
 		}
@@ -66,9 +67,9 @@ var mcpToolNames = mcpToolsOf(mcpDomainAll)
 const (
 	mcpIntro = ProductName + ` is a desktop app on this computer for editing videos, drawing, mind maps, recording the screen and
 streaming live.
-These tools drive its open window directly. It works in tabs, each a video edit, a drawing canvas or a mind map: get_state lists
+These tools drive its open window directly. It works in tabs, each a video edit, a drawing canvas, a mind map or an Office document: get_state lists
 them, new_tab, switch_tab and close_tab manage them, and screenshot shows the window as it looks. The app is
-extended by JSON configurations — music_sources, subtitle_models, speech_voices, ffmpeg and streaming_platforms: get_config reads
+extended by JSON configurations — music_sources, subtitle_models, speech_voices, ai_models, ffmpeg, streaming_platforms, sky_presets, keyboard_rules and keyboard_remap: get_config reads
 one with a guide to its format, set_config replaces it after checking it, and reset_config goes back to the built-in.
 Files are managed as in Eagle: assets_browse shows a folder in the asset manager tab, assets_list lists a folder's
 files with their tags and categories, assets_tag and assets_categorize organise them, and assets_trash moves files to
@@ -150,7 +151,7 @@ func mcpInstructionsFor(domain int) string {
 	for _, p := range []struct {
 		domain int
 		text   string
-	}{{domainVideo, mcpVideoInstructions}, {domainDrawing, mcpDrawingInstructions}, {domainMind, mcpMindInstructions}, {domainRecording, mcpRecordingInstructions}} {
+	}{{domainVideo, mcpVideoInstructions}, {domainDrawing, mcpDrawingInstructions}, {domainMind, mcpMindInstructions}, {domainRecording, mcpRecordingInstructions}, {domainOffice, mcpOfficeInstructions}} {
 		if domain == mcpDomainAll || domain == p.domain {
 			parts = append(parts, p.text)
 		}
@@ -173,6 +174,9 @@ func (a *App) mcpServer(domain int) *mcp.Server {
 	a.addDrawTools(s)
 	a.addDrawToolsMore(s)
 	a.addMindTools(s)
+	a.addCanvasExport(s)
+	a.addMindExport(s)
+	a.addOfficeTools(s)
 	a.addAssetTools(s)
 	if domain != mcpDomainAll {
 		keep := mcpToolsOf(domain)
@@ -200,7 +204,8 @@ func mcpServerName(domain int) string {
 
 // mcpTasks say what an AI is asked to do with each domain's server.
 var mcpTasks = map[int]string{domainVideo: "edit videos", domainDrawing: "draw and edit pictures",
-	domainMind: "think in mind maps and flowcharts", domainRecording: "record the screen", mcpDomainAll: "edit videos, draw, think in mind maps and record the screen"}
+	domainMind: "think in mind maps and flowcharts", domainRecording: "record the screen", domainOffice: "edit Word documents, spreadsheets, presentations and PDFs",
+	mcpDomainAll: "edit videos, draw, think in mind maps, record the screen and edit Office documents"}
 
 // mcpConnection is the text Settings copies for a domain: paste it to an AI and it knows how to connect and what it
 // can do there.
@@ -317,6 +322,7 @@ type tabView struct {
 	Title   string `json:"title"`
 	Active  bool   `json:"active"`
 	Opening string `json:"opening,omitempty"`
+	Pinned  bool   `json:"pinned,omitempty"`
 }
 
 type stateView struct {
@@ -346,7 +352,7 @@ func (a *App) state() stateView {
 	}
 	s.FFmpeg.Status, _ = a.toolsStatus()
 	for i, d := range a.docs {
-		s.Tabs = append(s.Tabs, tabView{Index: i, Title: d.title(a), Active: d == a.doc, Opening: d.opening})
+		s.Tabs = append(s.Tabs, tabView{Index: i, Title: d.title(a), Active: d == a.doc, Opening: d.opening, Pinned: d.pinned})
 	}
 	if a.p == nil {
 		return s
@@ -448,7 +454,7 @@ func (a *App) addStateTools(s *mcp.Server) {
 		a.seek(in.Time)
 		return map[string]float64{"playhead": a.playhead}, nil
 	})
-	tool(s, a, "save_edit", "Save the active edit as a .btcut file (in the default export folder the first time, then to the same file), to open again with open_video.",
+	tool(s, a, "save_edit", "Save the active edit as a .btcut file (in the Creative folder of the resource folder the first time, then to the same file), to open again with open_video.",
 		func(none) (any, error) {
 			path, err := a.saveEditFile()
 			if err != nil {

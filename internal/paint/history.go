@@ -168,7 +168,7 @@ func sameTree(a, b *Node) bool {
 	if a.ID != b.ID || a.Name != b.Name || a.Visible != b.Visible || a.Opacity != b.Opacity ||
 		(a.Pixels == nil) != (b.Pixels == nil) || a.Pixels != nil && !a.Pixels.Same(b.Pixels) ||
 		(a.Mask == nil) != (b.Mask == nil) || a.Mask != nil && !a.Mask.Same(b.Mask) ||
-		a.Blend != b.Blend || a.LockAlpha != b.LockAlpha || a.MaskOff != b.MaskOff || a.Open != b.Open || a.Text != b.Text || a.Vector != b.Vector || a.Adjust != b.Adjust || a.Style != b.Style || a.Clip != b.Clip || a.Board != b.Board || a.Smart != b.Smart ||
+		a.Blend != b.Blend || a.LockAlpha != b.LockAlpha || a.MaskOff != b.MaskOff || a.Open != b.Open || a.Text != b.Text || a.Vector != b.Vector || a.Adjust != b.Adjust || a.Style != b.Style || a.Clip != b.Clip || a.Board != b.Board || a.Smart != b.Smart || a.Filters != b.Filters ||
 		len(a.Children) != len(b.Children) {
 		return false
 	}

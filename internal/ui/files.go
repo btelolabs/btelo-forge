@@ -43,6 +43,8 @@ type filesDoc struct {
 	detailScroll, detailH float32
 	// sweep is the right button marking items in a list while it is held.
 	sweep *sweep
+	// pick is the dialog this list is in, when it is the file picker's rather than a tab's.
+	pick *filePick
 }
 
 // filesPane is one folder list.
@@ -70,6 +72,8 @@ type filesPane struct {
 	g    paneGrid
 	// pie turns the pie under an analysed list to the item under the cursor.
 	pie pieMotion
+	// only says which files the list shows, for the file picker; nil shows them all.
+	only func(name string) bool
 }
 
 // thisPC is the list of the drives, as the folder above each drive's own: there is no such folder, so its dir is
@@ -103,8 +107,12 @@ type filesSettings struct {
 	HideHidden bool `json:"hideHidden,omitempty"` // hidden files are left out of the lists
 	// Panes are the lists the file manager tab used last had, left to right, which a new one opens again.
 	Panes []savedPane `json:"panes,omitempty"`
+	// ResourcesOpened says a file manager has opened the resource folder as it is now; until one has, it opens there.
+	ResourcesOpened bool `json:"resourcesOpened,omitempty"`
 	// VideoDir is the folder the video editor's list of videos showed last, which it opens in again.
 	VideoDir string `json:"videoDir,omitempty"`
+	// PickDirs are the folders the file picker showed last, by the kind of file it was asked for.
+	PickDirs map[string]string `json:"pickDirs,omitempty"`
 }
 
 // savedPane is a list as it is kept between runs: its folder, and whether it shows pictures.
@@ -197,18 +205,28 @@ func (a *App) newFilesTab(dir string, grid bool) *filesDoc {
 }
 
 // openResourceManager opens a file manager tab with the lists the last one had, each at its folder and as rows or
-// pictures as it was; the first time, the desktop as rows on the left and as pictures on the right.
+// pictures as it was; the first time, and after the resource folder moves, that folder as rows on the left and as
+// pictures on the right.
 func (a *App) openResourceManager() *filesDoc {
+	root, err := a.ensureResourceFolders()
+	if err != nil {
+		a.toast(a.u.tf("The resource folder could not be made: %s", a.describe(err)), true)
+	}
 	panes := a.settings.Files.Panes
-	if len(panes) == 0 {
-		desktop := defaultFolder()
-		panes = []savedPane{{Dir: desktop}, {Dir: desktop, Grid: true}}
+	if !a.settings.Files.ResourcesOpened || len(panes) == 0 {
+		panes = []savedPane{{Dir: root}, {Dir: root, Grid: true}}
+		a.settings.Files.ResourcesOpened = true
+		a.saveSettings()
 	}
 	return a.openFilesTab(panes)
 }
 
-// defaultFolder is where a list opens when it has nowhere else to: the desktop, else the home folder.
-func defaultFolder() string {
+// defaultFolder is where a list opens when it has nowhere else to: the resource folder, else the desktop, else the
+// home folder.
+func (a *App) defaultFolder() string {
+	if dir, err := a.resourceDir(); err == nil && isFolder(dir) {
+		return dir
+	}
 	if dir := files.Desktop(); isFolder(dir) {
 		return dir
 	}
@@ -225,7 +243,7 @@ func (a *App) openFilesTab(saved []savedPane) *filesDoc {
 		switch {
 		case dir == thisPC && len(files.Drives()) > 0:
 		case !isFolder(dir):
-			dir = defaultFolder()
+			dir = a.defaultFolder()
 		default:
 			dir = filepath.Clean(dir)
 		}
@@ -249,13 +267,19 @@ func (a *App) openFilesTab(saved []savedPane) *filesDoc {
 	return fd
 }
 
-// rememberPanes keeps the lists of the file manager tab in front, to open them again in the next one; they are
-// written with the folders visited, once they settle.
-func (a *App) rememberPanes(fd *filesDoc) {
+// savedPanes are the tab's lists as they are kept between runs.
+func (fd *filesDoc) savedPanes() []savedPane {
 	saved := make([]savedPane, len(fd.panes))
 	for i, p := range fd.panes {
 		saved[i] = savedPane{Dir: p.dir, Grid: p.grid}
 	}
+	return saved
+}
+
+// rememberPanes keeps the lists of the file manager tab in front, to open them again in the next one; they are
+// written with the folders visited, once they settle.
+func (a *App) rememberPanes(fd *filesDoc) {
+	saved := fd.savedPanes()
 	if slices.Equal(saved, a.settings.Files.Panes) {
 		return
 	}
@@ -263,16 +287,15 @@ func (a *App) rememberPanes(fd *filesDoc) {
 	a.fm.lastDirty, a.fm.historyAt = true, time.Now()
 }
 
-// openAssets shows dir (the export folder when empty) as pictures: in the file manager tab in front, else a new one.
+// openAssets shows dir (the resource folder when empty) as pictures: in the file manager tab in front, else a new one.
 func (a *App) openAssets(dir string) *filesPane {
 	if dir == "" {
-		d, err := a.uploadDir()
+		d, err := a.ensureResourceFolders()
 		if err != nil {
 			a.toast(a.describe(err), true)
 			return nil
 		}
 		dir = d
-		os.MkdirAll(dir, 0o755) // the export folder exists before the first export
 	}
 	if a.files != nil {
 		p := a.files.pane()
@@ -391,11 +414,8 @@ func (a *App) readPane(p *filesPane) {
 
 // refreshPanes lists again every pane, in every tab, that shows one of dirs, or all of them when dirs is nil.
 func (a *App) refreshPanes(dirs []string) {
-	for _, d := range a.docs {
-		if d.files == nil {
-			continue
-		}
-		for _, p := range d.files.panes {
+	for _, fd := range a.filesDocs() {
+		for _, p := range fd.panes {
 			if dirs == nil || slices.ContainsFunc(dirs, func(dir string) bool { return files.SamePath(dir, p.dir) }) {
 				a.readPane(p)
 			}
@@ -416,7 +436,7 @@ func (a *App) arrange(p *filesPane) {
 	node := a.paneAnalysis(p)
 	p.rows = p.rows[:0]
 	for i, e := range p.entries {
-		if a.settings.Files.HideHidden && e.Hidden {
+		if a.settings.Files.HideHidden && e.Hidden || p.leavesOut(&e) {
 			continue
 		}
 		if p.grid && !a.passes(p, &e) {
@@ -478,6 +498,9 @@ func (a *App) arrange(p *filesPane) {
 	})
 	p.cursorTo(name)
 }
+
+// leavesOut reports whether the list does not offer a file, being the file picker's for files of some kinds.
+func (p *filesPane) leavesOut(e *files.Entry) bool { return p.only != nil && !e.Dir && !p.only(e.Name) }
 
 // current is the entry under the cursor, or nil in an empty folder.
 func (p *filesPane) current() *files.Entry {

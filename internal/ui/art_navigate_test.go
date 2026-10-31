@@ -86,3 +86,38 @@ func TestHoldingZZooms(t *testing.T) {
 		t.Errorf("a click with the zoom tool zoomed to %v from %v", ad.zoom, z)
 	}
 }
+
+// Space and the zoom key work by the mouse alone, and the tool stays as it was.
+func TestHeldKeysMoveTheCanvasWithoutAButton(t *testing.T) {
+	x, ad := canvasHarness(t)
+	x.key('B', false)
+	before := shown(ad)
+	fx, fy := x.viewPoint(ad, 100, 100)
+	at := func(mx float32, in Input) {
+		x.mx, x.my = mx, fy
+		x.frame(in)
+	}
+	at(fx, Input{})
+	panX := ad.panX
+	at(fx, Input{Keys: []Key{{Code: keySpace}}, Up: []uint16{}})
+	at(fx+60, Input{Up: []uint16{}})
+	at(fx+60, Input{Up: []uint16{keySpace}})
+	if got, want := ad.panX, panX-60/ad.zoom; math.Abs(got-want) > 1e-6 {
+		t.Fatalf("pan x %v, want %v", got, want)
+	}
+	zoom := ad.zoom
+	at(fx+60, Input{Keys: []Key{{Code: 'Z'}}, Up: []uint16{}})
+	at(fx+60, Input{Up: []uint16{}}) // the key is seen after the pointer, so it counts from the next frame
+	at(fx+60+zoomScrub, Input{Up: []uint16{}})
+	at(fx+60+zoomScrub, Input{Up: []uint16{'Z'}})
+	at(fx+60+zoomScrub, Input{})
+	if math.Abs(ad.zoom-zoom*2) > 1e-6 {
+		t.Fatalf("zoom went from %v to %v", zoom, ad.zoom)
+	}
+	if x.a.artTool != toolBrush {
+		t.Fatalf("the tool is %v", x.a.artTool)
+	}
+	if string(shown(ad)) != string(before) {
+		t.Fatal("moving the view painted")
+	}
+}

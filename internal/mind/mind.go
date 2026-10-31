@@ -452,3 +452,10 @@ func (m *Map) applyTheme(id string) {
 	})
 	m.version++
 }
+
+// Themed is a copy of the map in another theme, as a dark map is printed on white paper.
+func (m *Map) Themed(id string) *Map {
+	c := m.Clone()
+	c.applyTheme(ThemeByID(id).ID)
+	return c
+}

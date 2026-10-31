@@ -466,7 +466,7 @@ func (a *App) gridCountsOf(p *filesPane) gridCounts {
 	c := gridCounts{kinds: map[assets.Kind]int{}}
 	for k := range p.entries {
 		fe := &p.entries[k]
-		if a.settings.Files.HideHidden && fe.Hidden {
+		if a.settings.Files.HideHidden && fe.Hidden || p.leavesOut(fe) {
 			continue
 		}
 		c.all++
@@ -558,7 +558,7 @@ func (a *App) drawGridCards(fd *filesDoc, i int, p *filesPane, id string, r gfx.
 		}
 	}
 	if fd.prompt == nil && hit >= 0 {
-		if moved && active && u.active == "" {
+		if moved && active && u.active == "" && fd.pick == nil {
 			p.cursor = hit
 		}
 		fd.hovered = p.path(&p.entries[p.rows[hit]])
@@ -595,6 +595,7 @@ func (a *App) clickCard(fd *filesDoc, p *filesPane, k int) {
 	switch {
 	case u.double:
 		p.cursor = k
+		a.pickClicked(fd)
 		a.enter(fd)
 		u.active = ""
 		return
@@ -606,6 +607,7 @@ func (a *App) clickCard(fd *filesDoc, p *filesPane, k int) {
 		}
 	}
 	p.cursor = k
+	a.pickClicked(fd)
 	p.g.drag, p.g.dragMoved = p.selected(), false
 	u.drag.x, u.drag.y, u.drag.moved = u.mx, u.my, false
 }
@@ -877,11 +879,8 @@ func (a *App) tagMenu(fd *filesDoc, name string) []menuItem {
 
 // dropFilter shows everything again in the grids filtered by a category or tag that is gone.
 func (a *App) dropFilter(what filterWhat, name string) {
-	for _, d := range a.docs {
-		if d.files == nil {
-			continue
-		}
-		for _, p := range d.files.panes {
+	for _, fd := range a.filesDocs() {
+		for _, p := range fd.panes {
 			if p.g.filter.what == what && strings.EqualFold(p.g.filter.name, name) {
 				a.setFilter(p, assetFilter{})
 			}
@@ -891,11 +890,8 @@ func (a *App) dropFilter(what filterWhat, name string) {
 
 // renameFilter follows a category or tag renamed in the grids filtered by it.
 func (a *App) renameFilter(what filterWhat, old, name string) {
-	for _, d := range a.docs {
-		if d.files == nil {
-			continue
-		}
-		for _, p := range d.files.panes {
+	for _, fd := range a.filesDocs() {
+		for _, p := range fd.panes {
 			if p.g.filter.what == what && strings.EqualFold(p.g.filter.name, old) {
 				p.g.filter.name = name
 			}

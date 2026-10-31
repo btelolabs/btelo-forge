@@ -10,19 +10,19 @@ import (
 // TestEveryHistoryStepIsNamed keeps the list complete.
 var historyNames = msgsIn("history",
 	"Add artboard", "Add layer mask", "Add node", "Add noise", "Add shape", "Add vector mask", "Adjustment",
-	"Apply layer mask", "Artboard", "Blend mode", "Blur", "Boolean", "Break the link", "Brightness/Contrast", "Brush",
-	"Burn", "Canvas size", "Clear", "Clone stamp", "Combine shapes", "Convert to curves", "Convert to group", "Convert to smart object",
+	"Apply layer mask", "Artboard", "Blend mode", "Blur", "Boolean", "Border", "Break the link", "Brightness/Contrast", "Brush",
+	"Burn", "Canvas size", "Clear", "Clone stamp", "Color balance", "Combine shapes", "Content-aware fill", "Contract", "Convert to curves", "Convert to group", "Convert to smart object",
 	"Crop", "Curves", "Cut", "Delete artboard", "Delete layer", "Delete layer mask", "Delete node",
-	"Delete vector mask", "Desaturate", "Deselect", "Disable layer mask", "Distort", "Dodge", "Duplicate layer",
-	"Edit text", "Eraser", "Exclude shape", "Expand shapes", "Feather", "Fill", "Flatten", "Flip", "Flip canvas",
-	"Free transform", "Gaussian blur", "Gradient", "Group", "Hue/Saturation", "Image size", "Intersect shape",
-	"Inverse", "Invert", "Layer opacity", "Layer style", "Levels", "Lock transparent pixels", "Mark as slice", "Mask gradient",
+	"Delete vector mask", "Desaturate", "Deselect", "Develop", "Disable layer mask", "Distort", "Dodge", "Duplicate layer",
+	"Edit text", "Eraser", "Exclude shape", "Expand", "Expand shapes", "Exposure", "Feather", "Fill", "Flatten", "Flip", "Flip canvas",
+	"Free transform", "Gaussian blur", "Gradient", "Gradient map", "Group", "Healing brush", "Hue/Saturation", "Image size", "Intersect shape",
+	"Inverse", "Invert", "Layer opacity", "Layer style", "Levels", "Liquify", "Lock transparent pixels", "Mark as slice", "Mask gradient",
 	"Merge down", "Merge group", "Mosaic", "Move", "Move artboard", "Move handle", "Move layer", "Move node", "Move shape",
-	"New adjustment layer", "New group", "New layer", "New vector layer", "Paint bucket", "Paste", "Pen", "Pencil", "Perspective",
-	"Posterize", "Rasterize", "Rasterize type", "Rasterize vector mask", "Rename layer", "Reselect", "Reveal all",
-	"Rotate", "Rotate canvas", "Select", "Shape operation", "Sharp node", "Sharpen", "Show or hide layer", "Skew",
-	"Smooth node", "Smudge", "Sponge", "Stroke", "Subtract shape", "Swap fill and stroke", "Text", "Threshold", "Transform nodes",
-	"Ungroup", "Unmark as slice", "Unsharp mask", "Update smart object", "Warp")
+	"New adjustment layer", "New group", "New layer", "New vector layer", "Paint bucket", "Paste", "Patch", "Pen", "Pencil", "Perspective", "Photo filter",
+	"Posterize", "Rasterize", "Rasterize type", "Rasterize vector mask", "Rename layer", "Remove background", "Reselect", "Reveal all",
+	"Rotate", "Rotate canvas", "Select", "Selective color", "Shadows/Highlights", "Shape operation", "Sharp node", "Sharpen", "Show or hide layer", "Skew",
+	"Smart filter", "Smooth", "Smooth node", "Smudge", "Sponge", "Spot healing", "Stroke", "Subtract shape", "Swap fill and stroke", "Text", "Threshold", "Transform nodes",
+	"Ungroup", "Unmark as slice", "Unsharp mask", "Update smart object", "Vibrance", "Warp", "Wipe")
 
 // The side panel's lower pages, as Photoshop's Layers and History panels sharing a place.
 const (

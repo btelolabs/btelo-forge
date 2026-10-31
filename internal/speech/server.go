@@ -11,10 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -53,15 +51,14 @@ type Server struct {
 }
 
 type process struct {
+	*proc.Service
 	key    string
+	model  string // the id of the model it holds
 	api    api
-	cmd    *exec.Cmd
 	client *http.Client
 	base   string  // http://127.0.0.1:port
 	rate   int     // samples per second, for a server that says so before speaking
 	pace   float64 // seconds it takes to make a second of speech, for a server that does not stream
-	log    *tail
-	exited chan struct{}
 	timer  *time.Timer
 }
 
@@ -77,6 +74,16 @@ func (s *Server) Running() bool {
 	return s.run != nil
 }
 
+// Info says which model the running server holds and its process id, and false when none runs.
+func (s *Server) Info() (model string, pid int, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.run == nil || !s.run.Running() {
+		return "", 0, false
+	}
+	return s.run.model, s.run.Pid(), true
+}
+
 // Stop ends the server now, giving back its memory; the next piece of speech starts it again. A piece being made
 // fails.
 func (s *Server) Stop() {
@@ -84,7 +91,7 @@ func (s *Server) Stop() {
 	p := s.run
 	s.run = nil
 	s.mu.Unlock()
-	p.stop()
+	p.halt()
 }
 
 // Close stops the server for good; a piece of speech being made fails, and later ones are refused.
@@ -214,9 +221,9 @@ func (s *Server) Speak(ctx context.Context, l Launch, req Request, path string, 
 	}
 	// A server that died breaks the connection a moment before it is seen to have ended.
 	select {
-	case <-p.exited:
+	case <-p.Exited:
 		s.forget(p)
-		return 0, fmt.Errorf("the speech engine stopped: %s", p.log.last())
+		return 0, fmt.Errorf("the speech engine stopped: %s", p.Log.Last())
 	case <-time.After(time.Second):
 	}
 	return 0, err
@@ -233,11 +240,11 @@ func (s *Server) ready(ctx context.Context, l Launch, progress transcribe.Progre
 	if p != nil {
 		p.timer.Stop()
 		select {
-		case <-p.exited:
+		case <-p.Exited:
 			p = nil // it ended by itself; start it again
 		default:
 			if p.key != l.key() {
-				p.stop()
+				p.halt()
 				p = nil
 			}
 		}
@@ -259,7 +266,7 @@ func (s *Server) ready(ctx context.Context, l Launch, progress transcribe.Progre
 	}
 	s.mu.Unlock()
 	if closed {
-		p.stop()
+		p.halt()
 		return nil, errClosed
 	}
 	return p, nil
@@ -288,7 +295,7 @@ func (s *Server) rest(p *process) {
 		}
 		s.mu.Unlock()
 		if stop {
-			p.stop()
+			p.halt()
 		}
 	})
 }
@@ -299,7 +306,7 @@ func (s *Server) forget(p *process) {
 		s.run = nil
 	}
 	s.mu.Unlock()
-	p.stop()
+	p.halt()
 }
 
 // start runs the server on a free port and waits until its model is loaded and ready to speak.
@@ -308,59 +315,30 @@ func start(ctx context.Context, l Launch, client *http.Client, limit time.Durati
 	if !ok {
 		return nil, fmt.Errorf("unknown speech engine api %q", l.Engine.API)
 	}
-	port, err := freePort()
-	if err != nil {
-		return nil, err
-	}
 	if err := os.MkdirAll(l.Dir, 0o755); err != nil {
 		return nil, err
 	}
-	values, err := a.prepare(l, port)
+	svc, err := proc.StartAs("speech:"+l.Model.ID, l.Program, func(port int) ([]string, error) {
+		values, err := a.prepare(l, port)
+		if err != nil {
+			return nil, err
+		}
+		args := make([]string, len(l.Engine.Arguments))
+		for i, arg := range l.Engine.Arguments {
+			args[i] = placeholder.ReplaceAllStringFunc(arg, func(m string) string { return values[m[1:len(m)-1]] })
+		}
+		return args, nil
+	})
 	if err != nil {
+		return nil, fmt.Errorf("starting the speech engine: %w", err)
+	}
+	p := &process{Service: svc, key: l.key(), model: l.Model.ID, api: a, client: client, base: svc.Base, timer: time.NewTimer(0)}
+	p.timer.Stop()
+	if err := svc.WaitReady(ctx, limit, "the speech engine", func(ctx context.Context) bool { return a.ready(ctx, p) }); err != nil {
 		return nil, err
 	}
-	args := make([]string, len(l.Engine.Arguments))
-	for i, arg := range l.Engine.Arguments {
-		args[i] = placeholder.ReplaceAllStringFunc(arg, func(m string) string { return values[m[1:len(m)-1]] })
-	}
-	cmd := exec.Command(l.Program, args...)
-	cmd.Dir = filepath.Dir(l.Program)
-	proc.Hide(cmd)
-	log := &tail{}
-	cmd.Stdout, cmd.Stderr = log, log
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("starting the speech engine: %w", err)
-	}
-	p := &process{key: l.key(), api: a, cmd: cmd, client: client, base: "http://127.0.0.1:" + strconv.Itoa(port), log: log,
-		exited: make(chan struct{}), timer: time.NewTimer(0)}
-	p.timer.Stop()
-	if err := proc.Bind(cmd.Process); err != nil {
-		p.stop()
-		return nil, fmt.Errorf("starting the speech engine: %w", err)
-	}
-	go func() {
-		cmd.Wait()
-		close(p.exited)
-	}()
-	ctx, cancel := context.WithTimeout(ctx, limit)
-	defer cancel()
-	tick := time.NewTicker(250 * time.Millisecond)
-	defer tick.Stop()
-	for !a.ready(ctx, p) {
-		select {
-		case <-ctx.Done():
-			p.stop()
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return nil, fmt.Errorf("the speech engine did not load the model within %s", limit)
-			}
-			return nil, ctx.Err()
-		case <-p.exited:
-			return nil, fmt.Errorf("the speech engine stopped while loading the model: %s", log.last())
-		case <-tick.C:
-		}
-	}
 	if err := a.warm(ctx, p); err != nil {
-		p.stop()
+		p.halt()
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -369,30 +347,13 @@ func start(ctx context.Context, l Launch, client *http.Client, limit time.Durati
 	return p, nil
 }
 
-func freePort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
-}
-
-func (p *process) stop() {
+// halt ends the server's program and its idle timer.
+func (p *process) halt() {
 	if p == nil {
 		return
 	}
 	p.timer.Stop()
-	select {
-	case <-p.exited:
-		return
-	default:
-	}
-	proc.KillTree(p.cmd.Process)
-	select {
-	case <-p.exited:
-	case <-time.After(5 * time.Second):
-	}
+	p.Stop()
 }
 
 // get asks the server for path with a short time limit and decodes its JSON answer into into; false when it does
@@ -439,7 +400,7 @@ func (p *process) post(ctx context.Context, path, contentType string, body []byt
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-p.exited:
+		case <-p.Exited:
 			return nil, errors.New("the speech engine stopped")
 		case <-time.After(300 * time.Millisecond):
 		}
@@ -618,36 +579,4 @@ func wavHeader(rate int, n int64) []byte {
 	copy(h[36:], "data")
 	binary.LittleEndian.PutUint32(h[40:], uint32(n))
 	return h
-}
-
-// tail keeps the end of what the server prints, to explain why it stopped.
-type tail struct {
-	mu  sync.Mutex
-	buf []byte
-}
-
-func (t *tail) Write(b []byte) (int, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.buf = append(t.buf, b...)
-	if len(t.buf) > 8<<10 {
-		t.buf = append(t.buf[:0], t.buf[len(t.buf)-4<<10:]...)
-	}
-	return len(b), nil
-}
-
-// last is the last few lines printed, without the progress bars.
-func (t *tail) last() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	var lines []string
-	for _, l := range strings.FieldsFunc(string(t.buf), func(r rune) bool { return r == '\n' || r == '\r' }) {
-		if l = strings.TrimSpace(l); l != "" && !strings.Contains(l, "|") {
-			lines = append(lines, l)
-		}
-	}
-	if len(lines) == 0 {
-		return "no output"
-	}
-	return strings.Join(lines[max(len(lines)-4, 0):], " | ")
 }

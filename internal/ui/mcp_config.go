@@ -2,13 +2,15 @@ package ui
 
 import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/btelolabs/btelo-forge/internal/keyboard"
 )
 
 func (a *App) addConfigTools(s *mcp.Server) {
 	type nameIn struct {
-		Name string `json:"name" jsonschema:"music_sources, subtitle_models, speech_voices, ffmpeg or streaming_platforms"`
+		Name string `json:"name" jsonschema:"music_sources, subtitle_models, speech_voices, ffmpeg, streaming_platforms, sky_presets, keyboard_rules or keyboard_remap"`
 	}
-	tool(s, a, "get_config", "Read an extension configuration as JSON: music_sources (the online music and sound-effect sites), subtitle_models (speech engines, models and languages), ffmpeg (which ffmpeg the app uses and where it downloads it) or streaming_platforms (the live-streaming services offered when adding a destination: their servers and where their stream keys are found). Returns the JSON in use, whether it is the user's own file, and a guide to the format.",
+	tool(s, a, "get_config", "Read an extension configuration as JSON: music_sources (the online music and sound-effect sites), subtitle_models (speech engines, models and languages), ffmpeg (which ffmpeg the app uses and where it downloads it) streaming_platforms (the live-streaming services offered when adding a destination: their servers and where their stream keys are found) keyboard_rules (keys remapped, programs opened and abbreviations expanded in every program while the app runs) or keyboard_remap (keys changed below the programs, in the Windows registry as SharpKeys does, after a restart, or with hidutil on macOS). Returns the JSON in use, whether it is the user's own file, and a guide to the format.",
 		func(in nameIn) (any, error) {
 			k, err := findConfig(in.Name)
 			if err != nil {
@@ -18,10 +20,10 @@ func (a *App) addConfigTools(s *mcp.Server) {
 			return map[string]any{"name": k.id, "json": text, "custom": custom, "file": a.configPath(k), "guide": k.guide}, nil
 		})
 	type setIn struct {
-		Name string `json:"name" jsonschema:"music_sources, subtitle_models, speech_voices, ffmpeg or streaming_platforms"`
+		Name string `json:"name" jsonschema:"music_sources, subtitle_models, speech_voices, ffmpeg, streaming_platforms, sky_presets, keyboard_rules or keyboard_remap"`
 		JSON string `json:"json" jsonschema:"the complete new configuration; read it with get_config first and change what is needed"`
 	}
-	tool(s, a, "set_config", "Replace an extension configuration with new JSON. It is checked first: when it is invalid nothing changes and the error names the place. When it is valid it takes effect at once and is kept for the next start.",
+	tool(s, a, "set_config", "Replace an extension configuration with new JSON. It is checked first: when it is invalid nothing changes and the error names the place. When it is valid it takes effect at once and is kept for the next start. keyboard_rules are the exception: a rule with a mistake is still saved, summary.problem says which line, and no rule works until it is corrected; and only the user can turn the rules on, in the Keyboard tab (summary.active). keyboard_remap is the same: saved even with a mistake, and only the user can apply it, from that tab (summary.written).",
 		func(in setIn) (any, error) {
 			k, err := findConfig(in.Name)
 			if err != nil {
@@ -33,7 +35,7 @@ func (a *App) addConfigTools(s *mcp.Server) {
 			a.extensions.forget(k.id)
 			return map[string]any{"saved": a.configPath(k), "summary": a.configSummary(k)}, nil
 		})
-	tool(s, a, "reset_config", "Go back to the built-in configuration (music_sources, subtitle_models, speech_voices, ffmpeg or streaming_platforms), removing the user's file.",
+	tool(s, a, "reset_config", "Go back to the built-in configuration (music_sources, subtitle_models, speech_voices, ffmpeg, streaming_platforms, sky_presets, keyboard_rules or keyboard_remap), removing the user's file.",
 		func(in nameIn) (any, error) {
 			k, err := findConfig(in.Name)
 			if err != nil {
@@ -50,12 +52,34 @@ func (a *App) addConfigTools(s *mcp.Server) {
 // configSummary lists what a configuration now offers, so a tool can confirm the change.
 func (a *App) configSummary(k configKind) any {
 	switch k.id {
+	case keyboardRules:
+		problem, rules := "", 0
+		if a.keys.problem != nil {
+			problem = a.keys.problem.Error()
+		} else if list, err := keyboard.Parse(a.keys.config.Rules); err == nil {
+			rules = len(list)
+		}
+		return map[string]any{"rules": rules, "active": a.settings.KeyboardRules, "problem": problem}
+	case keyboardRemap:
+		problem, written := "", false
+		if a.keys.remapProblem != nil {
+			problem = a.keys.remapProblem.Error()
+		} else {
+			written = a.remapWritten()
+		}
+		return map[string]any{"remaps": len(a.keys.remapped), "written": written, "problem": problem}
 	case "streaming_platforms":
 		var ids []string
 		for _, p := range a.onAir.platforms.Platforms {
 			ids = append(ids, p.ID)
 		}
 		return map[string]any{"platforms": ids}
+	case "sky_presets":
+		var ids []string
+		for _, s := range a.models.skies.Skies {
+			ids = append(ids, s.ID)
+		}
+		return map[string]any{"skies": ids}
 	case "ffmpeg":
 		return map[string]any{"minimum": a.tools.config.Minimum, "useSystemFFmpeg": a.tools.config.System, "downloads": len(a.tools.config.Downloads)}
 	}

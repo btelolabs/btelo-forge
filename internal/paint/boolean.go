@@ -128,6 +128,11 @@ type boolEdge struct {
 // Combine is the outline that op makes of objects, bottom first, as rings of curves in canvas space; it is empty
 // when nothing is left.
 func Combine(op BoolOp, objects []Vector) []Subpath {
+	return combineFitted(op, objects, boolFit)
+}
+
+// combineFitted is Combine with its rings fitted within fit.
+func combineFitted(op BoolOp, objects []Vector, fit float64) []Subpath {
 	ops := make([]operand, len(objects))
 	var edges []boolEdge
 	for i := range objects {
@@ -197,7 +202,7 @@ func Combine(op BoolOp, objects []Vector) []Subpath {
 	})
 	var out []Subpath
 	for _, ring := range joinRings(kept) {
-		out = append(out, FitPath(ring, true, boolFit))
+		out = append(out, FitPath(ring, true, fit))
 	}
 	return out
 }

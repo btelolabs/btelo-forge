@@ -46,14 +46,14 @@ func TestVectorBrush(t *testing.T) {
 	if c := ad.look(175, 100); c != (color.RGBA{255, 255, 255, 255}) {
 		t.Errorf("between the strokes %v", c)
 	}
-	// About as wide as the brush: 10 px.
+	// As wide as the brush paints: half a pixel inside its 10 px each way.
 	thick := 0
 	for y := 40; y < 75; y++ {
 		if ad.look(175, y).B > 128 && ad.look(175, y).R < 128 {
 			thick++
 		}
 	}
-	if thick < 9 || thick > 12 {
+	if thick < 9 || thick > 10 {
 		t.Errorf("the stroke is %d px thick", thick)
 	}
 	// D and F size it.

@@ -15,7 +15,7 @@ Free, open source, offline, and driven by AI over MCP.</p>
 > [!NOTE]
 > **Windows is where Btelo Forge is made and checked. The macOS version is experimental:** it is tested far less,
 > and screen recording, live streaming, the camera on the screen, screenshots and drawing on the screen are not there
-> yet; stream keys are not kept encrypted.
+> yet.
 
 <p align="center"><img src="docs/demos/linked.webp" alt="A poster canvas shown on a mind map: a badge drawn on the canvas appears on the map at once"></p>
 
@@ -27,7 +27,7 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
 
 <p align="center"><img src="docs/demos/video.webp" alt="Two clips joined, one cut and sped up, music, a caption and a logo added on the timeline"></p>
 
-- Tabs for separate edits; drop more videos to extend the main track or stack them on upper tracks.
+- Tabs for separate edits, along the top or down the left side: drag them into any order, and right-click to pin one, which then opens again with the app holding what it held. Drop more videos to extend the main track or stack them on upper tracks.
 - A multi-track timeline for video, overlays (text, images and drawings) and music; upper tracks cover lower ones.
 - Split, trim and per-clip speed from 0.25× to 4×, with the sound's pitch kept.
 - Volume per clip and per track, opacity for clips and overlays; box-select or Ctrl-click several items and change
@@ -59,13 +59,13 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
 **Pixels, as in Photoshop**
 - Brushes and an eraser with hardness, flow, smoothing, tip shape and shape dynamics (size and angle jitter,
   scatter, a tip that turns with the stroke); twelve brush presets from pencil, charcoal and ink to bristle brushes,
-  sponge and spatter, and tips made from your own pictures; the clone stamp; dodge, burn, sponge, blur, sharpen and
-  smudge.
-- Marquee, lasso and magic wand selections; paint bucket and gradients.
+  sponge and spatter, and tips made from your own pictures; the clone stamp; the spot healing brush, healing brush, patch tool and content-aware fill, which take out blemishes, passers-by and clutter without a seam; dodge, burn, sponge, blur, sharpen and
+  smudge; liquify (forward, pucker, bloat).
+- Marquee, lasso and magic wand selections, and Select Subject and Remove Background by a local model (Windows, about 250 MB the first time, nothing uploaded), to feather, expand, contract, smooth or turn into a border; paint bucket and gradients.
 - Layers and groups with masks, 26 blend modes and locked transparency; adjustment layers that change what is under
   them without touching its pixels; layer styles — drop and inner shadow, outer and inner glow, stroke, colour
   overlay — that follow every change to the layer.
-- Levels, curves, hue/saturation and more, and filters (Gaussian blur, unsharp mask, noise, mosaic), all with live
+- Levels, curves, exposure, vibrance, hue/saturation, color balance, photo filter, gradient map, selective color and shadows/highlights, a Develop panel for a whole photograph, and filters (the slow ones run on a graphics card when there is one) (Gaussian blur, unsharp mask, noise, mosaic), all with live
   previews; Free Transform with skew, distort, perspective and warp; a History panel.
 
 **Vectors, as in Affinity Designer**
@@ -86,6 +86,7 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
   and the ⓘ by each slice says what it will export and why.
 - Open a screenshot as a canvas, or draw over a video as an overlay that follows every save of its canvas.
 - A canvas file keeps everything — layers, vectors, text, masks, effects, adjustment layers and artboards.
+- Photoshop's PSD files open and export (RGB or grey, 8 or 16 bits) with their layers, groups, blend modes, opacity and masks. Adjustment layers and effects do not cross yet, and you are told what was left out.
 
 <table>
   <tr>
@@ -93,6 +94,25 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
     <td><img src="docs/screenshots/en-style.jpg" alt="The Layer Style dialog"></td>
   </tr>
 </table>
+
+## Office documents
+
+- Word, Excel, PowerPoint and PDF in tabs, written in pure Go with nothing else to install. Files stay .docx, .xlsx and
+  .pptx: what the app does not understand, such as comments, comes back out unchanged. Charts in all three are drawn,
+  on the screen and as vectors on paper, and a chart in a workbook follows its cells; CSV and TSV files open as sheets and
+  are saved back in their own encoding and separator.
+- Documents: real pages with styles, lists, tables, pictures, headers and footers, find and replace.
+- Spreadsheets: formulas with incremental recalculation, number formats, merged cells, frozen panes, sorting and
+  filters, and files of millions of cells.
+- Presentations: slides drawn from their masters and layouts, shapes, pictures, tables, speaker notes and a slideshow.
+- PDFs: reading, searching, annotations other readers show, filling in forms, adding text and pictures, and turning,
+  reordering, joining or removing pages.
+- Documents save themselves a moment after each change, and the file as it was opened is kept in a backups folder.
+  The old binary .doc, .xls and .ppt formats are not read.
+- Printing: Ctrl+P prints Word, Excel, PowerPoint and PDF files, canvases and mind maps, with a preview that is the page
+  itself, and any of them but a PDF saves as a vector PDF with searchable text. Shapes and words stay vector on paper;
+  only what a printer cannot do, such as blend modes, goes as pixels. On macOS the PDF opens in the system's viewer,
+  which prints it.
 
 ## Mind maps and flowcharts
 
@@ -140,8 +160,11 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
   stops). The editor's own window is recorded too, so its use can be shown; it can also keep itself out of the
   picture. The recording toolbar never appears in it.
 - Recordings open in a tab, ready to cut.
-- Screenshots of a screen or a dragged region, onto the clipboard (Ctrl+Shift+3), into the pictures folder or
-  saved with their path copied, and drawing on the screen itself, with or without recording.
+- Screenshots of a dragged region of any screen, or all of one, onto the clipboard (Ctrl+Shift+3), into the pictures
+  folder or saved with their path copied.
+- Drawing on the screen (Ctrl+Shift+2), a tool of its own, while recording or not and ready for a screenshot: the
+  whole canvas editor, with its menus, tools, colours, layers, dialogs and your keys, gathered on one tall panel that
+  stays in front and out of recordings. The drawing is saved as a canvas.
 
 ## Live streaming (Windows)
 
@@ -176,6 +199,25 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
 
 ## Also
 
+- Local models, a tool opened from the start page: a chat window like ChatGPT's, with Qwen3, Gemma 3, Phi-4 mini and
+  Llama 3.2 running on your own computer through llama.cpp (Vulkan on NVIDIA, AMD and Intel graphics cards, or the
+  processor), and with Gemini, Grok, DeepSeek and Qwen online using your own API key, which is kept sealed for your
+  Windows account. A model downloads the first time it is used, resuming after an interruption, and is loaded, switched
+  and unloaded from the chat; while it is loaded the disk, memory, processor, graphics processor and video memory it
+  takes are shown. Settings → AI models lists every model of the app, including the voice-over and subtitle ones, with
+  whether it runs and what it costs. Answers stream in, thinking models show their thinking apart, and conversations are
+  kept on this computer. The list of models, engines and services is a JSON configuration (Settings → Extensions, or
+  `ai_models` over MCP).
+- A 3D tool opened from the start page, for making and changing assets: .glb, .gltf and .fbx files open and save (FBX written
+  and checked against Blender both ways). Points, edges and faces are edited with extrude, inset, bevel, loop cut, bridge,
+  mirror and subdivision; seams, unwrapping and a UV editor lay out textures, which you paint on the model, or in the drawing
+  tool with all its layers. Bones are made and bound, weights painted, poses keyed on a timeline, with IK. Five skies or your
+  own, and a path traced view with light that bounces, which runs on your graphics card through WebGPU.
+- Keyboard rules, a tool opened from the start page and off until you turn them on: one line each, such as `CapsLock -> Esc`,
+  `Ctrl+Alt+T -> open "wt.exe"` or `;mail => me@example.com`, working in every program. Example buttons add a rule to
+  change, key names complete as you type, a mistake is pointed out when saving, and saved rules apply at once; an AI
+  can change them over MCP. The same tab writes registry remaps as SharpKeys does, taking effect after a restart,
+  or hidutil remaps on macOS, with nothing running.
 - Keyboard shortcuts chosen in Settings for each kind of work on its own: general, video editing, drawing and
   recording.
 - Your phone can play and download exports, and send clips back to the computer, over the local network with a

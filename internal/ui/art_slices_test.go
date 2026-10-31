@@ -15,7 +15,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/paint"
 )
 
-// K marks the chosen layers as slices and unmarks them; the ⓘ by a slice explains it; Ctrl+P exports the slices
+// K marks the chosen layers as slices and unmarks them; the ⓘ by a slice explains it; Ctrl+Shift+P exports the slices
 // beside the canvas file, keeping a copy of each file it replaces.
 func TestSlices(t *testing.T) {
 	x, ad := canvasHarness(t)
@@ -66,9 +66,9 @@ func TestSlices(t *testing.T) {
 		t.Error("Esc should close the explanation")
 	}
 
-	// Ctrl+P writes them beside the canvas file.
+	// Ctrl+Shift+P writes them beside the canvas file.
 	dir := filepath.Dir(ad.path)
-	x.key('P', true)
+	x.frame(Input{Keys: []Key{{Code: 'P', Ctrl: true, Shift: true}}})
 	x.pump(10*time.Second, func() bool {
 		_, err := os.Stat(filepath.Join(dir, "ui", "cat.png"))
 		return err == nil && len(a.toasts) > 0
@@ -80,7 +80,7 @@ func TestSlices(t *testing.T) {
 	}
 	// Again: the files are replaced, the old ones kept.
 	toasts := len(a.toasts)
-	x.key('P', true)
+	x.frame(Input{Keys: []Key{{Code: 'P', Ctrl: true, Shift: true}}})
 	x.pump(10*time.Second, func() bool { return len(a.toasts) > toasts })
 	kept, _ := filepath.Glob(filepath.Join(dir, sliceBackups, "*", "ui", "cat.png"))
 	if len(kept) != 1 {
@@ -91,7 +91,7 @@ func TestSlices(t *testing.T) {
 	d.Rename(cat.ID, "ui/c?t.png")
 	os.Remove(filepath.Join(dir, "Fish.png"))
 	toasts = len(a.toasts)
-	x.key('P', true)
+	x.frame(Input{Keys: []Key{{Code: 'P', Ctrl: true, Shift: true}}})
 	x.settle(5 * time.Second)
 	if len(a.toasts) <= toasts || !a.toasts[len(a.toasts)-1].err {
 		t.Error("a bad name should say why the slices cannot export")

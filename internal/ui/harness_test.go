@@ -34,6 +34,7 @@ type fakeHost struct {
 	clipImage  image.Image
 	overlaysOn bool           // OpenOverlay works; off, it fails, as on a window without overlays
 	overlays   []*fakeOverlay // every overlay opened, closed ones too
+	pointer    image.Point    // where the mouse pointer is on the desktop
 	title      string
 	chosen     []string // what the open dialog answers
 	pasteText  string   // the text and files a paste finds, besides pasteImage
@@ -101,8 +102,8 @@ func newHarness(t testing.TB) *harness {
 	if err := os.WriteFile(filepath.Join(dir, "state", "ffmpeg.json"), system, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// The app keeps the user's work (canvases, screenshots, recordings) in their home folder's Videos, and the file
-	// manager starts at home: a test's home is its own folder, so nothing it makes lands among the user's files.
+	// The app keeps the user's work in a folder in their home folder, and the file manager starts there: a test's home
+	// is its own folder, so nothing it makes lands among the user's files.
 	home := filepath.Join(dir, "home")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatal(err)
@@ -274,6 +275,8 @@ func (h *fakeHost) OpenOverlay(o OverlayOptions) (Overlay, error) {
 	return f, nil
 }
 
+func (h *fakeHost) Pointer() image.Point { return h.pointer }
+
 // open lists the overlays that are still open.
 func (h *fakeHost) open() []*fakeOverlay {
 	var out []*fakeOverlay
@@ -290,6 +293,8 @@ type fakeOverlay struct {
 	opts         OverlayOptions
 	bounds       image.Rectangle
 	queued       []Input
+	raised       int
+	typing       bool
 	mx, my       float32
 	down         bool
 	shown        *image.RGBA
@@ -320,10 +325,14 @@ func (o *fakeOverlay) Present(img *image.RGBA, dirty image.Rectangle) error {
 }
 func (o *fakeOverlay) SetClickThrough(on bool) { o.clickThrough = on }
 func (o *fakeOverlay) TakeKeyboard(on bool)    { o.keyboard = on }
-func (o *fakeOverlay) SetCursor(c Cursor)      { o.cursor = c }
-func (o *fakeOverlay) Move(r image.Rectangle)  { o.bounds = r }
-func (o *fakeOverlay) Closed() bool            { return false }
-func (o *fakeOverlay) Close()                  { o.closed = true }
+func (o *fakeOverlay) Raise()                  { o.raised++ }
+func (o *fakeOverlay) TextInput(on bool, x, y, height float32) {
+	o.typing = on
+}
+func (o *fakeOverlay) SetCursor(c Cursor)     { o.cursor = c }
+func (o *fakeOverlay) Move(r image.Rectangle) { o.bounds = r }
+func (o *fakeOverlay) Closed() bool           { return false }
+func (o *fakeOverlay) Close()                 { o.closed = true }
 
 // drag queues a press at (x0, y0), moves to (x1, y1) and a release there, in the overlay's pixels.
 func (o *fakeOverlay) drag(x0, y0, x1, y1 float32) {

@@ -22,6 +22,7 @@ const (
 	RetouchBlur
 	RetouchSharpen
 	RetouchSmudge
+	RetouchLiquify
 	retouchCount
 )
 
@@ -41,9 +42,13 @@ type Retouch struct {
 	Range      ToneRange
 	Desaturate bool
 	Strength   float64
+	Liquify    LiquifyMode
 }
 
-var retouchNames = []string{"Dodge", "Burn", "Sponge", "Blur", "Sharpen", "Smudge"}
+var retouchNames = []string{"Dodge", "Burn", "Sponge", "Blur", "Sharpen", "Smudge", "Liquify"}
+
+// dabsItself reports whether the brush changes the pixels itself at each dab, rather than through the stroke's coverage.
+func (rt *Retouch) dabsItself() bool { return rt.Kind == RetouchSmudge || rt.Kind == RetouchLiquify }
 
 // ErrRetouchMask means a retouching brush was used on a layer mask, which has no tones or colours to change.
 var ErrRetouchMask = errors.New("the retouching tools work on a layer's pixels, not its mask")
@@ -60,8 +65,8 @@ func (d *Doc) BeginRetouch(b Brush, rt Retouch, x, y float64) (*Stroke, image.Re
 	rt.Strength = min(max(rt.Strength, 0), 1)
 	b.Opacity = rt.Strength // the strength bounds the stroke as a brush's opacity does
 	b.Flow = 1
-	if rt.Kind == RetouchSmudge {
-		b.Spacing = min(b.Spacing, 0.1) // the colour is carried from dab to dab, so dabs must overlap
+	if rt.dabsItself() {
+		b.Spacing = min(b.Spacing, 0.1) // what they carry goes from dab to dab, so dabs must overlap
 	}
 	r := rt
 	return d.beginStrokeWith(b, &r, x, y)

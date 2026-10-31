@@ -38,6 +38,23 @@ func (a *App) openMenu(id string, anchor gfx.Rect, items []menuItem) {
 	a.menu = &popupMenu{id: id, anchor: anchor, items: items, sub: -1}
 }
 
+// drawOpenMenu draws the open menu, if any, over everything else: a list, or one of the panels that open as menus.
+func (a *App) drawOpenMenu() {
+	if a.menu == nil {
+		return
+	}
+	switch a.menu.id {
+	case "art/tipshape":
+		a.drawTipShape()
+	case "art/presets":
+		a.drawPresets()
+	case "art/slice-info":
+		a.drawSliceInfo()
+	default:
+		a.drawMenu()
+	}
+}
+
 // menuOpen reports whether the menu with id is open.
 func (a *App) menuOpen(id string) bool { return a.menu != nil && a.menu.id == id }
 

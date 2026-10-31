@@ -602,6 +602,13 @@ func (r *renderer) media(n *Node, at Vec) {
 
 // picture draws img scaled into dst with its corners rounded to radius pixels, as the card around it is.
 func (r *renderer) picture(img *image.RGBA, dst gfx.Rect, radius float32) {
+	if r.c.Recorder() != nil {
+		// On paper the picture keeps all its pixels, and its corners are a clip.
+		r.c.PushRound(dst, radius)
+		r.c.Image(img, dst)
+		r.c.Pop()
+		return
+	}
 	px := dst.Pixels()
 	if radius < 2 || px.Dx() < 8 || px.Dy() < 8 || px.Dx()*px.Dy() > 4<<20 {
 		r.c.Image(img, dst)

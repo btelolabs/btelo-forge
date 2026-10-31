@@ -1,9 +1,7 @@
 package ui
 
 import (
-	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/btelolabs/btelo-forge/internal/library"
 	"github.com/btelolabs/btelo-forge/internal/web"
@@ -12,23 +10,6 @@ import (
 // phoneSite is what the phone page shows and where its uploads go.
 func (a *App) phoneSite() web.Site {
 	return web.Site{Files: a.phoneFiles, Text: a.phoneText, UploadDir: a.phoneUploadDir, Received: a.phoneReceived, Logo: logoJPEG}
-}
-
-// uploadDir is where files sent from a phone are kept: the default export folder, or the user's videos folder when
-// exports go beside each original.
-func (a *App) uploadDir() (string, error) {
-	if a.settings.ExportDir != "" {
-		return a.settings.ExportDir, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	videos := "Videos"
-	if runtime.GOOS == "darwin" {
-		videos = "Movies"
-	}
-	return filepath.Join(home, videos, ProductName), nil
 }
 
 // phoneFiles runs on a server goroutine, so it asks the UI goroutine for the list.
@@ -46,7 +27,7 @@ func (a *App) phoneFiles() []web.File {
 func (a *App) phoneUploadDir() (string, error) {
 	type dir struct{ path string }
 	d, err := call(a, func() (dir, error) {
-		p, err := a.uploadDir()
+		p, err := a.categoryDir(categoryTools)
 		return dir{p}, err
 	})
 	return d.path, err
@@ -75,7 +56,7 @@ func (a *App) phoneReceived(paths []string) {
 func (a *App) phoneText() web.Text {
 	t, _ := call(a, func() (web.Text, error) {
 		u := &a.u
-		dir, err := a.uploadDir()
+		dir, err := a.categoryDir(categoryTools)
 		if err != nil {
 			dir = err.Error()
 		}

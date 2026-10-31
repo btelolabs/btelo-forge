@@ -131,7 +131,7 @@ func TestScreenshotByHotkey(t *testing.T) {
 	if h.excluded {
 		t.Error("the window stays left out of captures")
 	}
-	shots, _ := filepath.Glob(filepath.Join(a.settings.ExportDir, "Screenshot *.png"))
+	shots, _ := filepath.Glob(filepath.Join(a.settings.ResourceDir, "Tools", "Screenshot *.png"))
 	if len(shots) != 1 {
 		t.Fatalf("screenshots %v; toasts %+v", shots, a.toasts)
 	}
@@ -182,7 +182,7 @@ func TestScreenshotOntoTheClipboard(t *testing.T) {
 		t.Fatalf("clipboard picture %v; toasts %+v", h.clipImage, a.toasts)
 	}
 	// It is only on the clipboard: no file is saved, and the one ffmpeg wrote is gone.
-	if shots, _ := filepath.Glob(filepath.Join(a.settings.ExportDir, "Screenshot *.png")); len(shots) != 0 {
+	if shots, _ := filepath.Glob(filepath.Join(a.settings.ResourceDir, "Tools", "Screenshot *.png")); len(shots) != 0 {
 		t.Errorf("saved %v", shots)
 	}
 	if left, _ := os.ReadDir(tmp); len(left) != 0 {
@@ -195,7 +195,7 @@ func TestScreenshotWithItsPathCopied(t *testing.T) {
 	a, h := x.a, x.h
 	a.Tick(Input{Hotkeys: []int{hotkeyScreenshotPath}})
 	x.pump(time.Minute, func() bool { return !a.rec.shooting })
-	shots, _ := filepath.Glob(filepath.Join(a.settings.ExportDir, "Screenshot *.png"))
+	shots, _ := filepath.Glob(filepath.Join(a.settings.ResourceDir, "Tools", "Screenshot *.png"))
 	if len(shots) != 1 || h.clip != shots[0] {
 		t.Fatalf("screenshots %v, clipboard %q; toasts %+v", shots, h.clip, a.toasts)
 	}

@@ -565,11 +565,12 @@ func TestFilesRemembersTheLists(t *testing.T) {
 		t.Fatalf("the settings hold %+v, want %+v: %v", saved.Files.Panes, want, err)
 	}
 	// The next resource manager opens them again; a folder gone since opens the default folder.
+	a.settings.Files.ResourcesOpened = true
 	a.settings.Files.Panes = append(want, savedPane{Dir: filepath.Join(root, "gone")})
 	fd := a.openResourceManager()
 	x.waitFiles()
 	if len(fd.panes) != 3 || fd.panes[0].dir != deep || fd.panes[0].grid || fd.panes[1].dir != other || !fd.panes[1].grid ||
-		fd.panes[2].dir != defaultFolder() {
+		fd.panes[2].dir != a.defaultFolder() {
 		t.Fatalf("opened %d lists: %+v %+v", len(fd.panes), fd.panes[0], fd.panes[1])
 	}
 }

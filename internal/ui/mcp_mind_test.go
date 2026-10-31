@@ -11,6 +11,37 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/mind"
 )
 
+// TestMCPAddsUnderATask: a topic added under a task is one, unless the call says not, and so is an outline's.
+func TestMCPAddsUnderATask(t *testing.T) {
+	x := newHarness(t)
+	s := connectMCPAt(t, x, "/mind")
+	var made mindStateView
+	s.ok("mind_new", map[string]any{"title": "Plan", "topic": "Launch"}, &made)
+	root := made.List[0].ID
+	s.ok("mind_update", map[string]any{"nodes": []map[string]any{{"id": root, "task_list": true}}}, nil)
+	var added struct {
+		IDs map[string]mind.ID `json:"ids"`
+	}
+	s.ok("mind_add", map[string]any{
+		"parent":  root,
+		"outline": "- from an outline",
+		"nodes": []map[string]any{
+			{"key": "new", "parent": root, "text": "New"},
+			{"key": "not", "parent": root, "text": "Not a task", "task": false},
+			{"key": "free", "text": "Free", "x": 900, "y": 0},
+		},
+	}, &added)
+	var state mindStateView
+	s.ok("mind_state", map[string]any{}, &state)
+	tasks := map[string]bool{}
+	for _, n := range state.List {
+		tasks[n.Text] = n.Task
+	}
+	if !tasks["New"] || !tasks["from an outline"] || tasks["Not a task"] || tasks["Free"] {
+		t.Fatalf("tasks: %v", tasks)
+	}
+}
+
 // TestMCPBuildsAMindMap drives the mind map server as an AI would: a map with a tree, a flowchart and a table built
 // in one call, read back, changed, drawn, undone.
 func TestMCPBuildsAMindMap(t *testing.T) {

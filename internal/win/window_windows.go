@@ -33,6 +33,8 @@ var (
 	setForeground    = user32.NewProc("SetForegroundWindow")
 	validateRect     = user32.NewProc("ValidateRect")
 	msgWait          = user32.NewProc("MsgWaitForMultipleObjectsEx")
+	createTimer      = kernel32.NewProc("CreateWaitableTimerExW")
+	setTimer         = kernel32.NewProc("SetWaitableTimer")
 	setDpiContext    = user32.NewProc("SetProcessDpiAwarenessContext")
 	moveMemory       = kernel32.NewProc("RtlMoveMemory")
 	getDC            = user32.NewProc("GetDC")
@@ -84,18 +86,21 @@ type minMaxInfo struct {
 
 // Window must be used and closed by the goroutine that called Open.
 type Window struct {
-	Handle  uintptr
-	closed  bool
-	input   Input
-	msg     message
-	bounds  rect
-	typing  bool
-	high    uint16
-	cursor  Cursor
-	minSize [2]int32
-	bgra    []byte
-	hotkeys []Hotkey      // registered with SetHotkeys, by id less one
-	overlay *overlayState // set for a window made by OpenOverlay
+	Handle   uintptr
+	closed   bool
+	input    Input
+	msg      message
+	bounds   rect
+	typing   bool
+	high     uint16
+	imePx    float32 // TextInputFont's size and typeface
+	imeFace  string
+	imeShown logFont // the font the input method has
+	cursor   Cursor
+	minSize  [2]int32
+	bgra     []byte
+	hotkeys  []Hotkey      // registered with SetHotkeys, by id less one
+	overlay  *overlayState // set for a window made by OpenOverlay
 	// leaving is set once Windows is asked to tell when the pointer leaves the window, until it does.
 	leaving bool
 	// Refresh runs on WM_SIZE and WM_PAINT, so the window keeps drawing while Windows runs its modal resize loop.
@@ -266,8 +271,23 @@ const Forever = 0xffffffff
 
 func (w *Window) Wait(timeoutMillis uint32) {
 	const allInput, inputAvailable = 0x04ff, 0x0004
+	if timer := preciseTimer(); timer != 0 && timeoutMillis != Forever {
+		due := -int64(timeoutMillis) * 10000 // in units of 100ns, from now
+		if ok, _, _ := setTimer.Call(timer, uintptr(unsafe.Pointer(&due)), 0, 0, 0, 0); ok != 0 {
+			msgWait.Call(1, uintptr(unsafe.Pointer(&timer)), uintptr(Forever), allInput, inputAvailable)
+			return
+		}
+	}
 	msgWait.Call(0, 0, uintptr(timeoutMillis), allInput, inputAvailable)
 }
+
+// preciseTimer is a timer that keeps to the millisecond: a plain wait ends on the system's tick, so that 16ms takes 31
+// and what animates runs at half its rate. It is 0 on a Windows too old to have one.
+var preciseTimer = sync.OnceValue(func() uintptr {
+	const highResolution, allAccess = 0x2, 0x1f0003
+	timer, _, _ := createTimer.Call(0, 0, highResolution, allAccess)
+	return timer
+})
 
 // Wake makes a pending Wait return; it is safe to call from any goroutine.
 func (w *Window) Wake() { postMessage.Call(w.Handle, wmApp, 0, 0) }
