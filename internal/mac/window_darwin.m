@@ -9,6 +9,8 @@ static NSWindow *window;
 static int closed;
 static NSCursor *currentCursor;
 
+NSView *forge_content_view(void) { return window.contentView; }
+
 // Modifier bits shared with the Go side: 1 Command or Control, 2 Shift, 4 Option.
 static int modifierBits(NSEventModifierFlags f) {
 	int m = 0;

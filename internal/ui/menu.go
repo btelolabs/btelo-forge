@@ -121,6 +121,7 @@ func (u *ctx) menuRows(items []menuItem, box gfx.Rect) []gfx.Rect {
 func (a *App) drawMenuList(id string, items []menuItem, box gfx.Rect, open int) (clicked, pointed int, rows []gfx.Rect) {
 	u := &a.u
 	f := u.face(13)
+	u.covers = append(u.covers, box)
 	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, gfx.Alpha(colBlack, 0.35))
 	u.c.Fill(box, colSurface)
 	u.c.Outline(box, max(1, u.px(1)), colBorder)

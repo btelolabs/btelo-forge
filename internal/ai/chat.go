@@ -48,6 +48,7 @@ type Message struct {
 type Options struct {
 	Temperature *float64
 	MaxTokens   int
+	NoThinking  bool // a model of this computer answers at once, where it would think at length first
 }
 
 // Chunk is a piece of an answer as it arrives.
@@ -90,6 +91,9 @@ func (e Endpoint) Chat(ctx context.Context, messages []Message, opt Options, on 
 	}
 	if e.Local {
 		body["stream_options"] = map[string]any{"include_usage": true}
+		if opt.NoThinking {
+			body["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
+		}
 	}
 	data, err := json.Marshal(body)
 	if err != nil {

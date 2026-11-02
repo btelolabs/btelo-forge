@@ -233,7 +233,7 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	if pick {
 		pickIn = u.takeInput()
 	}
-	u.blocked = pick || a.export != nil || a.settingsOpen || a.rec.open || a.cam.open || a.menu != nil || a.dialog.kind != dialogNone || a.adjust != nil || a.style != nil || a.print != nil || a.smartList != nil
+	u.blocked = pick || a.export != nil || a.settingsOpen || a.rec.open || a.rec.ask == askInWindow || a.cam.open || a.menu != nil || a.dialog.kind != dialogNone || a.adjust != nil || a.style != nil || a.print != nil || a.smartList != nil
 	held := u.blocked
 	a.preTasks()
 
@@ -301,6 +301,7 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	if a.export == nil {
 		a.drawSettings()
 		a.drawRecorder()
+		a.drawDiscardDialog()
 		a.drawCameraDialog()
 		a.drawArtDialog()
 		a.drawAdjustDialog()
@@ -320,6 +321,7 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	a.drawToasts()
 	wait := u.drawTip(a.screen)
 	u.end()
+	a.syncMailWeb()
 	a.pumpThumbs()
 
 	if u.focus != "" {
@@ -424,6 +426,7 @@ func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 		sooner(sd.wait) // a hint on the drawing's panel
 	}
 	sooner(a.previewWait())
+	sooner(a.peekWait())
 	return next
 }
 

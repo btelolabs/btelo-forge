@@ -101,6 +101,7 @@ type Window struct {
 	bgra     []byte
 	hotkeys  []Hotkey      // registered with SetHotkeys, by id less one
 	overlay  *overlayState // set for a window made by OpenOverlay
+	web      *WebView      // the view inside the window, if any
 	// leaving is set once Windows is asked to tell when the pointer leaves the window, until it does.
 	leaving bool
 	// Refresh runs on WM_SIZE and WM_PAINT, so the window keeps drawing while Windows runs its modal resize loop.
@@ -186,6 +187,9 @@ func Open(title string, width, height int, at Placement) (*Window, error) {
 func windowProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 	if value, ok := windows.Load(hwnd); ok {
 		w := value.(*Window)
+		if w.web != nil {
+			w.webMessage(msg)
+		}
 		switch msg {
 		case wmGetMinMaxInfo:
 			var info minMaxInfo
@@ -261,7 +265,7 @@ func (w *Window) Poll() bool {
 	// WM_KILLFOCUS: a window made foreground from outside, as -background leaves it to be, can have the focus
 	// without being told, and a caret would then never blink.
 	focus, _, _ := getFocus.Call()
-	w.input.Inactive = focus != w.Handle
+	w.input.Inactive = !w.hasFocus(focus)
 	return !w.closed
 }
 

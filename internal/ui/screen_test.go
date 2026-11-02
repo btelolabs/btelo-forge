@@ -595,6 +595,155 @@ func TestEveryToolFitsThePanel(t *testing.T) {
 	a.closeScreenDraw()
 }
 
+// recordingBar starts a recording and finds its floating bar.
+func recordingBar(t *testing.T, x *harness) *fakeOverlay {
+	t.Helper()
+	a := x.a
+	a.settings.Record.Minimize, a.settings.Record.SystemAudio = false, false
+	started := make(chan error, 1)
+	a.startRecording(func(_ string, err error) { started <- err })
+	x.pump(time.Minute, func() bool { return len(started) > 0 })
+	if err := <-started; err != nil {
+		t.Fatal(err)
+	}
+	x.frame(Input{})
+	for _, o := range x.h.open() {
+		if o.opts.Excluded && !o.closed {
+			return o
+		}
+	}
+	t.Fatal("no recording bar")
+	return nil
+}
+
+// clickDiscard clicks the bar's last button and returns the question that opens.
+func clickDiscard(t *testing.T, x *harness, bar *fakeOverlay) *fakeOverlay {
+	t.Helper()
+	bar.click(float32(bar.bounds.Dx()-barButton/2-2), barHeight/2)
+	before := x.h.open()
+	for range 12 {
+		x.frame(Input{})
+	}
+	if x.a.rec.ask != askOverScreen {
+		t.Fatal("the delete button did not ask")
+	}
+	x.frame(Input{})
+	for _, o := range x.h.open() {
+		if !slices.Contains(before, o) {
+			return o
+		}
+	}
+	t.Fatal("the question did not open")
+	return nil
+}
+
+func TestDeletingARecordingFromTheBar(t *testing.T) {
+	x := overlayHarness(t)
+	a := x.a
+	bar := recordingBar(t, x)
+	time.Sleep(time.Second)
+	x.frame(Input{})
+	x.shotOverlay(bar, "overlay-toolbar-recording-buttons")
+
+	// Cancelling goes on recording.
+	ask := clickDiscard(t, x, bar)
+	x.shotOverlay(ask, "overlay-recording-delete-question")
+	w, h := float32(discardAskWidth), float32(discardAskHeight)
+	ask.click(w-16-96-8-48, h-16-17)
+	x.pump(10*time.Second, func() bool { return a.rec.ask == askNothing })
+	x.frame(Input{})
+	if a.rec.rec == nil || a.rec.stopping || !ask.closed {
+		t.Fatalf("after cancelling: recorder %v, stopping %v, closed %v", a.rec.rec, a.rec.stopping, ask.closed)
+	}
+
+	ask = clickDiscard(t, x, bar)
+	ask.click(w-16-48, h-16-17)
+	x.pump(time.Minute, func() bool { return a.rec.rec == nil })
+	dir, err := a.categoryDir(categoryTools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	left, _ := os.ReadDir(dir)
+	if len(left) > 0 {
+		t.Errorf("left on disk: %v", left)
+	}
+	if a.p != nil || a.opening != "" {
+		t.Error("a deleted recording opened")
+	}
+	x.frame(Input{})
+	if !bar.closed || !ask.closed {
+		t.Errorf("toolbar closed %v, question closed %v", bar.closed, ask.closed)
+	}
+}
+
+func TestDeletingARecordingFromTheWindow(t *testing.T) {
+	x := recordingHarness(t)
+	a := x.a
+	a.settings.Record.Minimize, a.settings.Record.SystemAudio = false, false
+	started := make(chan error, 1)
+	a.startRecording(func(_ string, err error) { started <- err })
+	x.pump(time.Minute, func() bool { return len(started) > 0 })
+	if err := <-started; err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	x.frame(Input{})
+	x.shot("tabs-recording-three-buttons")
+	a.settings.VerticalTabs = true
+	x.frame(Input{})
+	x.shot("tabs-recording-three-buttons-side")
+	a.settings.VerticalTabs = false
+	x.frame(Input{})
+	strip := gfx.Rect{W: a.screen.W, H: x.a.u.px(40)}
+	discard := a.recordDiscardButton(strip)
+	x.click(discard)
+	x.frame(Input{})
+	if a.rec.ask != askInWindow {
+		t.Fatal("the delete button did not ask")
+	}
+	x.shot("window-recording-delete-question")
+	box := rectCentered(a.screen, discardAskWidth, discardAskHeight)
+	x.frame(Input{Keys: []Key{{Code: keyEscape}}})
+	if a.rec.ask != askNothing || a.rec.rec == nil {
+		t.Fatalf("Esc: asking %v, recorder %v", a.rec.ask, a.rec.rec)
+	}
+	x.click(discard)
+	x.frame(Input{})
+	x.click(rectAt(box.Right()-16-96, box.Bottom()-16-34, 96, 34))
+	x.pump(time.Minute, func() bool { return a.rec.rec == nil })
+	dir, err := a.categoryDir(categoryTools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := os.ReadDir(dir); len(left) > 0 {
+		t.Errorf("left on disk: %v", left)
+	}
+}
+
+// recordDiscardButton is where the tab strip's delete button is.
+func (a *App) recordDiscardButton(strip gfx.Rect) gfx.Rect {
+	u := &a.u
+	right := strip.Right() - u.px(40) - u.px(4) - u.px(4)
+	return rectAt(right-u.px(32), strip.Y+u.px(8), u.px(28), u.px(26))
+}
+
+func TestStopHotkeyAnswersTheQuestionBySaving(t *testing.T) {
+	x := overlayHarness(t)
+	a := x.a
+	bar := recordingBar(t, x)
+	time.Sleep(time.Second)
+	ask := clickDiscard(t, x, bar)
+	a.Tick(Input{Hotkeys: []int{hotkeyRecord}})
+	x.frame(Input{})
+	if a.rec.ask != askNothing || !ask.closed {
+		t.Errorf("the question stayed: %v, closed %v", a.rec.ask, ask.closed)
+	}
+	x.pump(time.Minute, func() bool { return a.rec.rec == nil && a.opening == "" })
+	if a.p == nil {
+		t.Errorf("the recording was not saved; toasts %+v", a.toasts)
+	}
+}
+
 func TestRecordingARegionWithTheToolbar(t *testing.T) {
 	x := overlayHarness(t)
 	a, h := x.a, x.h

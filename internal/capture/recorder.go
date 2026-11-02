@@ -157,6 +157,41 @@ func (r *Recorder) Stop(ctx context.Context) (string, error) {
 	return r.opts.Path, join(ctx, r.parts, r.opts.Path)
 }
 
+// Discard ends the recording and removes every segment, so nothing of it stays on disk. The error names what could
+// not be removed.
+func (r *Recorder) Discard() error {
+	r.mu.Lock()
+	if r.stopped {
+		r.mu.Unlock()
+		return errors.New("the recording was already stopped")
+	}
+	r.stopped = true
+	cur := r.cur
+	r.cur = nil
+	r.mu.Unlock()
+	if cur != nil {
+		cur.stop()
+	}
+	var errs []error
+	for _, p := range r.parts {
+		errs = append(errs, removeFinished(p))
+	}
+	return errors.Join(errs...)
+}
+
+// removeFinished removes a file ffmpeg has just closed; on Windows a virus scanner or the indexer may hold it a moment
+// longer.
+func removeFinished(path string) error {
+	var err error
+	for range 25 {
+		if err = os.Remove(path); err == nil || errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return err
+}
+
 // begin starts the next segment of the recording.
 func (r *Recorder) begin() error {
 	o := r.opts

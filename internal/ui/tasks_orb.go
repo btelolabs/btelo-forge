@@ -10,7 +10,7 @@ import (
 )
 
 // orbSize is the side of the orb that stands for the models running, in points.
-const orbSize = 34
+const orbSize = 24
 
 // orbLinger is how long the list stays open after the pointer leaves it, so that a slip does not close it.
 const orbLinger = 350 * time.Millisecond
@@ -37,12 +37,13 @@ func smooth(from, to, x float64) float64 {
 	return t * t * (3 - 2*t)
 }
 
-// paintOrb draws a frame of the orb into img: a drop of liquid whose edge swells and whose colours flow, with a soft glow
-// around it. t is in seconds.
+// paintOrb draws a frame of the orb into img: a small glass bead with colours flowing inside it, its edge clean, as
+// anything soft around it turns to a smudge at this size. t is in seconds.
 func paintOrb(img *image.RGBA, t float64) {
 	size := img.Bounds().Dx()
 	half := float64(size) / 2
-	aa := 1.6 / half
+	const edge = 0.94
+	aa := 1 / half
 	type lobe struct{ x, y float64 }
 	var lobes [len(orbColors)]lobe
 	for i := range lobes {
@@ -55,11 +56,7 @@ func paintOrb(img *image.RGBA, t float64) {
 		for px := range size {
 			x := (float64(px) + 0.5 - half) / half
 			r := math.Hypot(x, y)
-			a := math.Atan2(y, x)
-			edge := 0.74 + 0.028*math.Sin(3*a+t*1.3) + 0.018*math.Sin(5*a-t*1.9) + 0.014*math.Sin(2*a+t*0.8)
-			body := 1 - smooth(edge-aa, edge+aa, r)
-			glow := 0.32 * (1 - smooth(edge, 1, r)) * (1 - body)
-			alpha := body + glow
+			alpha := 1 - smooth(edge-aa, edge+aa, r)
 			out := row[px*4 : px*4+4 : px*4+4]
 			if alpha <= 0 {
 				out[0], out[1], out[2], out[3] = 0, 0, 0, 0
@@ -82,9 +79,9 @@ func paintOrb(img *image.RGBA, t float64) {
 			red, green, blue = red/weights, green/weights, blue/weights
 			// Lit from the upper left, and dimmer towards the edge, so that it reads as round.
 			depth := min(r/edge, 1)
-			shade := 1.08 - 0.42*depth*depth
-			hx, hy := x+0.28, y+0.32
-			shine := 150 * math.Exp(-(hx*hx+hy*hy)/0.07) * body
+			shade := 1.04 - 0.5*depth*depth*depth
+			hx, hy := x+0.34, y+0.4
+			shine := 120 * math.Exp(-(hx*hx+hy*hy)/0.035)
 			put := func(v float64) uint8 { return uint8(min(max((v*shade+shine)*alpha, 0), 255*alpha)) }
 			out[0], out[1], out[2], out[3] = put(red), put(green), put(blue), uint8(alpha*255)
 		}
@@ -125,12 +122,13 @@ func (a *App) placeTasks(tasks []task) taskLayout {
 	}
 	margin := u.px(16)
 	w := min(u.px(280), a.screen.W-2*margin)
-	bottom := a.screen.H - margin
+	corner := a.screen.H - margin
+	bottom, right := corner, a.screen.W-margin
 	place := func(list []task) {
 		for _, t := range list {
 			h := a.taskCard(t)
 			bottom -= h
-			r := gfx.Rect{X: a.screen.W - margin - w, Y: bottom, W: w, H: h}
+			r := gfx.Rect{X: right - w, Y: bottom, W: w, H: h}
 			l.tasks = append(l.tasks, t)
 			l.cards = append(l.cards, r)
 			l.cancels = append(l.cancels, gfx.Rect{X: r.Right() - u.px(34), Y: r.Y + u.px(6), W: u.px(28), H: u.px(28)})
@@ -139,19 +137,38 @@ func (a *App) placeTasks(tasks []task) taskLayout {
 	}
 	if len(running) > 0 {
 		side := u.px(orbSize)
-		l.orb = gfx.Rect{X: a.screen.W - margin - side, Y: bottom - side, W: side, H: side}
+		l.orb = a.orbBesideView(gfx.Rect{X: right - side, Y: bottom - side, W: side, H: side}, margin)
+		right = max(l.orb.Right(), w+margin)
 		bottom = l.orb.Y - u.px(8)
 		top := bottom - float32(len(running))*(u.px(46)+u.px(8))
-		l.zone = gfx.Rect{X: a.screen.W - margin - w, Y: top, W: w, H: l.orb.Bottom() - top}
+		l.zone = gfx.Rect{X: right - w, Y: top, W: w, H: l.orb.Bottom() - top}
 		a.followOrb(l)
 		if a.orb.open {
 			place(running)
+		}
+		if right != a.screen.W-margin || l.orb.Bottom() != corner {
+			bottom, right = corner, a.screen.W-margin // the orb has moved off, and the corner is free
 		}
 	} else {
 		a.orb.open = false
 	}
 	place(others)
 	return l
+}
+
+// orbBesideView moves the orb off a web view. The view is a window of its own, so what is drawn over it can only be a
+// hole in it, and the round orb would stand in a square of what is beneath; beside it, it is on the window itself.
+func (a *App) orbBesideView(orb gfx.Rect, margin float32) gfx.Rect {
+	v := a.mail.webLast
+	if v.W <= 0 || orb.Right() <= v.X || orb.X >= v.Right() || orb.Bottom() <= v.Y || orb.Y >= v.Bottom() {
+		return orb
+	}
+	if x := v.X - margin - orb.W; x >= 0 {
+		orb.X = x
+	} else {
+		orb.Y = v.Y - margin - orb.H // a narrow window has only the view: the head above it
+	}
+	return orb
 }
 
 // followOrb opens the list while the pointer is on the orb, and keeps it while the pointer is on the list. A press on a

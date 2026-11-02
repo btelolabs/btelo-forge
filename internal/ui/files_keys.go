@@ -99,18 +99,25 @@ func (a *App) fileShortcuts() []shortcut {
 	return out
 }
 
+// previewCommands are the commands that work while the preview is over the lists: going from item to item, tagging
+// the one shown, opening it, and closing the preview. The others act on what the preview hides.
+var previewCommands = map[string]bool{
+	"files.down": true, "files.up": true, "files.left": true, "files.right": true, "files.top": true, "files.bottom": true,
+	"files.page-down": true, "files.page-up": true, "files.enter": true, "files.preview": true, "files.tag": true,
+	"files.open": true, "files.escape": true,
+}
+
 // fileKeys runs the file manager commands the keys pressed this frame are bound to, and lets the others through to
 // the general shortcuts, such as Ctrl+T and Ctrl+W.
 func (a *App) fileKeys(fd *filesDoc) {
 	u := &a.u
 	cmds := a.fileCommands()
+	if fd.preview {
+		cmds = slices.DeleteFunc(cmds, func(c fileCommand) bool { return !previewCommands[c.id] })
+	}
 	var rest []Key
 	for _, k := range u.keys {
 		if fd.previewFocus && k.Code != keyEscape && !(k.Code == keySpace && !k.Ctrl) && a.previewKey(k) {
-			continue
-		}
-		if fd.previewFocus && k.Code == keyEscape {
-			fd.previewFocus = false
 			continue
 		}
 		ran := false

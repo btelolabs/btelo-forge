@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -94,6 +95,35 @@ func TestTimelineSelectsSeveralItemsAndEditsThemTogether(t *testing.T) {
 	x.key(keyEscape, false)
 	if len(x.a.selectedIDs()) != 0 {
 		t.Fatal("Esc did not clear the selection")
+	}
+}
+
+func TestRightClickingAClipOffersItsPath(t *testing.T) {
+	x := newHarness(t)
+	x.open(x.fixture())
+	a := x.a
+	c := a.p.Video[0].Clips[0]
+	tr := a.tracks(a.layout().timeline)
+	l, _ := tr.lane(groupVideo, 0)
+	r := a.clipRect(tr, l, c.Start, c.End())
+	a.selectOnly(selection{})
+	x.rightClick(r.X+r.W/2, r.Y+r.H/2)
+	if !a.menuOpen("timeline/clip") {
+		t.Fatal("no menu opened")
+	}
+	if a.sel.kind != selClip || a.sel.id != c.ID {
+		t.Errorf("selection %+v", a.sel)
+	}
+	x.shot("timeline-clip-menu")
+	x.clickMenuItem("Copy the path")
+	if want := a.p.SourceOf(c).Path; x.h.clip != want {
+		t.Errorf("copied %q, want %q", x.h.clip, want)
+	}
+	if !x.toastSays(filepath.Base(a.p.SourceOf(c).Path)) {
+		t.Errorf("toasts %+v", a.toasts)
+	}
+	if a.menu != nil {
+		t.Error("the menu stayed open")
 	}
 }
 

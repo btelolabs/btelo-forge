@@ -85,12 +85,12 @@ func TestAMessageIsReadInBothLanguagesAndNarrow(t *testing.T) {
 	bindTwo(t, x)
 	s := &x.a.mail
 	id := s.list[0].ID
-	if err := s.mailer.Store.SaveOrganised(id, "m", mail.Verdict{Summary: "A short summary of the message", Priority: mail.PriorityHigh, Category: "work",
-		Actions: []mail.Action{{Action: mail.ActionArchive, Reason: "read already"}}}); err != nil {
+	if err := s.mailer.Store.SaveOrganised(id, "m", mail.Verdict{Summary: "A short summary of the message", Tier: mail.TierMust, Why: "they wait for an answer"}); err != nil {
 		t.Fatal(err)
 	}
 	s.stale, s.current = true, id
-	x.pump(5*time.Second, func() bool { return len(s.offers) == 1 })
+	x.pump(5*time.Second, func() bool { return !s.stale })
+	x.settle(200 * time.Millisecond)
 	x.frame(Input{})
 	x.shot("mail-reader")
 	x.a.u.lang = "zh"
@@ -161,46 +161,140 @@ func TestBindingAMailboxSaysWhatWentWrong(t *testing.T) {
 	}
 }
 
-func TestTheModelReadsMailAndTheUserDecides(t *testing.T) {
+func TestTheTiersSortTheMailAndClearIt(t *testing.T) {
 	x := newHarness(t)
 	home, _ := bindTwo(t, x)
 	s := &x.a.mail
-	id := int64(0)
+	store := s.mailer.Store
 	for _, m := range s.list {
-		if m.Account == "home" {
-			id = m.ID
+		tier := mail.TierNoise
+		switch m.Subject {
+		case "The report":
+			tier = mail.TierMust
+		case "Your statement":
+			tier = mail.TierMaybe
+		}
+		if err := store.SaveOrganised(m.ID, "m", mail.Verdict{Summary: m.Subject, Tier: tier, Why: "why"}); err != nil {
+			t.Fatal(err)
 		}
 	}
-	verdict := `{"summary":"A dinner invitation","priority":"high","category":"personal","actions":[{"action":"archive","reason":"no reply needed"},{"action":"delete"}]}`
-	if err := func() error {
-		v, err := mail.Organise(context.Background(), func(context.Context, string, string) (string, error) { return verdict, nil }, s.list[0])
-		if err != nil {
-			return err
-		}
-		return s.mailer.Store.SaveOrganised(id, "m", v)
-	}(); err != nil {
-		t.Fatal(err)
+	show := func(v mailView, n int) {
+		t.Helper()
+		s.view, s.stale = v, true
+		x.pump(5*time.Second, func() bool { return !s.stale && len(s.list) == n })
+		x.frame(Input{})
 	}
-	s.stale = true
-	x.pump(5*time.Second, func() bool { return len(s.offers) == 1 })
-	if home.Asked("STORE") {
+	show(mailMust, 1)
+	if s.list[0].Subject != "The report" {
+		t.Fatalf("%+v", s.list[0])
+	}
+	x.a.u.lang = "zh"
+	x.frame(Input{})
+	x.shot("mail-must-zh")
+	show(mailMaybe, 1)
+	x.shot("mail-maybe-zh")
+	show(mailNoise, 1)
+	x.shot("mail-noise-zh")
+
+	// Nothing happens on a server before a click, and deleting asks first.
+	if home.Asked("STORE") || home.Asked("MOVE") {
 		t.Fatal("something was changed before the user decided")
 	}
-	ac, _ := s.account("home")
-	x.a.mailApply(s.offers[0], ac)
-	x.pump(10*time.Second, func() bool { return s.busy == "" })
-	x.pump(5*time.Second, func() bool { return len(s.log) == 1 })
-	if !home.Asked("STORE") {
+	s.trashing = true
+	x.frame(Input{})
+	x.shot("mail-trash-asked-zh")
+	if home.Asked("MOVE") {
+		t.Fatal("deleted before the answer")
+	}
+	x.a.mailChange(mail.TierNoise, mail.ActionTrash)
+	if len(x.a.mailTasks()) != 1 {
+		t.Fatal("no card for the work")
+	}
+	x.frame(Input{})
+	x.shot("mail-task-card-zh")
+	x.pump(10*time.Second, func() bool { return s.busy == "" && !s.stale })
+	show(mailNoise, 0)
+	if !home.Asked(`MOVE`) {
 		t.Fatal("the change did not reach the server")
 	}
 	s.view = mailHistory
+	x.pump(5*time.Second, func() bool { return len(s.log) == 1 })
 	x.frame(Input{})
-	x.shot("mail-history")
+	x.shot("mail-history-zh")
 	x.a.mailUndo(s.log[0])
 	x.pump(10*time.Second, func() bool { return s.busy == "" })
-	x.pump(5*time.Second, func() bool { return len(s.log) == 1 && s.log[0].Undone })
+	s.stale = true
+	x.pump(5*time.Second, func() bool { return !s.stale && len(s.log) == 1 && s.log[0].Undone })
+	show(mailNoise, 1)
+}
+
+func TestTheReaderSaysWhatTheUserWants(t *testing.T) {
+	x := newHarness(t)
+	bindTwo(t, x)
+	s := &x.a.mail
+	var m mail.Message
+	for _, it := range s.list {
+		if it.Subject == "Your statement" {
+			m = it
+		}
+	}
+	store := s.mailer.Store
+	store.SaveOrganised(m.ID, "m", mail.Verdict{Summary: "A statement", Tier: mail.TierMaybe, Why: "only for reference"})
+	s.view, s.stale, s.current = mailAll, true, m.ID
+	x.pump(5*time.Second, func() bool { return !s.stale })
+	x.settle(200 * time.Millisecond)
+	x.a.u.lang = "zh"
 	x.frame(Input{})
-	x.shot("mail-history-undone")
+	x.shot("mail-choices-zh")
+	if err := x.a.mailSetSender(m, "", mail.TierMust); err != nil {
+		t.Fatal(err)
+	}
+	store.Star(m.ID, true)
+	s.stale = true
+	x.pump(5*time.Second, func() bool { return !s.stale && len(s.senders) == 1 })
+	x.settle(200 * time.Millisecond)
+	x.frame(Input{})
+	x.shot("mail-choices-on-zh")
+	if err := x.a.mailSetSender(m, mail.TierMust, mail.TierMust); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.Senders(); len(got) != 0 {
+		t.Fatalf("a second click takes it back: %v", got)
+	}
+}
+
+func TestNewMailWaitsForTheClick(t *testing.T) {
+	x := newHarness(t)
+	bindTwo(t, x)
+	s := &x.a.mail
+	x.a.mailSync()
+	x.pump(10*time.Second, func() bool { return !s.syncing })
+	if s.organised {
+		t.Fatal("the model started by itself")
+	}
+	s.stale = true
+	x.pump(5*time.Second, func() bool { return !s.stale && s.tiers[""].All == 3 && s.view == mailNew && len(s.list) == 3 })
+	x.frame(Input{})
+	x.a.u.lang = "zh"
+	x.frame(Input{})
+	x.shot("mail-analyse-zh")
+
+	// The slider says how much of it the model reads, and is kept.
+	x.drag(300, 115, 640, 115)
+	x.frame(Input{})
+	if x.a.settings.MailShare < 0.99 {
+		t.Fatalf("the slider stands at %v", x.a.settings.MailShare)
+	}
+
+	// What no model has read is not said to be important, and a view the user chose stays.
+	s.view, s.viewChosen, s.stale = mailMust, true, true
+	x.pump(5*time.Second, func() bool { return !s.stale && len(s.list) == 0 && s.tiers[""].All == 3 })
+	x.settle(time.Second)
+	if s.view != mailMust || len(s.list) != 0 {
+		t.Fatalf("view %d shows %d", s.view, len(s.list))
+	}
+	x.frame(Input{})
+	x.shot("mail-must-empty-zh")
 }
 
 func TestTheMailTabIsPinnable(t *testing.T) {
@@ -221,7 +315,7 @@ func TestMailGoesOnlyToALocalModel(t *testing.T) {
 	defer srv.Close()
 	bindTwo(t, x)
 	s := &x.a.mail
-	x.a.mailOrganise(true)
+	x.a.mailOrganise(10)
 	x.frame(Input{})
 	if !strings.Contains(s.notice, "on this computer") {
 		t.Fatalf("%q", fmt.Sprint(s.notice))
@@ -263,7 +357,14 @@ func TestRealModelSortsMail(t *testing.T) {
 	s := &x.a.mail
 	x.a.mailSync()
 	x.pump(10*time.Second, func() bool { return !s.syncing })
+	if s.organised {
+		t.Fatal("a model started without a click")
+	}
+	x.a.mailOrganise(10)
 	x.pump(5*time.Minute, func() bool { return !s.organised })
+	if st := x.a.ai.rt.Status("qwen3-4b"); st.State == ai.Ready {
+		t.Fatal("the model stayed after the reading")
+	}
 	s.stale = true
 	x.settle(2 * time.Second)
 	x.shot("mail-real-model")
@@ -271,13 +372,10 @@ func TestRealModelSortsMail(t *testing.T) {
 		t.Fatal(s.notice)
 	}
 	for _, m := range s.list {
-		t.Logf("%-20s %-7s %-12s %s", m.Subject, m.Priority, m.Category, m.Summary)
+		t.Logf("%-20s %-7s %s", m.Subject, m.Tier, m.Why)
 		if m.Organised == "" {
 			t.Errorf("%s was not read", m.Subject)
 		}
-	}
-	for _, g := range s.offers {
-		t.Logf("suggests %s %q: %s", g.Action, g.Value, g.Reason)
 	}
 	if home.Asked("STORE") || home.Asked("MOVE") || home.Asked("APPEND") {
 		t.Fatal("the model changed a mailbox by itself")

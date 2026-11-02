@@ -19,6 +19,11 @@ func openWindow(title string, width, height int, background bool) (window, error
 	return macWindow{w}, nil
 }
 
+// OpenWebView opens the system's browser engine in the window, for mail.
+func (h macWindow) OpenWebView(_ string, wake func()) (ui.WebView, error) {
+	return h.w.OpenWebView(wake), nil
+}
+
 func (h macWindow) Poll() bool                 { return h.w.Poll() }
 func (h macWindow) Size() (int, int)           { return h.w.Size() }
 func (h macWindow) Scale() float32             { return h.w.Scale() }

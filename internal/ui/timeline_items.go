@@ -166,8 +166,29 @@ func (a *App) drawVideoClips(t tracks) {
 					a.requestFrame()
 				})
 			u.hint(fmt.Sprintf("clip/%d", id), u.t("Drag to move or onto another track; drag the ends to trim; S splits at the playhead"), r)
+			if at := u.rightAt; at != nil && !u.blocked && r.Contains(at.X, at.Y) && t.view.Contains(at.X, at.Y) && at.X >= t.area.X {
+				a.openClipMenu(c, *at)
+				u.rightAt = nil
+			}
 		}
 	}
+}
+
+// openClipMenu is the menu of a clip clicked with the right button, which is chosen first unless it already is, so
+// that a choice of several stays for Delete.
+func (a *App) openClipMenu(c project.Clip, at Pointer) {
+	if !a.isPicked(c.ID) {
+		a.selectOnly(selection{kind: selClip, id: c.ID})
+	}
+	u := &a.u
+	path := a.p.SourceOf(c).Path
+	a.openMenu("timeline/clip", gfx.Rect{X: at.X, Y: at.Y, W: 1, H: 1}, []menuItem{
+		{label: u.t("Copy the path"), run: func() { a.copyPathList([]string{path}) }},
+		{label: u.t("Show in folder"), run: func() { a.host.Reveal(path) }},
+		menuSep,
+		{label: u.t("Split at the playhead"), key: "S", run: a.split},
+		{label: u.t("Delete the selection"), key: "Delete", run: a.deleteSelection},
+	})
 }
 
 func (a *App) drawClip(t tracks, track int, c project.Clip, r gfx.Rect) {

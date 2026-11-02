@@ -3,9 +3,12 @@ package ui
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
 func TestSpringSettlesOnItsTargetAndKeepsItsSpeedForANewOne(t *testing.T) {
@@ -56,12 +59,13 @@ func TestPieWedgesAreTheLargestItemsThenTheRest(t *testing.T) {
 	p := x.a.files.pane()
 	node := x.a.paneAnalysis(p)
 	w := x.a.pieWedges(p, node)
-	if len(w) != pieSlots+1 || w[len(w)-1].key != pieOther {
+	// f10 and the small file are too small for a wedge.
+	if len(w) != 11 || w[len(w)-1].key != pieOther {
 		t.Fatalf("%d wedges, the last %q", len(w), w[len(w)-1].key)
 	}
 	var sum int64
 	for i, wd := range w {
-		if i < pieSlots && wd.key != fmt.Sprintf("f%02d", i) {
+		if i < 10 && wd.key != fmt.Sprintf("f%02d", i) {
 			t.Errorf("wedge %d is %q", i, wd.key)
 		}
 		if i > 0 && w[i-1].to != wd.from {
@@ -72,8 +76,7 @@ func TestPieWedgesAreTheLargestItemsThenTheRest(t *testing.T) {
 	if sum != node.Size || w[0].from != 0 || w[len(w)-1].to != 2*math.Pi {
 		t.Errorf("the wedges hold %d of %d and span %v to %v", sum, node.Size, w[0].from, w[len(w)-1].to)
 	}
-	// f08, f09, f10 and the small file share the last wedge.
-	if rest := w[len(w)-1]; rest.count != 3 && rest.count != 4 {
+	if rest := w[len(w)-1]; rest.count != 2 {
 		t.Errorf("the rest holds %d items", rest.count)
 	}
 	p.cursorTo("f10")
@@ -150,9 +153,9 @@ func TestPieClickPutsTheCursorOnTheWedgesItem(t *testing.T) {
 	}
 	w := x.a.pieWedges(p, x.a.paneAnalysis(p))
 	m := &p.pie
-	// Halfway out along the middle of f02's wedge, where it is drawn now.
+	// In the inner ring along the middle of f02's wedge, where it is drawn now.
 	a := (w[2].from+w[2].to)/2 + m.turn.pos
-	r := float64(m.radius) * 0.6
+	r := float64(m.radius) * 0.4
 	x.mx, x.my = m.cx+float32(r*math.Sin(a)), m.cy-float32(r*math.Cos(a))
 	pieFrame(x, now, Input{})
 	pieFrame(x, now, Input{Down: true, Pointer: []Pointer{{X: x.mx, Y: x.my, Down: true}}})
@@ -162,5 +165,103 @@ func TestPieClickPutsTheCursorOnTheWedgesItem(t *testing.T) {
 	}
 	if !x.a.pieMoving() {
 		t.Error("the pie does not turn to the wedge clicked")
+	}
+}
+
+// pieDeepHarness is an analysed folder holding a folder within a folder, with a large file of its own beside them.
+func pieDeepHarness(t *testing.T) (*harness, *time.Time, *filesPane) {
+	x, _ := filesHarness(t, map[string]string{
+		"big/deep/a.bin":  strings.Repeat("d", 600_000),
+		"big/own.bin":     strings.Repeat("d", 300_000),
+		"tiny/hidden.bin": "x",
+		"loose.bin":       strings.Repeat("d", 100_000),
+	})
+	now := time.Unix(1_000_000, 0)
+	x.a.fm.clock = func() time.Time { return now }
+	x.press('I', "")
+	x.waitFiles()
+	p := x.a.files.pane()
+	for pieFrame(x, &now, Input{}); x.a.pieMoving(); {
+		pieFrame(x, &now, Input{})
+	}
+	return x, &now, p
+}
+
+func TestPieRingsShowWhatFoldersHoldAndGreyForTheRest(t *testing.T) {
+	x, _, p := pieDeepHarness(t)
+	node := x.a.paneAnalysis(p)
+	arcs := pieArcs(node, x.a.pieWedges(p, node))
+	find := func(ring int, name string) *pieArc {
+		for i := range arcs {
+			if arcs[i].ring == ring && arcs[i].name == name {
+				return &arcs[i]
+			}
+		}
+		t.Fatalf("no %q in ring %d: %+v", name, ring, arcs)
+		return nil
+	}
+	big, deep, own := find(0, "big"), find(1, "deep"), find(1, pieOther)
+	if deep.from != big.from || math.Abs(own.to-big.to) > 1e-9 {
+		t.Errorf("big spans %v to %v, what it holds %v to %v", big.from, big.to, deep.from, own.to)
+	}
+	if deep.size != 600_000 || own.size != 300_000 || own.col != pieOtherColor {
+		t.Errorf("deep holds %d, the grey arc %d in %v", deep.size, own.size, own.col)
+	}
+	if got := find(2, pieOther).dir; got != filepath.Join(deep.dir, "deep") {
+		t.Errorf("the arc inside deep is of %q", got)
+	}
+	if deep.col == big.col {
+		t.Error("the rings have one colour")
+	}
+}
+
+func TestPieClickOnAnOuterRingOpensItsFolderAndTheMiddleGoesUp(t *testing.T) {
+	x, now, p := pieDeepHarness(t)
+	root := p.dir
+	node := x.a.paneAnalysis(p)
+	click := func(px, py float32) {
+		x.mx, x.my = px, py
+		pieFrame(x, now, Input{})
+		pieFrame(x, now, Input{Down: true, Pointer: []Pointer{{X: px, Y: py, Down: true}}})
+		pieFrame(x, now, Input{Pointer: []Pointer{{X: px, Y: py}}})
+		x.waitFiles()
+	}
+	var deep pieArc
+	for _, arc := range pieArcs(node, x.a.pieWedges(p, node)) {
+		if arc.name == "deep" {
+			deep = arc
+		}
+	}
+	m := &p.pie
+	at := (deep.from+deep.to)/2 + m.turn.pos
+	r := float64(m.radius * (pieEdges[1] + pieEdges[2]) / 2)
+	click(m.cx+float32(r*math.Sin(at)), m.cy-float32(r*math.Cos(at)))
+	if p.dir != filepath.Join(root, "big") || p.current() == nil || p.current().Name != "deep" {
+		t.Fatalf("the click went to %q", p.dir)
+	}
+	for pieFrame(x, now, Input{}); x.a.pieMoving(); {
+		pieFrame(x, now, Input{})
+	}
+	click(p.pie.cx, p.pie.cy)
+	if p.dir != root {
+		t.Fatalf("the middle went to %q", p.dir)
+	}
+}
+
+func TestPieOfHundredsOfArcsIsQuick(t *testing.T) {
+	c := gfx.NewCanvas(700, 700)
+	var shapes []gfx.Wedge
+	for ring := float32(0); ring < 5; ring++ {
+		for i := 0; i < 120; i++ {
+			from := float32(i) * 2 * math.Pi / 120
+			shapes = append(shapes, gfx.Wedge{From: from, To: from + 0.05, Inner: 100 + 45*ring, Radius: 144 + 45*ring, Col: colWhite})
+		}
+	}
+	start := time.Now()
+	for i := 0; i < 10; i++ {
+		c.Pie(350, 350, shapes, 1)
+	}
+	if d := time.Since(start) / 10; d > 30*time.Millisecond {
+		t.Errorf("a frame of %d arcs took %v", len(shapes), d)
 	}
 }

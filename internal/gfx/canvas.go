@@ -372,15 +372,34 @@ func (c *Canvas) Triangle(ax, ay, bx, by, cx, cy float32, col color.RGBA) {
 }
 
 // Wedge is a slice of a pie: the angles it spans, in radians clockwise from twelve o'clock (To after From, at most a
-// whole turn later), how far it reaches from the centre, and its colour.
+// whole turn later), how far it reaches from the centre, where it starts (0 for the centre itself, more for a piece of
+// a ring), and its colour.
 type Wedge struct {
-	From, To, Radius float32
-	Col              color.RGBA
+	From, To, Inner, Radius float32
+	Col                     color.RGBA
 }
 
-// Pie fills wedges around (cx, cy), anti-aliased, leaving a strip gap pixels wide between neighbours. Each pixel's
-// angle and distance are worked out once and every wedge is tested against them, so a pie of many wedges costs
-// little more than a disc.
+// bounds is the box a wedge around (cx, cy) lies in: its corners, and the outer edge where it crosses an axis.
+func (w Wedge) bounds(cx, cy float32) (x0, y0, x1, y1 float64) {
+	x0, y0, x1, y1 = math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)
+	add := func(a float64, r float32) {
+		s, co := math.Sincos(a)
+		x, y := float64(cx)+float64(r)*s, float64(cy)-float64(r)*co
+		x0, y0, x1, y1 = min(x0, x), min(y0, y), max(x1, x), max(y1, y)
+	}
+	from, to := float64(w.From), float64(w.To)
+	for _, a := range []float64{from, to} {
+		add(a, w.Inner)
+		add(a, w.Radius)
+	}
+	for k := math.Ceil(from / (math.Pi / 2)); k <= math.Floor(to/(math.Pi/2)); k++ {
+		add(k*math.Pi/2, w.Radius)
+	}
+	return x0, y0, x1, y1
+}
+
+// Pie fills wedges around (cx, cy), anti-aliased, leaving a strip gap pixels wide between neighbours. Each wedge
+// touches only the box it lies in, so a thin piece of a ring costs little and a pie of hundreds stays quick.
 func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 	if c.rec != nil {
 		for _, w := range wedges {
@@ -388,36 +407,31 @@ func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 		}
 		return
 	}
-	var reach float32
-	for _, w := range wedges {
-		reach = max(reach, w.Radius)
-	}
-	if reach <= 0 {
-		return
-	}
-	b := image.Rect(int(math.Floor(float64(cx-reach-1))), int(math.Floor(float64(cy-reach-1))),
-		int(math.Ceil(float64(cx+reach+1))), int(math.Ceil(float64(cy+reach+1)))).Intersect(c.clip)
 	const turn = 2 * math.Pi
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		i := c.Img.PixOffset(b.Min.X, y)
-		dy := float64(float32(y) + 0.5 - cy)
-		for x := b.Min.X; x < b.Max.X; x, i = x+1, i+4 {
-			dx := float64(float32(x) + 0.5 - cx)
-			r := math.Hypot(dx, dy)
-			if r > float64(reach)+1 {
-				continue
-			}
-			angle := math.Atan2(dx, -dy) // clockwise from straight up
-			for _, w := range wedges {
+	for _, w := range wedges {
+		if w.Radius <= 0 {
+			continue
+		}
+		x0, y0, x1, y1 := w.bounds(cx, cy)
+		b := image.Rect(int(math.Floor(x0-1)), int(math.Floor(y0-1)), int(math.Ceil(x1+1)), int(math.Ceil(y1+1))).Intersect(c.clip)
+		span := float64(w.To - w.From)
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			i := c.Img.PixOffset(b.Min.X, y)
+			dy := float64(float32(y) + 0.5 - cy)
+			for x := b.Min.X; x < b.Max.X; x, i = x+1, i+4 {
+				dx := float64(float32(x) + 0.5 - cx)
+				r := math.Hypot(dx, dy)
 				cov := clamp01(w.Radius - float32(r) + 0.5)
+				if w.Inner > 0 {
+					cov = min(cov, clamp01(float32(r)-w.Inner+0.5))
+				}
 				if cov <= 0 {
 					continue
 				}
-				span := float64(w.To - w.From)
 				if span < turn-1e-4 {
 					// The distance to the nearer of the wedge's two edges, inside positive: the edges are rays, so
 					// past a right angle from one the nearest point of it is the centre.
-					off := math.Mod(angle-float64(w.From), turn)
+					off := math.Mod(math.Atan2(dx, -dy)-float64(w.From), turn) // clockwise from straight up
 					if off < 0 {
 						off += turn
 					}
@@ -438,7 +452,8 @@ func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 	}
 }
 
-// wedgePoints is the outline of a wedge, its edges moved in by half the gap.
+// wedgePoints is the outline of a wedge, its edges moved in by half the gap. A piece of a ring goes out along its
+// outer edge and back along its inner one.
 func wedgePoints(cx, cy float32, w Wedge, gap float32) [][2]float32 {
 	span := float64(w.To - w.From)
 	at := func(a float64, r float32) [2]float32 {
@@ -446,13 +461,18 @@ func wedgePoints(cx, cy float32, w Wedge, gap float32) [][2]float32 {
 		return [2]float32{cx + r*float32(s), cy - r*float32(co)}
 	}
 	n := max(int(span*40), 4)
-	pts := make([][2]float32, 0, n+2)
-	if span < 2*math.Pi-1e-4 {
+	pts := make([][2]float32, 0, 2*n+3)
+	if w.Inner <= 0 && span < 2*math.Pi-1e-4 {
 		tip := float32(float64(gap/2) / max(math.Sin(span/2), 1e-3))
 		pts = append(pts, at(float64(w.From)+span/2, min(tip, w.Radius)))
 	}
 	for i := 0; i <= n; i++ {
 		pts = append(pts, at(float64(w.From)+span*float64(i)/float64(n), w.Radius))
+	}
+	if w.Inner > 0 {
+		for i := n; i >= 0; i-- {
+			pts = append(pts, at(float64(w.From)+span*float64(i)/float64(n), w.Inner))
+		}
 	}
 	return pts
 }

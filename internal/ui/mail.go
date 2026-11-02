@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/ai"
+	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/mail"
 )
 
@@ -19,11 +20,22 @@ import (
 type mailView int
 
 const (
-	mailInbox mailView = iota
-	mailImportant
-	mailSuggested
+	mailMust mailView = iota
+	mailMaybe
+	mailNoise
+	mailNew // what no model has read
+	mailStarred
+	mailAll
 	mailHistory
 )
+
+// mailJob is a change to many messages on the servers, which a card shows while it runs.
+type mailJob struct {
+	title     string
+	done, all int
+	stop      context.CancelFunc
+	stopping  bool
+}
 
 // mailProvider is a kind of mailbox the wizard knows.
 type mailProvider struct {
@@ -102,19 +114,27 @@ type mailState struct {
 	failed  error
 	dial    func(ctx context.Context, address string) (*mail.Conn, error) // the tests' server, else the real one
 
-	accounts []mail.Account
-	hidden   map[string]bool // accounts left out of the list
-	view     mailView
-	search   string
-	list     []mail.Message
-	counts   map[string]int
-	offers   []mail.Suggestion
-	log      []mail.LogEntry
-	stale    bool
-	loads    int // which load is the newest, as they finish in the background
+	accounts   []mail.Account
+	hidden     map[string]bool // accounts left out of the list
+	view       mailView
+	viewChosen bool // by the user, so it is left alone
+	search     string
+	list       []mail.Message
+	counts     map[string]int
+	tiers      map[string]mail.TierCount
+	senders    map[string]string // what the user said of an address, by address in lower case
+	log        []mail.LogEntry
+	loaded     bool // the list has been read once, so an empty one means no mail
+	stale      bool
+	loads      int // which load is the newest, as they finish in the background
 
 	current int64 // the message open, 0 for none
-	sideOn  bool  // a narrow window shows the mailboxes instead of the list
+	page    mailPage
+	web     WebView  // the system's browser engine, opened for the first page
+	webOff  bool     // there is none to be had
+	webAt   gfx.Rect // where this frame wants it
+	webLast gfx.Rect // where the last frame had it, which what is drawn after the page goes around
+	sideOn  bool     // a narrow window shows the mailboxes instead of the list
 	scroll  [4]float32
 	content [4]float32
 
@@ -129,10 +149,15 @@ type mailState struct {
 
 	syncing   bool
 	syncText  string
+	syncRatio float64 // how far the sync has got; below 0 when that cannot be told
+	syncStop  context.CancelFunc
 	lastSync  time.Time
-	organised bool // the model is working
-	again     bool // and more mail arrived meanwhile
+	unread    int    // how many messages of the accounts chosen the model has to read
+	organised bool   // the model is working
+	read      [2]int // how many messages the model has read, of how many
 	stop      context.CancelFunc
+	job       *mailJob
+	trashing  bool // the question whether to delete a tier is showing
 	notice    string
 	drafting  bool
 	draft     string
@@ -143,7 +168,7 @@ type mailState struct {
 func (s *mailState) init(stateDir string, wake func()) {
 	s.path = filepath.Join(stateDir, "mail-accounts.json")
 	s.keys, s.keysErr = ai.OpenKeys(filepath.Join(stateDir, "mail-keys.json"))
-	s.hidden, s.counts = map[string]bool{}, map[string]int{}
+	s.hidden, s.counts, s.tiers, s.senders = map[string]bool{}, map[string]int{}, map[string]mail.TierCount{}, map[string]string{}
 	s.stale = true
 	if data, err := os.ReadFile(s.path); err == nil {
 		s.failed = json.Unmarshal(data, &s.accounts)
@@ -154,6 +179,9 @@ func (s *mailState) init(stateDir string, wake func()) {
 func (s *mailState) close() {
 	if s.stop != nil {
 		s.stop()
+	}
+	if s.web != nil {
+		s.web.Close()
 	}
 	if s.opened {
 		s.mailer.Store.Close()
@@ -218,23 +246,41 @@ func (a *App) mailLoad() {
 	load := s.loads
 	store := s.mailer.Store
 	filter := mail.Filter{Accounts: s.chosen(), Inbox: true, Search: s.search}
-	if s.view == mailImportant {
-		filter.Priority = mail.PriorityHigh
+	switch s.view {
+	case mailMust:
+		filter.Tiers = []string{mail.TierMust}
+	case mailMaybe:
+		filter.Tiers = []string{mail.TierMaybe}
+	case mailNoise:
+		filter.Tiers = []string{mail.TierNoise}
+	case mailNew:
+		filter.Tiers = []string{""}
+	case mailStarred:
+		filter.Inbox, filter.Starred = false, true
 	}
 	none := len(filter.Accounts) == 0
+	model, _ := a.mailModel()
 	a.background(func(context.Context) {
 		var list []mail.Message
-		var offers []mail.Suggestion
+		tiers := map[string]mail.TierCount{}
+		unread := 0
 		var err error
 		if !none {
 			list, err = store.List(filter)
 		}
 		if err == nil && !none {
-			offers, err = store.Suggestions(filter.Accounts)
+			tiers, err = store.TierCounts(filter.Accounts)
+		}
+		if err == nil && !none {
+			unread, err = store.CountUnorganised(filter.Accounts, model.ID)
 		}
 		counts, cerr := store.Counts()
 		if err == nil {
 			err = cerr
+		}
+		senders, serr := store.Senders()
+		if err == nil {
+			err = serr
 		}
 		log, lerr := store.Log(200)
 		if err == nil {
@@ -249,11 +295,9 @@ func (a *App) mailLoad() {
 				s.notice = a.describe(err)
 				return
 			}
-			s.list, s.offers, s.counts, s.log = list, offers, counts, log
-			if s.view == mailSuggested {
-				s.list = slices.DeleteFunc(s.list, func(m mail.Message) bool {
-					return !slices.ContainsFunc(offers, func(g mail.Suggestion) bool { return g.Message == m.ID })
-				})
+			s.list, s.tiers, s.unread, s.senders, s.counts, s.log, s.loaded = list, tiers, unread, senders, counts, log, true
+			if !s.viewChosen && s.view == mailMust && len(list) == 0 && tiers[""].All > 0 {
+				s.view, s.stale = mailNew, true // the first view would stand empty
 			}
 		})
 	})
@@ -265,8 +309,8 @@ func (a *App) describeMail(err error) string {
 	switch {
 	case errors.Is(err, mail.ErrLogin):
 		return u.t("The mail server refused the sign-in. Use an app password or authorisation code, not your usual password.")
-	case errors.Is(err, mail.ErrNoLabels):
-		return u.t("This mailbox has no labels")
+	case errors.Is(err, mail.ErrNoTrash):
+		return u.t("This mailbox has no trash folder, so nothing was deleted")
 	}
 	return a.describe(err)
 }
@@ -359,23 +403,27 @@ func (a *App) mailSync() {
 		s.notice = a.describe(err)
 		return
 	}
-	s.syncing, s.notice = true, ""
+	ctx, stop := context.WithCancel(a.life)
+	s.syncing, s.syncStop, s.syncRatio, s.notice = true, stop, -1, ""
 	s.lastSync = time.Now()
 	accounts := slices.Clone(s.accounts)
 	mailer := s.mailer
-	progress := a.u.t("Syncing %s: %d of %d")
-	a.background(func(ctx context.Context) {
+	progress, paging := a.u.t("%s: %d of %d"), a.u.t("Fetching the pages of %s: %d of %d")
+	a.background(func(context.Context) {
+		defer stop()
 		var failures []string
-		arrived := 0
-		for _, ac := range accounts {
-			n, err := mailer.Sync(ctx, ac, func(done, total int) {
-				a.post(func() {
-					a.mail.syncText = fmt.Sprintf(progress, ac.Email, done, total)
-					a.mail.stale = true
-				})
+		show := func(text string, done, total int) {
+			a.post(func() {
+				a.mail.syncText, a.mail.syncRatio = text, float64(done)/float64(max(total, 1))
+				a.mail.stale = true
 			})
-			arrived += n
-			if err != nil {
+		}
+		for _, ac := range accounts {
+			_, err := mailer.Sync(ctx, ac, func(done, total int) { show(fmt.Sprintf(progress, ac.Email, done, total), done, total) })
+			if err == nil {
+				err = mailer.FillPages(ctx, ac, func(done, total int) { show(fmt.Sprintf(paging, ac.Email, done, total), done, total) })
+			}
+			if err != nil && !errors.Is(err, context.Canceled) {
 				failures = append(failures, ac.Email+": "+a.describeMail(err))
 			}
 		}
@@ -383,17 +431,18 @@ func (a *App) mailSync() {
 			s := &a.mail
 			s.syncing, s.syncText, s.stale = false, "", true
 			s.notice = strings.Join(failures, "\n")
-			if arrived > 0 {
-				a.mailOrganise(false)
-			}
 		})
 	})
 }
 
-// mailModel is the model that reads mail: the user's choice among those of this computer, else the first downloaded.
+// mailBestModel sorted real mail best of the models tried, thinking off: 27 of 32 hard messages, against 22 and 23 of the others.
+const mailBestModel = "qwen3-8b"
+
+// mailModel is the model that reads mail: the user's choice among those of this computer, else mailBestModel, else the
+// first downloaded.
 func (a *App) mailModel() (ai.Choice, bool) {
 	var first ai.Choice
-	found := false
+	found, best := false, false
 	for _, ch := range a.ai.config.Choices() {
 		if ch.Kind != ai.KindLLM || ch.Local == nil {
 			continue
@@ -404,44 +453,41 @@ func (a *App) mailModel() (ai.Choice, bool) {
 		if ch.ID == a.settings.MailModel {
 			return ch, true
 		}
-		if !found {
-			first, found = ch, true
+		if !found || (!best && ch.ID == mailBestModel) {
+			first, found, best = ch, true, ch.ID == mailBestModel
 		}
 	}
 	return first, found
 }
 
 // mailAsk is how the mail asks a model, which goes through the one place models are started.
-func (a *App) mailAsk(ch ai.Choice) mail.Ask {
+func (a *App) mailAsk(ch ai.Choice, opt ai.Options) mail.Ask {
 	cfg, engine := a.ai.config, a.settings.AIEngine
 	return func(ctx context.Context, system, text string) (string, error) {
 		ep, err := a.aiEndpoint(ctx, cfg, ch, engine, &aiAnswer{})
 		if err != nil {
 			return "", err
 		}
-		return ep.Complete(ctx, []ai.Message{{Role: ai.System, Text: system}, {Role: ai.User, Text: text}}, ai.Options{})
+		return ep.Complete(ctx, []ai.Message{{Role: ai.System, Text: system}, {Role: ai.User, Text: text}}, opt)
 	}
 }
 
-// mailOrganiseBatch is how many messages one round reads.
-const mailOrganiseBatch = 200
+// mailOrganiseOptions make a verdict quick and steady: thinking takes a minute a message and changes no answer asked of a list.
+func mailOrganiseOptions() ai.Options {
+	temperature := 0.1
+	return ai.Options{Temperature: &temperature, MaxTokens: 300, NoThinking: true}
+}
 
-// mailOrganise has the model read the mail no model has read, of the accounts chosen. A model that is not on this
-// computer is not downloaded unasked: asked says the user pressed the button, and is then told.
-func (a *App) mailOrganise(asked bool) {
+// mailOrganise has the model read mail no model has read, of the accounts chosen. A model holds gigabytes, so only the
+// user's click starts one, says how many of the newest it reads, and it stops when the reading ends (mailRelease).
+func (a *App) mailOrganise(limit int) {
 	s := &a.mail
-	if s.organised {
-		s.again = true // mail that arrived during the reading is read after it
-		return
-	}
-	if !s.opened {
+	if s.organised || !s.opened {
 		return
 	}
 	ch, ok := a.mailModel()
 	if !ok {
-		if asked {
-			s.notice = a.u.t("Download a language model in Settings → AI models first; mail is read only by a model on this computer")
-		}
+		s.notice = a.u.t("Download a language model in Settings → AI models first; mail is read only by a model on this computer")
 		return
 	}
 	accounts := s.chosen()
@@ -450,40 +496,19 @@ func (a *App) mailOrganise(asked bool) {
 	}
 	ctx, stop := context.WithCancel(a.life)
 	s.organised, s.stop = true, stop
-	store, ask := s.mailer.Store, a.mailAsk(ch)
-	reading := a.u.t("Reading mail: %d of %d")
+	store, ask := s.mailer.Store, a.mailAsk(ch, mailOrganiseOptions())
 	a.background(func(context.Context) {
 		defer stop()
-		list, err := store.Unorganised(accounts, mailOrganiseBatch)
-		skipped := 0
-		for i, m := range list {
-			if err != nil || ctx.Err() != nil {
-				break
-			}
-			a.post(func() { a.mail.syncText = fmt.Sprintf(reading, i+1, len(list)) })
-			var v mail.Verdict
-			if v, err = mail.Organise(ctx, ask, m); err != nil {
-				if ctx.Err() == nil && strings.Contains(err.Error(), "form asked for") {
-					// One answer in the wrong form says nothing of the next message.
-					skipped++
-					err = nil
-				}
-				continue
-			}
-			if err = store.SaveOrganised(m.ID, ch.ID, v); err == nil {
-				a.post(func() { a.mail.stale = true })
-			}
-		}
+		skipped, err := store.OrganiseSome(ctx, ask, accounts, ch.ID, limit, func(done, total int) {
+			a.post(func() {
+				a.mail.read = [2]int{done, total}
+				a.mail.stale = true
+			})
+		})
 		a.post(func() {
 			s := &a.mail
-			s.organised, s.syncText, s.stale = false, "", true
-			again := s.again && err == nil
-			s.again = false
-			defer func() {
-				if again {
-					a.mailOrganise(false)
-				}
-			}()
+			s.organised, s.read, s.stale = false, [2]int{}, true
+			a.mailRelease()
 			switch {
 			case err != nil && !errors.Is(err, context.Canceled):
 				s.notice = a.describeAI(err)
@@ -494,8 +519,8 @@ func (a *App) mailOrganise(asked bool) {
 	})
 }
 
-// mailApply makes a change on the server, which only a click of the user's ever starts.
-func (a *App) mailApply(g mail.Suggestion, ac mail.Account) {
+// mailArchive takes a message out of the inbox on the server, which only a click of the user's ever starts.
+func (a *App) mailArchive(id int64, ac mail.Account) {
 	s := &a.mail
 	if s.busy != "" {
 		return
@@ -503,7 +528,7 @@ func (a *App) mailApply(g mail.Suggestion, ac mail.Account) {
 	s.busy = ac.ID
 	mailer := s.mailer
 	a.background(func(ctx context.Context) {
-		err := mailer.Apply(ctx, ac, g)
+		err := mailer.Archive(ctx, ac, id)
 		a.post(func() {
 			s := &a.mail
 			s.busy, s.stale = "", true
@@ -514,25 +539,106 @@ func (a *App) mailApply(g mail.Suggestion, ac mail.Account) {
 	})
 }
 
-// mailUndo reverses a change of the log on the server.
-func (a *App) mailUndo(e mail.LogEntry) {
+// mailRun does work on the servers behind a card, which says how far it has got and can stop it.
+func (a *App) mailRun(title string, work func(ctx context.Context, progress func(done, all int)) error) {
 	s := &a.mail
-	ac, ok := s.account(e.Account)
-	if !ok || s.busy != "" {
+	if s.busy != "" {
 		return
 	}
-	s.busy = ac.ID
-	mailer := s.mailer
-	a.background(func(ctx context.Context) {
-		err := mailer.Undo(ctx, ac, e.ID)
+	ctx, stop := context.WithCancel(a.life)
+	job := &mailJob{title: title, stop: stop}
+	s.busy, s.job, s.trashing = "job", job, false
+	a.background(func(context.Context) {
+		defer stop()
+		err := work(ctx, func(done, all int) {
+			a.post(func() {
+				job.done, job.all = done, all
+				a.mail.stale = true
+			})
+		})
 		a.post(func() {
 			s := &a.mail
-			s.busy, s.stale = "", true
-			if err != nil {
+			s.busy, s.job, s.stale = "", nil, true
+			if err != nil && !errors.Is(err, context.Canceled) {
 				s.notice = a.describeMail(err)
 			}
 		})
 	})
+}
+
+// mailChange changes all the mail of a tier on the servers of the chosen mailboxes, at the user's click.
+func (a *App) mailChange(tier, action string) {
+	s := &a.mail
+	store, mailer, chosen := s.mailer.Store, s.mailer, s.chosen()
+	accounts := map[string]mail.Account{}
+	for _, id := range chosen {
+		accounts[id], _ = s.account(id)
+	}
+	title := a.u.t("Marking mail read")
+	change := mailer.MarkRead
+	if action == mail.ActionTrash {
+		title, change = a.u.t("Moving mail to the trash"), mailer.Trash
+	}
+	a.mailRun(title, func(ctx context.Context, progress func(done, all int)) error {
+		target, err := store.Target(chosen, tier, action)
+		if err != nil {
+			return err
+		}
+		all, done := 0, 0
+		for _, ids := range target {
+			all += len(ids)
+		}
+		for id, ids := range target {
+			if err := change(ctx, accounts[id], ids, func(n, _ int) { progress(done+n, all) }); err != nil {
+				return err
+			}
+			done += len(ids)
+		}
+		return nil
+	})
+}
+
+// mailUndo reverses a change of the log on the server.
+func (a *App) mailUndo(e mail.LogEntry) {
+	s := &a.mail
+	ac, ok := s.account(e.Account)
+	if !ok {
+		return
+	}
+	mailer := s.mailer
+	a.mailRun(a.u.t("Undoing the change"), func(ctx context.Context, progress func(done, all int)) error {
+		return mailer.Undo(ctx, ac, e.ID, progress)
+	})
+}
+
+// mailTasks are the cards of the work the mail is doing, whichever tab is in front.
+func (a *App) mailTasks() []task {
+	s := &a.mail
+	u := &a.u
+	var out []task
+	if s.syncing {
+		out = append(out, task{id: "mail/sync", glyph: icSync, title: u.t("Looking for new mail"), status: s.syncText, fraction: s.syncRatio,
+			cancel: s.syncStop, open: a.openMailTab})
+	}
+	if s.organised {
+		t := task{id: "mail/read", glyph: icThink, title: u.t("The model is sorting mail"), fraction: -1, cancel: s.stop, open: a.openMailTab}
+		if s.read[1] > 0 {
+			t.status, t.fraction = u.tf("%d of %d", s.read[0], s.read[1]), float64(s.read[0])/float64(s.read[1])
+		}
+		out = append(out, t)
+	}
+	if j := s.job; j != nil {
+		t := task{id: "mail/job", glyph: icMail, title: j.title, fraction: -1, stopping: j.stopping, open: a.openMailTab}
+		t.cancel = func() {
+			j.stopping = true
+			j.stop()
+		}
+		if j.all > 0 {
+			t.status, t.fraction = u.tf("%d of %d", j.done, j.all), float64(j.done)/float64(j.all)
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // mailDraftReply has the model write a reply into the box, where the user changes it.
@@ -544,12 +650,13 @@ func (a *App) mailDraftReply(m mail.Message) {
 		return
 	}
 	s.drafting, s.draftFor, s.draft = true, m.ID, ""
-	ask := a.mailAsk(ch)
+	ask := a.mailAsk(ch, ai.Options{})
 	a.background(func(ctx context.Context) {
 		text, err := mail.DraftReply(ctx, ask, m)
 		a.post(func() {
 			s := &a.mail
 			s.drafting = false
+			a.mailRelease()
 			if err != nil {
 				s.notice = a.describeAI(err)
 				return
@@ -586,15 +693,24 @@ func (a *App) mailSaveDraft(m mail.Message) {
 	})
 }
 
-// mailClosed is what closing the tab ends: the model's reading and the model, unless the chat is using it.
+// mailRelease stops the mail's model once nothing of the mail needs it, unless the chat may be using it.
+func (a *App) mailRelease() {
+	s := &a.mail
+	if s.organised || s.drafting {
+		return
+	}
+	if ch, ok := a.mailModel(); ok && !slices.ContainsFunc(a.docs, func(d *doc) bool { return d.aiTab }) {
+		a.ai.rt.Unload(ch.ID)
+	}
+}
+
+// mailClosed is what closing the tab ends: the model's reading and the model.
 func (a *App) mailClosed() {
 	s := &a.mail
 	if s.stop != nil {
 		s.stop()
 	}
-	if ch, ok := a.mailModel(); ok && !slices.ContainsFunc(a.docs, func(d *doc) bool { return d.aiTab }) {
-		a.ai.rt.Unload(ch.ID)
-	}
+	a.mailRelease()
 }
 
 // mailDue reports whether it is time to look for new mail by itself.

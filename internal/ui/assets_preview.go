@@ -263,13 +263,16 @@ func (a *App) drawFilePreview(id string, r gfx.Rect, path string) {
 	if p.path != path || p.id != id {
 		a.openPreview(id, path)
 	}
+	if p.kind == assets.Model && p.img == nil && !p.loading {
+		p.img = a.modelPicture(path) // what shows the file turning is its tab
+	}
 	u.c.Push(r)
 	defer u.c.Pop()
 	switch {
 	case p.problem != "":
 		a.drawKindCard(r, p.kind, assets.Info{}, true)
 		u.label(u.face(13), gfx.Rect{X: r.X, Y: r.Y + r.H*0.72, W: r.W, H: u.px(24)}, p.problem, colDangerText, 0.5)
-	case p.loading:
+	case p.loading, p.kind == assets.Model && p.img == nil && a.modelPictureComing():
 		u.label(u.face(13), r, u.t("Loading the preview…"), colFaint, 0.5)
 	case p.anim != nil:
 		a.drawAnimPreview(id, r)

@@ -98,6 +98,19 @@ func (a *App) refreshThumbs() {
 	}
 }
 
+// give sets the picture of a file that was made outside the cache, as a 3D file's is by the card; the budget counts it
+// as any other, and a change to the file forgets it.
+func (c *thumbCache) give(path string, img *image.RGBA) {
+	it := c.items[path]
+	if it == nil || !it.ready || it.img != nil {
+		return
+	}
+	it.img = img
+	c.bytes += len(img.Pix)
+	c.made++
+	c.evict()
+}
+
 func (c *thumbCache) drop(it *thumbItem) {
 	if it.img != nil {
 		c.bytes -= len(it.img.Pix)

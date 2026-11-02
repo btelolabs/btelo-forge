@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -192,6 +193,22 @@ func TestChatStreamsThinkingAndTextAndSendsTheKey(t *testing.T) {
 }
 
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
+
+func TestOnlyAModelOfThisComputerIsToldNotToThink(t *testing.T) {
+	for _, local := range []bool{true, false} {
+		var got map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewDecoder(r.Body).Decode(&got)
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		}))
+		e := Endpoint{URL: srv.URL, Model: "m", Local: local}
+		e.Chat(context.Background(), []Message{{Role: User, Text: "hi"}}, Options{NoThinking: true}, func(Chunk) {})
+		srv.Close()
+		if _, has := got["chat_template_kwargs"]; has != local {
+			t.Fatalf("local %v: %v", local, got)
+		}
+	}
+}
 
 func TestChatReportsWhatTheServiceRefusedWith(t *testing.T) {
 	for name, c := range map[string]struct {

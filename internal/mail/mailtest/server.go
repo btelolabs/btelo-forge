@@ -46,6 +46,7 @@ type Server struct {
 	Plain    bool     // LIST does not say what folders are for
 	Users    []string // who LOGIN was asked for
 	OnlyUser string   // the one user LOGIN accepts, when set
+	NoTrash  bool     // LIST names no trash folder
 }
 
 func selfSigned(t *testing.T) tls.Certificate {
@@ -94,6 +95,25 @@ func (s *Server) Add(from, subject, body string) *Message {
 	s.next++
 	s.Messages = append(s.Messages, m)
 	return m
+}
+
+// Return puts a message back in the inbox under a new UID, as a server does.
+func (s *Server) Return(i int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Messages[i].Box, s.Messages[i].UID = "INBOX", s.next
+	s.next++
+}
+
+// Renumber gives every message a new UID under a new UIDVALIDITY.
+func (s *Server) Renumber() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.validity++
+	for _, m := range s.Messages {
+		m.UID = s.next
+		s.next++
+	}
 }
 
 func (s *Server) Asked(word string) bool {
@@ -161,9 +181,15 @@ func (s *Server) serve(c net.Conn) {
 			if s.Plain {
 				w(`* LIST (\HasNoChildren) "/" "Archive"`)
 				w(`* LIST (\HasNoChildren) "/" "Drafts"`)
+				if !s.NoTrash {
+					w(`* LIST (\HasNoChildren) "/" "Trash"`)
+				}
 			} else {
 				w(`* LIST (\All \HasNoChildren) "/" "Archive"`)
 				w(`* LIST (\Drafts \HasNoChildren) "/" "Drafts"`)
+				if !s.NoTrash {
+					w(`* LIST (\Trash \HasNoChildren) "/" "Trash"`)
+				}
 			}
 			w("%s OK done", tag)
 		case "SELECT":
@@ -259,12 +285,15 @@ func (s *Server) uid(tag, rest, box string, w func(string, ...any)) {
 		w("%s OK done", tag)
 	case "STORE":
 		parts := strings.SplitN(rest, " ", 4)
-		uid, _ := strconv.Atoi(parts[1])
 		for _, m := range s.Messages {
-			if int(m.UID) != uid {
+			if !slices.Contains(strings.Split(parts[1], ","), strconv.Itoa(int(m.UID))) {
 				continue
 			}
 			switch {
+			case parts[2] == "+FLAGS.SILENT":
+				m.Seen = true
+			case parts[2] == "-FLAGS.SILENT":
+				m.Seen = false
 			case parts[2] == "-X-GM-LABELS" && strings.Contains(parts[3], `Inbox`):
 				m.Box = "Archive"
 			case parts[2] == "+X-GM-LABELS" && strings.Contains(parts[3], `Inbox`):
@@ -274,9 +303,8 @@ func (s *Server) uid(tag, rest, box string, w func(string, ...any)) {
 		w("%s OK stored", tag)
 	case "MOVE":
 		parts := strings.SplitN(rest, " ", 3)
-		uid, _ := strconv.Atoi(parts[1])
 		for _, m := range s.Messages {
-			if int(m.UID) == uid {
+			if slices.Contains(strings.Split(parts[1], ","), strconv.Itoa(int(m.UID))) {
 				m.Box = strings.Trim(parts[2], `"`)
 			}
 		}

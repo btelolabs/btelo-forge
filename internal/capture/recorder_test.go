@@ -117,6 +117,43 @@ func TestRecordPauseAndJoin(t *testing.T) {
 	}
 }
 
+func TestDiscardLeavesNothingOnDisk(t *testing.T) {
+	d, e := recordable(t)
+	for _, paused := range []bool{false, true} {
+		dir := t.TempDir()
+		r, err := Start(Options{Display: d, FPS: 30, SystemAudio: true, Encoder: e, Path: filepath.Join(dir, "screen.mp4")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+		if err := r.Pause(); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.Resume(); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+		if paused {
+			if err := r.Pause(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.Discard(); err != nil {
+			t.Fatal(err)
+		}
+		left, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(left) > 0 {
+			t.Errorf("paused %v: left behind %v", paused, left)
+		}
+		if _, err := r.Stop(context.Background()); err == nil {
+			t.Error("a discarded recording could still be stopped")
+		}
+	}
+}
+
 func TestStopWithoutSoundKeepsOnlyPicture(t *testing.T) {
 	d, e := recordable(t)
 	out := filepath.Join(t.TempDir(), "quiet.mp4")

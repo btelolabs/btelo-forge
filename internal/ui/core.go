@@ -119,7 +119,8 @@ type ctx struct {
 	shift      bool
 	ctrl       bool
 	alt        bool
-	inactive   bool // the window does not have the keyboard focus
+	inactive   bool       // the window does not have the keyboard focus
+	covers     []gfx.Rect // what the frame drew over everything, which a view in the window must leave a hole for
 	keys       []Key
 	held       []uint16 // the keys held down, by code, as their presses and releases came
 	heldWas    []uint16 // those held as the frame began, before its presses and releases

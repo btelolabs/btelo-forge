@@ -68,15 +68,27 @@ type recordState struct {
 	failures map[string]error
 	probing  string // the encoderKey being probed
 
-	rec      *capture.Recorder
-	starting bool
-	stopping bool
-	busy     bool // pausing or resuming
-	shooting bool // a screenshot is being taken
-	title    string
-	scroll   float32 // the dialog's scroll offset
-	content  float32 // and its content height at the last frame
+	rec        *capture.Recorder
+	starting   bool
+	stopping   bool // being saved, or thrown away when discarding
+	discarding bool
+	ask        discardAsk // where deleting the recording is being asked about
+	busy       bool       // pausing or resuming
+	shooting   bool       // a screenshot is being taken
+	title      string
+	scroll     float32 // the dialog's scroll offset
+	content    float32 // and its content height at the last frame
 }
+
+// discardAsk is where the question before deleting a recording is: beside the button that was clicked, as the window
+// may be minimized while the floating bar is in use.
+type discardAsk int
+
+const (
+	askNothing discardAsk = iota
+	askInWindow
+	askOverScreen
+)
 
 // recorder is the window's recording support, or nil where screen recording is not offered at all (macOS, or a
 // window that cannot get out of the way); on Windows the controls are shown even when this computer cannot record,
@@ -433,7 +445,7 @@ func (a *App) stopRecording(done func(path string, err error)) {
 		}
 		return
 	}
-	r.stopping = true
+	r.stopping, r.ask = true, askNothing
 	a.liveFollow() // the stream goes black, and on
 	failure := rec.Err()
 	// The joining goes on while the app closes, so it does not use the app's lifetime.
@@ -471,6 +483,7 @@ func (a *App) stopRecording(done func(path string, err error)) {
 			a.openVideo(path, false)
 			a.toastActions(a.u.tf("Saved the recording %s", filepath.Base(path)), false, []toastAction{
 				{a.u.t("Show in folder"), func() { a.host.Reveal(path) }},
+				{a.u.t("Copy the path"), func() { a.copyPathList([]string{path}) }},
 			})
 			if done != nil {
 				done(path, nil)
@@ -482,6 +495,77 @@ func (a *App) stopRecording(done func(path string, err error)) {
 // joinWait bounds how long saving a recording may take; the picture is copied and only the sound encoded, so even
 // hours take less.
 const joinWait = 10 * time.Minute
+
+// askDiscard asks before deleting the recording, from a button in the window or over the screen.
+func (a *App) askDiscard(where discardAsk) {
+	r := &a.rec
+	if r.rec != nil && !r.stopping {
+		r.ask = where
+	}
+}
+
+// discardRecording ends the recording and removes all of it from the disk; no file is left and no tab opens.
+func (a *App) discardRecording() {
+	r := &a.rec
+	rec := r.rec
+	r.ask = askNothing
+	if rec == nil || r.stopping || r.busy {
+		return
+	}
+	r.stopping, r.discarding = true, true
+	a.liveFollow() // the stream goes black, and on
+	a.background(func(context.Context) {
+		err := rec.Discard()
+		a.post(func() {
+			a.releaseRecordingWindow()
+			if host := a.recorder(); host != nil {
+				host.Restore()
+			}
+			r.rec, r.stopping, r.discarding = nil, false, false
+			a.host.SetTitle(a.Title())
+			r.title = ""
+			if err != nil {
+				a.toast(a.u.tf("The recording could not be deleted: %s", a.describe(err)), true)
+				return
+			}
+			a.toast(a.u.t("Deleted the recording"), false)
+		})
+	})
+}
+
+// drawDiscardQuestion is the question before deleting the recording, drawn on u in box, in the window or over the screen.
+func (a *App) drawDiscardQuestion(u *ctx, box gfx.Rect) {
+	r := &a.rec
+	panel(u, box)
+	in := box.Inset(u.px(16))
+	u.label(u.bold(15), rectAt(in.X, in.Y, in.W, u.px(22)), u.t("Delete this recording?"), colText, 0)
+	u.label(u.face(12), rectAt(in.X, in.Y+u.px(26), in.W, u.px(20)), u.t("It is not kept anywhere and cannot be undone."), colDim, 0)
+	w, h := u.px(96), u.px(34)
+	y := in.Bottom() - h
+	if u.button("record/discard/cancel", rectAt(in.Right()-2*w-u.px(8), y, w, h), "", u.t("Cancel"), ghost, true) {
+		r.ask = askNothing
+	}
+	if u.button("record/discard/delete", rectAt(in.Right()-w, y, w, h), icDelete, u.t("Delete"), danger, !r.busy) {
+		a.discardRecording()
+	}
+}
+
+// drawDiscardDialog is the question in the window, when it was asked from there.
+func (a *App) drawDiscardDialog() {
+	r := &a.rec
+	if r.ask != askInWindow {
+		return
+	}
+	u := &a.u
+	u.c.Fill(a.screen, gfxShade)
+	a.drawDiscardQuestion(u, rectCentered(a.screen, u.px(discardAskWidth), u.px(discardAskHeight)))
+	for _, k := range u.keys {
+		if k.Code == keyEscape {
+			r.ask = askNothing
+		}
+	}
+	u.keys = nil
+}
 
 // releaseRecordingWindow undoes what starting a recording did to the window.
 func (a *App) releaseRecordingWindow() {
@@ -581,8 +665,11 @@ func (a *App) displayLabel(d capture.Display, i int) string {
 	return strings.Join(parts, " · ")
 }
 
+// recordControlWidth is the usual width of the recording's control, in logical pixels.
+const recordControlWidth = 262
+
 // drawRecordControl is, while recording, the recording's time, sound levels and buttons at the end of the tab strip;
-// it returns where it begins. It is w wide; narrower than its usual 232, down the side strip, it has no room for the
+// it returns where it begins. It is w wide; narrower than its usual width, down the side strip, it has no room for the
 // size of the file, and the word for saving takes the time's place. Recording and screenshots start from the new tab's
 // card or their hotkeys.
 func (a *App) drawRecordControl(end, y, h, w float32) float32 {
@@ -594,7 +681,11 @@ func (a *App) drawRecordControl(end, y, h, w float32) float32 {
 	end -= u.px(4)
 	st := r.rec.Status()
 	pill := gfx.Rect{X: end - w - u.px(4), Y: y, W: w, H: h}
-	narrow := w < u.px(232)
+	narrow := w < u.px(recordControlWidth)
+	saving := u.t("Saving…")
+	if r.discarding {
+		saving = u.t("Deleting…")
+	}
 	u.c.Fill(pill, gfx.Mix(colSurface, colDanger, 0.18))
 	dot := colDanger
 	if st.Paused {
@@ -604,14 +695,14 @@ func (a *App) drawRecordControl(end, y, h, w float32) float32 {
 	}
 	u.c.Circle(pill.X+u.px(14), pill.Y+h/2, u.px(4.5), dot)
 	if narrow && r.stopping {
-		u.label(u.face(11), rectAt(pill.X+u.px(24), pill.Y, w-u.px(90), h), u.t("Saving…"), colDim, 0)
+		u.label(u.face(11), rectAt(pill.X+u.px(24), pill.Y, w-u.px(120), h), saving, colDim, 0)
 	} else {
 		u.label(u.bold(12.5), rectAt(pill.X+u.px(24), pill.Y, u.px(56), h), shortClock(st.Elapsed.Seconds()), colText, 0)
 	}
 	switch {
 	case narrow:
 	case r.stopping:
-		u.label(u.face(11), rectAt(pill.X+u.px(78), pill.Y, u.px(90), h), u.t("Saving…"), colDim, 0)
+		u.label(u.face(11), rectAt(pill.X+u.px(78), pill.Y, u.px(90), h), saving, colDim, 0)
 	case st.Bytes > 1<<10:
 		u.label(u.face(11), rectAt(pill.X+u.px(78), pill.Y, u.px(60), h), size(st.Bytes), colDim, 0)
 	}
@@ -628,10 +719,13 @@ func (a *App) drawRecordControl(end, y, h, w float32) float32 {
 	if o.Microphone {
 		levels, names = append(levels, st.Mic), append(names, u.t("the microphone"))
 	}
-	// Before the pause button, and in a narrow pill shorter and closer, to clear the time.
-	meterX, meterW := pill.Right()-u.px(96), u.px(24)
+	// Before the pause button; in a narrow pill the meters and buttons are smaller, to clear the time.
+	meterX, meterW, buttonW, step := pill.Right()-u.px(126), u.px(24), u.px(28), u.px(30)
 	if narrow {
-		meterX, meterW = pill.Right()-u.px(86), u.px(20)
+		meterX, meterW, buttonW, step = pill.Right()-u.px(96), u.px(16), u.px(24), u.px(25)
+	}
+	button := func(i int) gfx.Rect {
+		return rectAt(pill.Right()-float32(3-i)*step-u.px(2), pill.Y+u.px(2), buttonW, h-u.px(4))
 	}
 	meters := rectAt(meterX, pill.Y+h/2-u.px(3)*float32(len(levels)), meterW, u.px(6)*float32(len(levels)))
 	for i, level := range levels {
@@ -642,18 +736,19 @@ func (a *App) drawRecordControl(end, y, h, w float32) float32 {
 	if len(names) > 0 {
 		u.hint("tabs/rec/meters", u.tf("Sound level of %s", strings.Join(names, u.t(" and "))), meters)
 	}
-	pause := rectAt(pill.Right()-u.px(62), pill.Y+u.px(2), u.px(28), h-u.px(4))
 	glyph, hint := icPause, u.t("Pause the recording")
 	if st.Paused {
 		glyph, hint = icRecord, u.t("Resume the recording")
 	}
 	hint = withKey(hint, a.hotkeyLabel(hotkeyPause))
-	if u.iconButton("tabs/rec/pause", pause, glyph, hint, false, !r.busy && !r.stopping) {
+	if u.iconButton("tabs/rec/pause", button(0), glyph, hint, false, !r.busy && !r.stopping) {
 		a.pauseRecording(!st.Paused, nil)
 	}
-	stop := rectAt(pill.Right()-u.px(32), pill.Y+u.px(2), u.px(28), h-u.px(4))
-	if u.iconButton("tabs/rec/stop", stop, icStop, withKey(u.t("Stop and edit the recording"), a.hotkeyLabel(hotkeyRecord)), false, !r.stopping) {
+	if u.iconButton("tabs/rec/stop", button(1), icStop, withKey(u.t("Stop and edit the recording"), a.hotkeyLabel(hotkeyRecord)), false, !r.stopping) {
 		a.stopRecording(nil)
+	}
+	if u.iconButton("tabs/rec/discard", button(2), icDelete, u.t("Delete the recording"), false, !r.stopping && !r.busy) {
+		a.askDiscard(askInWindow)
 	}
 	return pill.X
 }

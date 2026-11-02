@@ -222,7 +222,7 @@ func recordPieDemo(t *testing.T, lang Language, gif string) {
 	m := &p.pie
 	for _, k := range []int{4, 2} {
 		a := (w[k].from+w[k].to)/2 + m.turn.pos
-		rr := float64(m.radius) * 0.62
+		rr := float64(m.radius) * 0.4
 		r.glide(m.cx+float32(rr*math.Sin(a)), m.cy-float32(rr*math.Cos(a)), 550*time.Millisecond)
 		r.hold(350 * time.Millisecond)
 		r.click()

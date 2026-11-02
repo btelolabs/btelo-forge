@@ -77,6 +77,15 @@ func (h winWindow) Launch(path string) error   { return win.Launch(path) }
 func (h winWindow) LaunchURL(url string) error { return win.LaunchURL(url) }
 func (h winWindow) Languages() []string        { return win.Languages() }
 
+// OpenWebView opens the system's browser engine in the window, for mail.
+func (h winWindow) OpenWebView(dir string, wake func()) (ui.WebView, error) {
+	v, err := h.w.OpenWebView(dir, wake)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
 // ChoosePrinter shows the system's print dialog.
 func (h winWindow) ChoosePrinter(last *printing.Target) (*printing.Target, error) {
 	t, err := printing.ChoosePrinter(h.w.Handle, last)

@@ -101,8 +101,8 @@ func itemCount(u *ctx, n int64) string {
 	return u.tf("%s items", countText(n))
 }
 
-// drawFiles is a file manager tab: its lists side by side, the preview beside them when it is open, what is
-// running over them, and at the bottom the state of the folder and the keys.
+// drawFiles is a file manager tab: its lists side by side, what is running over them, at the bottom the state of the
+// folder and the keys, and over it all the preview when it is open, or the small picture of what the pointer is on.
 func (a *App) drawFiles(r gfx.Rect) {
 	u := &a.u
 	fd := a.files
@@ -128,18 +128,10 @@ func (a *App) drawFiles(r gfx.Rect) {
 	foot := gfx.Rect{X: r.X, Y: r.Bottom() - keysH - statusH, W: r.W, H: statusH + keysH}
 	main := gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: foot.Y - r.Y}
 	lists := main
-	var pv gfx.Rect
-	if fd.preview {
-		pw := max(min(main.W*0.42, u.px(760)), min(u.px(300), main.W/2))
-		pv = gfx.Rect{X: main.Right() - pw, Y: main.Y, W: pw, H: main.H}
-		lists.W -= pw
-	}
 
-	// A dialog takes the mouse and the keys from the lists behind it.
-	modal := fd.confirm != nil
-	if modal {
-		u.blocked = true
-	}
+	// A dialog or the preview takes the mouse and the keys from the lists behind it.
+	held := u.blocked
+	u.blocked = held || fd.confirm != nil || fd.preview
 	w := lists.W / float32(len(fd.panes))
 	for i, p := range fd.panes {
 		pr := gfx.Rect{X: lists.X + float32(i)*w, Y: lists.Y, W: w, H: lists.H}
@@ -154,17 +146,19 @@ func (a *App) drawFiles(r gfx.Rect) {
 		fd.after()
 		fd.after = nil
 	}
-	if fd.preview {
-		a.drawPreviewPanel(fd, pv)
-	}
 	a.drawFileStatus(fd, rectAt(foot.X, foot.Y, foot.W, statusH))
 	a.drawKeyList(fd, rectAt(foot.X, foot.Y+statusH, foot.W, keysH))
+	a.drawFilePeek(fd, main, a.drawFileJobs(main))
+	if fd.preview {
+		u.blocked = held || fd.confirm != nil || fd.prompt != nil
+		a.drawPreviewOverlay(fd, r)
+	}
+	u.blocked = held || fd.confirm != nil
 	if fd.prompt != nil && fd.prompt.kind != promptRename && fd.prompt.kind != promptPath {
 		a.drawPromptBox(fd, lists)
 	}
-	a.drawFileJobs(rectAt(main.X, main.Y, lists.W, main.H))
-	if modal {
-		u.blocked = false
+	u.blocked = held
+	if fd.confirm != nil {
 		a.drawConfirm(fd, r)
 	}
 	// The keys go to what has them: a dialog, a text box, else the commands.

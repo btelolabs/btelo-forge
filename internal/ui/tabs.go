@@ -55,7 +55,7 @@ func (a *App) drawTabs(r gfx.Rect) {
 			bottom -= rowH
 		}
 	} else {
-		end = a.drawLiveControl(a.drawRecordControl(gear.X, gear.Y, gear.H, u.px(232)), gear.Y, gear.H)
+		end = a.drawLiveControl(a.drawRecordControl(gear.X, gear.Y, gear.H, u.px(recordControlWidth)), gear.Y, gear.H)
 	}
 	if a.p != nil {
 		watchHint := u.tf("Player mode (%s)", a.commandKey("video.watch"))

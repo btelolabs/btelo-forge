@@ -230,6 +230,13 @@ func TestPauseHotkeyWhileRecording(t *testing.T) {
 	if !strings.HasPrefix(filepath.Base(a.p.Sources[0].Path), "Screen recording") {
 		t.Errorf("opened %s", a.p.Sources[0].Path)
 	}
+	x.clickToastAction("Copy the path")
+	if x.h.clip != a.p.Sources[0].Path {
+		t.Errorf("copied %q, want %q", x.h.clip, a.p.Sources[0].Path)
+	}
+	if !x.toastSays(filepath.Base(a.p.Sources[0].Path)) {
+		t.Errorf("copying said nothing: %+v", a.toasts)
+	}
 }
 
 func TestWindowHotkeyHidesAndBringsBack(t *testing.T) {

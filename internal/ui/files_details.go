@@ -11,7 +11,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
-// The details of the item under the cursor, under its preview: what it is, and its tags and categories to change
+// The details of the item under the cursor, beside its preview: what it is, and its tags and categories to change
 // with the mouse, as Eagle's inspector shows them. The keys reach the same through t and the menu.
 
 // actedOn are the paths the commands act on in the list in use: the marked items, the one under the cursor, or
@@ -91,15 +91,10 @@ func (a *App) categoryItems(fd *filesDoc, paths []string) []menuItem {
 	return append(items, menuItem{label: u.t("New category…"), run: func() { a.openPrompt(fd, promptCategory) }})
 }
 
-// detailsMinH is how tall the preview panel must be to show the details under the preview.
-func (u *ctx) detailsMinH() float32 { return u.px(460) }
-
 // drawFileDetails draws what is known of the items the commands act on: the one's kind, size and length, or how
 // many there are; then their tags and categories.
 func (a *App) drawFileDetails(fd *filesDoc, r gfx.Rect) {
 	u := &a.u
-	u.c.Fill(r, colBackground)
-	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: max(1, u.px(1))}, colBorder)
 	paths := a.actedOn(fd)
 	if len(paths) == 0 || fd.pane().atDrives() {
 		return

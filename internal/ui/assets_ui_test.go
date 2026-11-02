@@ -271,7 +271,7 @@ func TestGridBrowsesTagsAndActsOnHover(t *testing.T) {
 	}
 	x.press(keyEscape, "")
 
-	// Space previews beside the grid: Markdown, code, a picture, a video, which plays at once.
+	// Space previews over the grid: Markdown, code, a picture, a video, which plays at once.
 	for _, name := range []string{"README.md", "main.go", "sunset.png", "holiday.mp4", "loop.gif"} {
 		x.hoverKey(x.cardOf(name), keySpace)
 		if !fd.preview || a.previewPath(fd) != filepath.Join(dir, name) {
@@ -297,7 +297,7 @@ func TestGridBrowsesTagsAndActsOnHover(t *testing.T) {
 		if fd.preview {
 			t.Fatal("Space did not close the preview")
 		}
-		x.frame(Input{}) // the grid takes the width back
+		x.frame(Input{})
 	}
 
 	// q shows the rows, and pictures again, the cursor on the same file.

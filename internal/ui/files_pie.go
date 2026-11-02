@@ -11,29 +11,85 @@ import (
 
 	"github.com/btelolabs/btelo-forge/internal/files"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
+	"github.com/btelolabs/btelo-forge/internal/office/dml"
 )
 
-// A list showing an analysis has a pie of its folder under its rows: a wedge for each of the largest items, the
-// rest together as one more. The wedge of the item under the cursor turns to twelve o'clock and stands out a little,
-// both on springs, so moving down the list, with the keys or by pointing at rows, turns the pie smoothly from item
-// to item. A click on a wedge puts the cursor on its item.
+// A list showing an analysis has a map of its folder under its rows, in the manner of DaisyDisk: rings around the
+// folder's size, the inner ring its items and each ring further out what the folders of the one inside hold, coloured
+// through the spectrum by where they lie, with what is too small to draw in grey. The item under the cursor turns to
+// twelve o'clock and stands out a little, both on springs, so moving down the list, with the keys or by pointing at
+// rows, turns the rings smoothly from item to item. A click on the inner ring puts the cursor on its item, one further
+// out opens the folder that holds it, and one in the middle goes up.
 
-// pieSlots is how many items have a wedge of their own, as many as there are colours told apart at a glance; the
-// rest share the last wedge.
-const pieSlots = 8
+// pieSlots is how many items have a wedge of their own in the inner ring; the rest share the last wedge.
+const pieSlots = 32
 
 // pieOther is the key of the wedge the items without one of their own share.
 const pieOther = "\x00other"
 
-// pieColors tell the wedges apart, largest first: eight hues kept apart for colour-blind eyes as well, each at least
-// 3:1 against the panel.
-var pieColors = [pieSlots]color.RGBA{
-	gfx.Hex(0x3987e5), gfx.Hex(0xd95926), gfx.Hex(0x199e70), gfx.Hex(0xc98500),
-	gfx.Hex(0xd55181), gfx.Hex(0x008300), gfx.Hex(0x9085e9), gfx.Hex(0xe66767),
+// pieOtherColor is what is no one item: a grey.
+var pieOtherColor = gfx.Hex(0x6b6e78)
+
+// pieEdges are where the rings start and end, of the map's radius; the rings narrow outwards.
+var pieEdges = [...]float32{0.30, 0.50, 0.67, 0.81, 0.92, 1}
+
+// pieMinArc is the narrowest arc drawn, in radians: what is narrower goes into the grey arc of its folder.
+const pieMinArc = 0.012
+
+// pieColor is the colour of what lies at an angle, in a ring: red at the start round to violet at the end, a little
+// lighter outwards.
+func pieColor(angle float64, ring int) color.RGBA {
+	return dml.HSL(angle/(2*math.Pi)*275, 0.74, 0.56+0.025*float64(ring))
 }
 
-// pieOtherColor is the wedge of everything else: a grey, as it is no one item.
-var pieOtherColor = gfx.Hex(0x6b6e78)
+// pieArc is a piece of a ring.
+type pieArc struct {
+	ring      int // 0 is the inner ring
+	from, to  float64
+	name      string // pieOther for the grey arc
+	size      int64
+	top       string // the key of the wedge of the inner ring it lies in
+	dir, land string // for rings further out: the folder holding it, and the name to land on
+	col       color.RGBA
+}
+
+// pieArcs lays out the rings of a folder around its wedges.
+func pieArcs(node *files.Node, wedges []pieWedge) []pieArc {
+	var out []pieArc
+	var grow func(n *files.Node, top string, ring int, from, to float64)
+	grow = func(n *files.Node, top string, ring int, from, to float64) {
+		if ring >= len(pieEdges)-1 || n.Size <= 0 {
+			return
+		}
+		kids := slices.Clone(n.Children)
+		slices.SortFunc(kids, func(x, y *files.Node) int { return cmp.Compare(y.Size, x.Size) })
+		scale := (to - from) / float64(n.Size)
+		dir, at, left := n.Path(), from, n.Size
+		for _, k := range kids {
+			span := float64(k.Size) * scale
+			if span < pieMinArc {
+				break
+			}
+			mid := at + span/2
+			out = append(out, pieArc{ring: ring, from: at, to: at + span, name: k.Name, size: k.Size, top: top, dir: dir, land: k.Name, col: pieColor(mid, ring)})
+			grow(k, top, ring+1, at, at+span)
+			at += span
+			left -= k.Size
+		}
+		if to-at >= pieMinArc {
+			out = append(out, pieArc{ring: ring, from: at, to: to, name: pieOther, size: left, top: top, dir: dir, col: pieOtherColor})
+		}
+	}
+	for _, w := range wedges {
+		out = append(out, pieArc{from: w.from, to: w.to, name: w.key, size: w.size, top: w.key, col: w.col})
+		if w.key != pieOther {
+			if c := node.Child(w.key); c != nil {
+				grow(c, w.key, 1, w.from, w.to)
+			}
+		}
+	}
+	return out
+}
 
 // pieWedge is a wedge of a folder's pie: an item, or the items that share the last wedge.
 type pieWedge struct {
@@ -56,6 +112,12 @@ type pieMotion struct {
 	shown  bool // drawn this frame: a pie out of sight does not keep the window drawing
 	// cx, cy and radius are where it was drawn last, before a wedge stands out.
 	cx, cy, radius float32
+	// arcs are the rings of the folder laidOf at its size laidAt, around laidFor, kept as walking the tree each frame
+	// is not free.
+	arcs    []pieArc
+	laidFor []pieWedge
+	laidOf  *files.Node
+	laidAt  int64
 }
 
 // How quickly the pie turns and a wedge stands out, and how damped: the turn settles with hardly a sway, the wedge
@@ -98,7 +160,7 @@ func (a *App) pieWedges(p *filesPane, node *files.Node) []pieWedge {
 	rest := pieWedge{key: pieOther, col: pieOtherColor, size: max(node.Size-listed, 0)}
 	for _, it := range items {
 		if len(out) < pieSlots && float64(it.size)/total >= 0.005 {
-			out = append(out, pieWedge{key: it.name, size: it.size, col: pieColors[len(out)]})
+			out = append(out, pieWedge{key: it.name, size: it.size})
 			continue
 		}
 		rest.size += it.size
@@ -112,6 +174,9 @@ func (a *App) pieWedges(p *filesPane, node *files.Node) []pieWedge {
 		out[i].from = at
 		at += 2 * math.Pi * float64(out[i].size) / total
 		out[i].to = at
+		if out[i].key != pieOther {
+			out[i].col = pieColor((out[i].from+out[i].to)/2, 0)
+		}
 	}
 	if n := len(out); n > 0 {
 		out[n-1].to = 2 * math.Pi // the last closes the circle whatever the rounding
@@ -227,8 +292,29 @@ func (a *App) pieHeight(body gfx.Rect) float32 {
 	return h
 }
 
-// drawPie draws the pie of a list's folder in r, with what the wedge in front, or the one pointed at, holds under
-// it.
+// rings is the arcs of a folder, laid out again only when it or its wedges change.
+func (m *pieMotion) rings(node *files.Node, wedges []pieWedge) []pieArc {
+	if m.laidOf != node || m.laidAt != node.Size || !slices.Equal(m.laidFor, wedges) {
+		m.arcs, m.laidOf, m.laidAt, m.laidFor = pieArcs(node, wedges), node, node.Size, wedges
+	}
+	return m.arcs
+}
+
+// arcAt is the arc at a distance and angle (before the turn) from the centre, or nil.
+func (m *pieMotion) arcAt(arcs []pieArc, dist, angle float64) *pieArc {
+	for i := range arcs {
+		arc := &arcs[i]
+		scale := float64(m.radius) * (1 + piePop*m.pop(arc.top))
+		if angle >= arc.from && angle < arc.to &&
+			dist >= float64(pieEdges[arc.ring])*scale && dist <= float64(pieEdges[arc.ring+1])*scale {
+			return arc
+		}
+	}
+	return nil
+}
+
+// drawPie draws the rings of a list's folder in r, with what the arc pointed at, or the wedge in front, holds under
+// them.
 func (a *App) drawPie(fd *filesDoc, i int, p *filesPane, id string, r gfx.Rect, node *files.Node, wedges []pieWedge) {
 	u := &a.u
 	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: max(1, u.px(1))}, colBorder)
@@ -238,69 +324,94 @@ func (a *App) drawPie(fd *filesDoc, i int, p *filesPane, id string, r gfx.Rect, 
 	cx, cy := area.X+area.W/2, area.Y+area.H/2
 
 	m := &p.pie
-	// The wedge under the pointer, found where the last frame drew it.
-	hovered := ""
+	m.cx, m.cy, m.radius = cx, cy, radius
+	arcs := m.rings(node, wedges)
+	// The arc under the pointer, found where the last frame drew it.
+	var hovered *pieArc
 	pid := id + "/pie"
 	disc := gfx.Rect{X: cx - radius*(1+piePop), Y: cy - radius*(1+piePop), W: 2 * radius * (1 + piePop), H: 2 * radius * (1 + piePop)}
+	middle := false
 	if fd.prompt == nil && u.hover(pid, disc) {
 		dx, dy := float64(u.mx-cx), float64(u.my-cy)
 		angle := math.Mod(math.Atan2(dx, -dy)-m.turn.pos, 2*math.Pi)
 		if angle < 0 {
 			angle += 2 * math.Pi
 		}
-		for _, w := range wedges {
-			if angle >= w.from && angle < w.to && math.Hypot(dx, dy) <= float64(radius)*(1+piePop*m.pop(w.key)) {
-				hovered = w.key
-				u.cursor = CursorHand
-			}
+		dist := math.Hypot(dx, dy)
+		hovered = m.arcAt(arcs, dist, angle)
+		middle = dist < float64(pieEdges[0]*radius) && node.Parent != nil
+		if hovered != nil || middle {
+			u.cursor = CursorHand
 		}
 	}
 
-	// A click on a wedge puts the cursor on its item, or on the first of those sharing the last wedge.
-	if fd.prompt == nil && u.clicked(pid, disc) && hovered != "" {
-		for row, ri := range p.rows {
-			if a.pieKeyOf(wedges, node, &p.entries[ri]) == hovered {
-				a.focusPane(fd, i)
-				p.cursor = row
-				a.keepInView(fd, p)
-				break
+	if fd.prompt == nil && u.clicked(pid, disc) {
+		switch {
+		case middle:
+			a.focusPane(fd, i)
+			a.goUp(p)
+			return
+		case hovered != nil && hovered.ring > 0:
+			a.focusPane(fd, i)
+			a.goTo(p, hovered.dir, hovered.land)
+			return
+		case hovered != nil:
+			// The cursor goes on the item, or on the first of those sharing the last wedge.
+			for row, ri := range p.rows {
+				if a.pieKeyOf(wedges, node, &p.entries[ri]) == hovered.top {
+					a.focusPane(fd, i)
+					p.cursor = row
+					a.keepInView(fd, p)
+					break
+				}
 			}
 		}
 	}
 
 	focus := a.pieKeyOf(wedges, node, p.current())
 	m.advance(p.dir, wedges, focus, a.pieNow())
-	m.cx, m.cy, m.radius = cx, cy, radius
 
-	shapes := make([]gfx.Wedge, len(wedges))
-	for k, w := range wedges {
-		pop := m.pop(w.key)
-		col := gfx.Mix(w.col, colWhite, float32(0.16*pop))
-		if w.key == hovered && w.key != focus {
-			col = gfx.Mix(w.col, colWhite, 0.1)
+	gap := max(u.px(1), 1)
+	shapes := make([]gfx.Wedge, len(arcs))
+	for k := range arcs {
+		arc := &arcs[k]
+		pop := m.pop(arc.top)
+		scale := radius * float32(1+piePop*pop)
+		col := gfx.Mix(arc.col, colWhite, float32(0.16*pop))
+		if arc == hovered {
+			col = gfx.Mix(arc.col, colWhite, 0.3)
 		}
 		shapes[k] = gfx.Wedge{
-			From: float32(w.from + m.turn.pos), To: float32(w.to + m.turn.pos),
-			Radius: radius * float32(1+piePop*pop), Col: col,
+			From: float32(arc.from + m.turn.pos), To: float32(arc.to + m.turn.pos),
+			Inner: pieEdges[arc.ring]*scale + gap, Radius: pieEdges[arc.ring+1] * scale, Col: col,
 		}
 	}
-	u.c.Pie(cx, cy, shapes, max(u.px(2), 1))
+	u.c.Pie(cx, cy, shapes, gap)
 
-	// What the wedge holds: the one pointed at, else the one in front, else the whole folder.
-	shown := hovered
-	if shown == "" {
-		shown = focus
+	// The whole folder in the middle.
+	colTotal := colText
+	if middle {
+		colTotal = colWhite
 	}
+	u.label(u.bold(14), gfx.Rect{X: cx - radius*pieEdges[0], Y: cy - u.px(10), W: 2 * radius * pieEdges[0], H: u.px(20)}, sizeText(node.Size), colTotal, 0.5)
+
+	// What is shown under it: the arc pointed at, else the wedge in front, else the whole folder.
 	lr := gfx.Rect{X: r.X + u.px(12), Y: area.Bottom(), W: r.W - u.px(24), H: labelH}
 	name, size, sw := filepath.Base(p.dir), node.Size, colFaint
 	var count int
+	if hovered != nil {
+		name, size, sw = hovered.name, hovered.size, hovered.col
+	}
 	for _, w := range wedges {
-		if w.key == shown {
-			name, size, sw, count = w.key, w.size, w.col, w.count
-			if w.key == pieOther {
-				name = u.t("Everything else")
-			}
+		if hovered == nil && w.key == focus {
+			name, size, sw = w.key, w.size, w.col
 		}
+		if w.key == pieOther && name == pieOther && (hovered == nil || hovered.ring == 0) {
+			count = w.count
+		}
+	}
+	if name == pieOther {
+		name = u.t("Everything else")
 	}
 	detail := sizeText(size)
 	if node.Size > 0 {
@@ -318,7 +429,6 @@ func (a *App) drawPie(fd *filesDoc, i int, p *filesPane, id string, r gfx.Rect, 
 	u.c.Circle(x+dot/2, lr.Y+line/2, dot/2, sw)
 	u.c.Text(bold, x+dot+u.px(8), lr.Y+(line-bold.Height())/2, name, colText)
 	u.label(u.face(12), gfx.Rect{X: lr.X, Y: lr.Y + line, W: lr.W, H: u.px(18)}, detail, colDim, 0.5)
-
 }
 
 // pop is how far the wedge key stands out, from 0 to about 1.

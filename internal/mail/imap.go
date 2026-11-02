@@ -1,6 +1,6 @@
 // Package mail keeps a copy of the user's mailbox on this computer and organises it with a local model. It speaks IMAP,
-// and only the part of it that reads, labels, archives and saves drafts: there is no way here to send or delete a
-// message, which TestNothingCanSendOrDelete holds to.
+// and only the part of it that reads, marks read, archives, moves to the trash and saves drafts: there is no way here to
+// send a message or remove one for good, which TestNothingCanSendOrDelete holds to.
 package mail
 
 import (
@@ -137,13 +137,13 @@ func (c *Conn) Gmail() bool { return c.Has("X-GM-EXT-1") }
 
 // Folders are the mailboxes that have a use here, by name on the server; "" when the server has none.
 type Folders struct {
-	Inbox, Archive, Drafts string
+	Inbox, Archive, Drafts, Trash string
 }
 
 // FindFolders asks the server which of its mailboxes are which.
 func (c *Conn) FindFolders() (Folders, error) {
 	f := Folders{Inbox: "INBOX"}
-	var archive, drafts string // named so, on a server that does not say what its folders are for
+	var archive, drafts, trash string // named so, on a server that does not say what its folders are for
 	err := c.run(`LIST "" "*"`, func(fields []any) {
 		if len(fields) < 5 || !strings.EqualFold(atom(fields[1]), "LIST") {
 			return
@@ -155,6 +155,8 @@ func (c *Conn) FindFolders() (Folders, error) {
 			archive = name
 		case "drafts", "draft":
 			drafts = name
+		case "trash", "deleted messages", "deleted items":
+			trash = name
 		}
 		for _, a := range attrs {
 			switch strings.ToLower(atom(a)) {
@@ -164,6 +166,8 @@ func (c *Conn) FindFolders() (Folders, error) {
 				}
 			case `\drafts`:
 				f.Drafts = name
+			case `\trash`:
+				f.Trash = name
 			}
 		}
 	})
@@ -172,6 +176,9 @@ func (c *Conn) FindFolders() (Folders, error) {
 	}
 	if f.Drafts == "" {
 		f.Drafts = drafts
+	}
+	if f.Trash == "" {
+		f.Trash = trash
 	}
 	return f, err
 }
@@ -241,6 +248,23 @@ const bodyPart = 256 << 10
 
 // Fetch reads messages by UID, with their first bodyPart bytes when body is set. each is called for every message.
 func (c *Conn) Fetch(uids []uint32, body bool, each func(Fetched)) error {
+	limit := 0
+	if body {
+		limit = bodyPart
+	}
+	return c.fetch(uids, limit, each)
+}
+
+// FetchWhole reads a message of the selected mailbox as far as maxLiteral, its attachments with it. Nothing is returned
+// when the mailbox has no such message.
+func (c *Conn) FetchWhole(uid uint32) ([]byte, error) {
+	var raw []byte
+	err := c.fetch([]uint32{uid}, maxLiteral, func(f Fetched) { raw = f.Raw })
+	return raw, err
+}
+
+// fetch reads messages by UID with their first limit bytes, if any.
+func (c *Conn) fetch(uids []uint32, limit int, each func(Fetched)) error {
 	if len(uids) == 0 {
 		return nil
 	}
@@ -248,8 +272,8 @@ func (c *Conn) Fetch(uids []uint32, body bool, each func(Fetched)) error {
 	if c.Gmail() {
 		items = append(items, "X-GM-MSGID", "X-GM-THRID", "X-GM-LABELS")
 	}
-	if body {
-		items = append(items, fmt.Sprintf("BODY.PEEK[]<0.%d>", bodyPart))
+	if limit > 0 {
+		items = append(items, fmt.Sprintf("BODY.PEEK[]<0.%d>", limit))
 	}
 	return c.run(fmt.Sprintf("UID FETCH %s (%s)", uidSet(uids), strings.Join(items, " ")), func(fields []any) {
 		if len(fields) < 4 || !strings.EqualFold(atom(fields[2]), "FETCH") {
@@ -289,12 +313,21 @@ func (c *Conn) label(uid uint32, sign, label string) error {
 	return c.run(fmt.Sprintf("UID STORE %d %sX-GM-LABELS (%s)", uid, sign, quote(label)), nil)
 }
 
-// Move moves a message of the selected mailbox to another, which a mail server does in one step.
-func (c *Conn) Move(uid uint32, to string) error {
+// Move moves messages of the selected mailbox to another, which a mail server does in one step.
+func (c *Conn) Move(uids []uint32, to string) error {
 	if !c.Has("MOVE") {
 		return errors.New("this mail server cannot move messages")
 	}
-	return c.run(fmt.Sprintf("UID MOVE %d %s", uid, quote(to)), nil)
+	return c.run(fmt.Sprintf("UID MOVE %s %s", uidSet(uids), quote(to)), nil)
+}
+
+// Seen marks messages of the selected mailbox read, or unread.
+func (c *Conn) Seen(uids []uint32, on bool) error {
+	sign := "-"
+	if on {
+		sign = "+"
+	}
+	return c.run(fmt.Sprintf(`UID STORE %s %sFLAGS.SILENT (\Seen)`, uidSet(uids), sign), nil)
 }
 
 // Append saves a message in a mailbox, marked as a draft.

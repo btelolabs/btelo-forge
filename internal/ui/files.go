@@ -38,7 +38,7 @@ type filesDoc struct {
 	after func()
 	// hovered is the item under the pointer this frame, whose keys the list of keys shows; "" when there is none.
 	hovered string
-	// tagText is typed in the details' tag box; detailScroll and detailH scroll the details.
+	// tagText is typed in the preview's tag box; detailScroll and detailH scroll the details.
 	tagText               string
 	detailScroll, detailH float32
 	// sweep is the right button marking items in a list while it is held.
@@ -123,6 +123,7 @@ type savedPane struct {
 
 // fileManager is what the file manager tabs share.
 type fileManager struct {
+	peek    filePeek
 	trees   []*files.Node // the folders analysed, none inside another
 	scans   []*fileScan
 	jobs    []*fileJob
@@ -332,6 +333,8 @@ func (a *App) leaveFiles(d *doc, closing bool) {
 	if d.files.preview {
 		a.closeFilePreview()
 	}
+	a.endPeek()
+	a.stopModelCard()
 	a.saveFileHistory(true) // where it was, for the next file manager tab
 	if closing {
 		for _, p := range d.files.panes {

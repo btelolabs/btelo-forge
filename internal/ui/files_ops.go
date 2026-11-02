@@ -124,10 +124,14 @@ func (a *App) enter(fd *filesDoc) {
 	fd.preview = true
 }
 
-// togglePreview opens the preview of the file under the cursor beside the lists, or closes it.
+// togglePreview opens the preview of the item under the cursor over the lists, or closes it.
 func (a *App) togglePreview(fd *filesDoc) {
+	if !fd.preview && a.previewPath(fd) == "" {
+		return
+	}
 	fd.preview = !fd.preview
 	fd.previewFocus = false
+	a.endPeek()
 	if !fd.preview {
 		a.closeFilePreview()
 	}
@@ -148,20 +152,49 @@ func (a *App) previewPath(fd *filesDoc) string {
 	return ""
 }
 
-// drawPreviewPanel shows the file under the cursor in the file preview, and under it, where there is room, its
-// details, tags and categories; a click in the preview gives it the keys.
-func (a *App) drawPreviewPanel(fd *filesDoc, r gfx.Rect) {
+// drawPreviewOverlay shows the item under the cursor over the whole tab, with beside it, or under it in a narrow
+// window, its details, tags and categories. A click in the preview gives it the keys; a click outside closes it.
+func (a *App) drawPreviewOverlay(fd *filesDoc, r gfx.Rect) {
 	u := &a.u
-	u.c.Fill(r, colBackground)
-	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y, W: max(1, u.px(1)), H: r.H}, colBorderHi)
-	inner := gfx.Rect{X: r.X + max(1, u.px(1)), Y: r.Y, W: r.W - max(1, u.px(1)), H: r.H}
+	u.c.Fill(r, gfx.Alpha(colBlack, 0.55))
+	margin := min(u.px(28), r.W/16, r.H/16)
+	card := r.Inset(margin)
+	u.c.Outline(card.Inset(-u.px(2)), u.px(6), gfx.Alpha(colBlack, 0.4))
+	u.c.Fill(card, colBackground)
+	u.c.Outline(card, max(1, u.px(1)), colBorderHi)
 	path := a.previewPath(fd)
-	var details gfx.Rect
-	if path != "" && inner.H >= u.detailsMinH() && !fd.pane().atDrives() {
-		dh := min(inner.H*0.42, u.px(380))
-		details = rectAt(inner.X, inner.Bottom()-dh, inner.W, dh)
-		inner.H -= dh
+
+	headH := u.px(42)
+	head := rectAt(card.X, card.Y, card.W, headH)
+	u.c.Fill(rectAt(head.X, head.Bottom()-max(1, u.px(1)), head.W, max(1, u.px(1))), colBorder)
+	size := u.px(28)
+	closeAt := rectAt(head.Right()-u.px(8)-size, head.Y+(headH-size)/2, size, size)
+	if path != "" {
+		u.label(u.bold(13), rectAt(head.X+u.px(16), head.Y, closeAt.X-head.X-u.px(24), headH), a.previewHeading(path), colText, 0)
 	}
+	inner := rectAt(card.X, head.Bottom(), card.W, card.Bottom()-head.Bottom())
+	var details gfx.Rect
+	if path != "" && !fd.pane().atDrives() {
+		line := max(1, u.px(1))
+		if inner.W >= u.px(720) {
+			dw := min(inner.W*0.36, u.px(340))
+			details = rectAt(inner.Right()-dw, inner.Y, dw, inner.H)
+			inner.W -= dw
+			u.c.Fill(rectAt(details.X-line, details.Y, line, details.H), colBorder)
+		} else {
+			dh := inner.H * 0.42
+			details = rectAt(inner.X, inner.Bottom()-dh, inner.W, dh)
+			inner.H -= dh
+			u.c.Fill(rectAt(details.X, details.Y-line, details.W, line), colBorder)
+		}
+	}
+	defer func() {
+		if u.iconButton("files/preview/close", closeAt, icClose, withKey(u.t("Close"), a.fileKeyHint("preview")), false, true) {
+			a.togglePreview(fd)
+		} else if !card.Contains(u.pressX, u.pressY) && u.clicked("files/preview/away", r) {
+			a.togglePreview(fd)
+		}
+	}()
 	if u.pressed && inner.Contains(u.pressX, u.pressY) && !u.blocked {
 		fd.previewFocus = true
 	} else if u.pressed && !inner.Contains(u.pressX, u.pressY) {
@@ -171,7 +204,7 @@ func (a *App) drawPreviewPanel(fd *filesDoc, r gfx.Rect) {
 		u.label(u.face(13), inner, u.t("Nothing to preview"), colFaint, 0.5)
 		return
 	}
-	if details.H > 0 {
+	if details.W > 0 {
 		a.drawFileDetails(fd, details)
 	}
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
@@ -182,6 +215,15 @@ func (a *App) drawPreviewPanel(fd *filesDoc, r gfx.Rect) {
 	if fd.previewFocus {
 		u.c.Outline(inner, u.px(1.5), gfx.Alpha(colAccent, 0.6))
 	}
+}
+
+// previewHeading is the line above the preview: the item's name, and what is known of it.
+func (a *App) previewHeading(path string) string {
+	if isFolder(path) {
+		return filepath.Base(path)
+	}
+	_, info, _ := a.fileThumb(path)
+	return previewTitle(path, info, assets.KindOf(path), fileSize(path))
 }
 
 // drawFolderPreview shows what a folder holds, as its first names, and its size when it has been analysed.
@@ -393,6 +435,11 @@ func (a *App) copyPaths(fd *filesDoc) {
 	if len(paths) == 0 {
 		paths = []string{fd.pane().dir}
 	}
+	a.copyPathList(paths)
+}
+
+// copyPathList puts paths on the clipboard, one to a line, and says so.
+func (a *App) copyPathList(paths []string) {
 	if err := a.host.SetClipboard(strings.Join(paths, "\n")); err != nil {
 		a.toast(a.u.tf("Copying failed: %v", err), true)
 		return
@@ -458,11 +505,13 @@ func (a *App) sortBy(p *filesPane, s filesSort) {
 	a.arrange(p)
 }
 
-// escapeFiles leaves a search, or unmarks, or shows a filtered grid whole again, or closes the preview, or forgets
+// escapeFiles closes the preview, or leaves a search, or unmarks, or shows a filtered grid whole again, or forgets
 // what was cut or copied.
 func (a *App) escapeFiles(fd *filesDoc) {
 	p := fd.pane()
 	switch {
+	case fd.preview:
+		a.togglePreview(fd)
 	case p.search != nil:
 		a.closeSearch(p)
 	case len(p.marked) > 0:
@@ -470,8 +519,6 @@ func (a *App) escapeFiles(fd *filesDoc) {
 	case p.grid && (p.g.filter.what != showAll || p.g.search != ""):
 		p.g.search = ""
 		a.setFilter(p, assetFilter{})
-	case fd.preview:
-		a.togglePreview(fd)
 	case fd.pick != nil:
 		fd.pick.pickCancel()
 	case len(a.fm.clip.paths) > 0:
@@ -1217,11 +1264,11 @@ func (a *App) stopFileWork() {
 }
 
 // drawFileJobs floats what is running over the bottom right of the lists: each job's name, the file it is on, its
-// progress, and a button that stops it. The lists stay usable under them.
-func (a *App) drawFileJobs(r gfx.Rect) {
+// progress, and a button that stops it. The lists stay usable under them. It returns the top of what it drew.
+func (a *App) drawFileJobs(r gfx.Rect) float32 {
 	u := &a.u
 	if len(a.fm.jobs) == 0 {
-		return
+		return r.Bottom()
 	}
 	w := min(u.px(400), r.W-u.px(24))
 	h := u.px(76)
@@ -1272,4 +1319,5 @@ func (a *App) drawFileJobs(r gfx.Rect) {
 			u.c.Fill(gfx.Rect{X: bar.X, Y: bar.Y, W: bar.W * float32(frac), H: bar.H}, colAccent)
 		}
 	}
+	return y + u.px(8)
 }

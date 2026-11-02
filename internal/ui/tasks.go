@@ -51,6 +51,7 @@ func (a *App) tasks() []task {
 			status: status, fraction: fraction, stopping: m.stopping, cancel: m.cancel, open: a.openPanelOf(m.doc, tabMusic)})
 	}
 	out = append(out, a.aiTasks()...)
+	out = append(out, a.mailTasks()...)
 	if t, ok := a.updateTask(); ok {
 		out = append(out, t)
 	}
@@ -105,11 +106,13 @@ func (a *App) drawTasks(live bool) {
 	l := a.layoutTasks()
 	u.blocked = held
 	if l.orb.W > 0 {
+		u.covers = append(u.covers, l.orb)
 		a.drawOrb(l.orb)
 	}
 	tasks, cards, cancels := l.tasks, l.cards, l.cancels
 	for i, t := range tasks {
 		r, x := cards[i], cancels[i]
+		u.covers = append(u.covers, r)
 		openID, cancelID := "task/open/"+t.id, "task/cancel/"+t.id
 		hotX := live && !t.stopping && u.hover(cancelID, x)
 		hot := live && t.open != nil && !hotX && u.hover(openID, r)

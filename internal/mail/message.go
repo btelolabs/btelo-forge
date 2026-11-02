@@ -31,6 +31,8 @@ type Parsed struct {
 	Subject   string
 	Date      time.Time
 	Text      string
+	HTML      string // the message's page, with its inline pictures in it; "" when it has none
+	Forged    bool   // the receiving server found its From address false
 }
 
 // decoder reads header words in any charset a mailbox holds, of which old Chinese mail has several.
@@ -73,12 +75,18 @@ func Parse(raw []byte) Parsed {
 	if p.From == "" {
 		p.From = p.Address
 	}
-	plain, rich := "", ""
-	walk(textproto(h), m.Body, 0, &plain, &rich)
-	p.Text = strings.TrimSpace(plain)
-	if p.Text == "" {
-		p.Text = strings.TrimSpace(htmlToText(rich))
+	// The newest of these is the receiving server's; older ones came with the message and say nothing.
+	if results := h["Authentication-Results"]; len(results) > 0 {
+		p.Forged = strings.Contains(strings.ToLower(results[0]), "dmarc=fail")
 	}
+	var found parts
+	found.walk(textproto(h), m.Body, 0)
+	p.Text = strings.TrimSpace(found.plain)
+	if p.Text == "" {
+		p.Text = strings.TrimSpace(htmlToText(found.rich))
+	}
+	p.Text = lineEnds.Replace(p.Text)
+	p.HTML = found.page()
 	return p
 }
 
@@ -89,17 +97,49 @@ func headerText(s string) string {
 	return strings.TrimSpace(s)
 }
 
-type partHeader struct{ kind, encoding string }
+type partHeader struct{ kind, encoding, id string }
 
 func textproto(h mail.Header) partHeader {
-	return partHeader{h.Get("Content-Type"), h.Get("Content-Transfer-Encoding")}
+	return partHeader{kind: h.Get("Content-Type"), encoding: h.Get("Content-Transfer-Encoding")}
 }
 
 // maxParts bounds how deep a message's parts are followed: a message is someone else's input.
 const maxParts = 12
 
-// walk finds the first plain and the first HTML text in a message's parts.
-func walk(h partHeader, body io.Reader, depth int, plain, rich *string) {
+// lineEnds makes the line ends of mail, CRLF on the wire, those of this program's text.
+var lineEnds = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+
+// parts is what a message's parts are searched for: its first plain and first HTML text, and the pictures its HTML
+// names by Content-ID.
+type parts struct {
+	plain, rich string
+	pictures    map[string]string // data: addresses by Content-ID
+	held        int               // their size
+}
+
+// maxPictures bounds the inline pictures kept of a message.
+const maxPictures = 32 << 20
+
+// inlineKinds are the pictures taken inline; an SVG is a document of its own, not a picture.
+var inlineKinds = map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true}
+
+var inlinePicture = regexp.MustCompile(`(?i)cid:([^"'\s>)]+)`)
+
+// page is the message's HTML with its inline pictures in place.
+func (f *parts) page() string {
+	if strings.TrimSpace(f.rich) == "" {
+		return ""
+	}
+	return inlinePicture.ReplaceAllStringFunc(f.rich, func(ref string) string {
+		if data, ok := f.pictures[strings.ToLower(ref[len("cid:"):])]; ok {
+			return data
+		}
+		return ref
+	})
+}
+
+// walk goes through a message's parts.
+func (f *parts) walk(h partHeader, body io.Reader, depth int) {
 	if depth > maxParts {
 		return
 	}
@@ -114,31 +154,49 @@ func walk(h partHeader, body io.Reader, depth int, plain, rich *string) {
 			if err != nil {
 				return // a message cut short ends here
 			}
-			if !strings.EqualFold(firstWord(part.Header.Get("Content-Disposition")), "attachment") {
-				walk(partHeader{part.Header.Get("Content-Type"), part.Header.Get("Content-Transfer-Encoding")}, part, depth+1, plain, rich)
+			next := partHeader{kind: part.Header.Get("Content-Type"), encoding: part.Header.Get("Content-Transfer-Encoding")}
+			next.id = strings.ToLower(strings.Trim(strings.TrimSpace(part.Header.Get("Content-Id")), "<>"))
+			if next.id != "" || !strings.EqualFold(firstWord(part.Header.Get("Content-Disposition")), "attachment") {
+				f.walk(next, part, depth+1)
 			}
 		}
 	}
-	target := plain
+	if inlineKinds[kind] && h.id != "" {
+		data, err := io.ReadAll(io.LimitReader(h.decoded(body), int64(maxPictures-f.held+1)))
+		if err != nil || len(data) == 0 || f.held+len(data) > maxPictures {
+			return // cut short, or too much: the picture stays out
+		}
+		if f.pictures == nil {
+			f.pictures = map[string]string{}
+		}
+		f.pictures[h.id] = "data:" + kind + ";base64," + base64.StdEncoding.EncodeToString(data)
+		f.held += len(data)
+		return
+	}
+	target := &f.plain
 	switch kind {
 	case "text/plain":
 	case "text/html":
-		target = rich
+		target = &f.rich
 	default:
 		return
 	}
 	if *target != "" {
 		return
 	}
-	var r io.Reader = body
+	data, _ := io.ReadAll(h.decoded(body)) // what was read before a cut is kept
+	*target = decodeText(data, params["charset"])
+}
+
+// decoded undoes a part's transfer encoding.
+func (h partHeader) decoded(body io.Reader) io.Reader {
 	switch strings.ToLower(strings.TrimSpace(h.encoding)) {
 	case "base64":
-		r = base64.NewDecoder(base64.StdEncoding, lineless{body})
+		return base64.NewDecoder(base64.StdEncoding, lineless{body})
 	case "quoted-printable":
-		r = quotedprintable.NewReader(body)
+		return quotedprintable.NewReader(body)
 	}
-	data, _ := io.ReadAll(r) // what was read before a cut is kept
-	*target = decodeText(data, params["charset"])
+	return body
 }
 
 func firstWord(s string) string {
@@ -179,8 +237,7 @@ var (
 	blankLines = regexp.MustCompile(`\n[ \t]*\n[ \t\n]*`)
 )
 
-// htmlToText keeps the words of a page. Pictures and links do not load: a message is never rendered, so nothing in it
-// can tell the sender that it was opened.
+// htmlToText keeps the words of a page, for what reads text: the list, the search and the model.
 func htmlToText(s string) string {
 	s = htmlHidden.ReplaceAllString(s, "")
 	s = htmlBreak.ReplaceAllString(s, "\n")
@@ -195,6 +252,22 @@ func Snippet(text string, runes int) string {
 		return text
 	}
 	return string([]rune(text)[:runes]) + "…"
+}
+
+var previewNoise = regexp.MustCompile(`[\[(<]?https?://[^\s\])>]*[\])>]?|-->|[|_=*~\-.·•]{4,}`)
+
+// previewRunes is how much of a message a list shows, and previewSource how much of its text that is looked for in.
+const (
+	previewRunes  = 120
+	previewSource = 4 << 10
+)
+
+// Preview is the start of a text for the list, without the long addresses and rules of a plain copy made from a page.
+func Preview(text string, runes int) string {
+	if len(text) > previewSource {
+		text = strings.ToValidUTF8(text[:previewSource], "")
+	}
+	return Snippet(previewNoise.ReplaceAllString(text, " "), runes)
 }
 
 // Reply is a draft written in answer to a message.

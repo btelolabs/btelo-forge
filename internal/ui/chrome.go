@@ -86,12 +86,14 @@ func (a *App) preToasts() {
 			continue
 		}
 		u.pressed = false
+		// It goes first, as an action may show a toast of its own.
+		t := a.toasts[i]
+		a.toasts = append(a.toasts[:i], a.toasts[i+1:]...)
 		for k, b := range buttons[i] {
 			if b.Contains(u.pressX, u.pressY) {
-				a.toasts[i].actions[k].run()
+				t.actions[k].run()
 			}
 		}
-		a.toasts = append(a.toasts[:i], a.toasts[i+1:]...)
 		return
 	}
 }
@@ -102,6 +104,7 @@ func (a *App) drawToasts() {
 	f := u.face(13)
 	for i, r := range boxes {
 		t := a.toasts[i]
+		u.covers = append(u.covers, r)
 		u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, gfx.Alpha(colBlack, 0.45))
 		bg, edge := colSurfaceHi, colBorderHi
 		if t.err {

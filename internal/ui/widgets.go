@@ -302,6 +302,7 @@ func (u *ctx) drawTip(screen gfx.Rect) time.Duration {
 		y = u.tip.at.Y - h - u.px(6)
 	}
 	r := gfx.Rect{X: x, Y: y, W: w, H: h}
+	u.covers = append(u.covers, r)
 	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(2), W: r.W, H: r.H}, gfx.Alpha(colBlack, 0.4))
 	u.c.Fill(r, colSelected)
 	u.c.Outline(r, max(1, u.px(1)), colBorderHi)

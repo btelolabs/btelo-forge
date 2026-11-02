@@ -102,9 +102,12 @@ type screenState struct {
 	pick   *regionPick
 	draw   *screenDraw
 	bar    *recordBar
+	ask    *surface    // the question before deleting the recording, when asked from the bar
 	frame  *surface    // the outline of the region being recorded
 	barPos image.Point // where the user dragged the recording bar, relative to its display; zero is the default place
 	flow   barFlow     // the options bar being laid out in rows
+
+	askDrawn time.Time
 }
 
 // screenTick looks after the windows over the screen, every frame and while the main window is minimized.
@@ -131,6 +134,16 @@ func (a *App) screenTick() {
 	if sc.bar != nil {
 		a.recordBarTick(sc.bar)
 	}
+	switch want := a.rec.ask == askOverScreen && sc.bar != nil; {
+	case want && sc.ask == nil:
+		a.openDiscardAsk()
+	case !want && sc.ask != nil:
+		sc.ask.close()
+		sc.ask = nil
+	}
+	if sc.ask != nil {
+		a.discardAskTick(sc.ask)
+	}
 }
 
 // closeScreen closes every window over the screen, as the app closes.
@@ -144,6 +157,7 @@ func (a *App) closeScreen() {
 	if sc.bar != nil {
 		sc.bar.s.close()
 	}
+	sc.ask.close()
 	a.closeScreenDraw()
 	sc.frame.close()
 	*sc = screenState{}
@@ -367,7 +381,9 @@ type recordBar struct {
 const (
 	barHeight = 52
 	barButton = 42 // an icon button and the gap after it
-	barWidth  = 8 + 14 + 6 + 72 + 2*barButton + 2
+	barWidth  = 8 + 14 + 6 + 72 + 3*barButton + 2
+
+	discardAskWidth, discardAskHeight = 330, 128 // the question before deleting the recording
 )
 
 func (a *App) openRecordBar() {
@@ -452,7 +468,48 @@ func (a *App) recordBarTick(tb *recordBar) {
 	if button("stop", icStop, withKey(u.t("Stop and edit the recording"), a.hotkeyLabel(hotkeyRecord))) && !r.stopping {
 		a.stopRecording(nil)
 	}
+	if button("discard", icDelete, u.t("Delete the recording")) && !r.stopping && !r.busy {
+		a.askDiscard(askOverScreen)
+	}
 	tb.s.end(image.Rectangle{})
+}
+
+// openDiscardAsk opens the question before deleting the recording, under the bar, or over it at the display's bottom.
+// When it cannot open, the window asks instead.
+func (a *App) openDiscardAsk() {
+	sc := &a.over
+	bar := sc.bar.s.o.Bounds()
+	scale := sc.bar.s.o.Scale()
+	w, h := int(discardAskWidth*scale), int(discardAskHeight*scale)
+	gap := int(6 * scale)
+	screen := displayBounds(sc.bar.d)
+	at := image.Pt(bar.Max.X-w, bar.Max.Y+gap)
+	if at.Y+h > screen.Max.Y {
+		at.Y = bar.Min.Y - gap - h
+	}
+	at.X = max(at.X, screen.Min.X)
+	s, err := a.openSurface(OverlayOptions{Bounds: image.Rectangle{Min: at, Max: at.Add(image.Pt(w, h))}, Excluded: true})
+	if err != nil {
+		a.rec.ask = askInWindow
+		if host := a.recorder(); host != nil {
+			host.Restore()
+		}
+		return
+	}
+	sc.ask = s
+}
+
+// discardAskTick draws the question over the screen.
+func (a *App) discardAskTick(s *surface) {
+	_, changed := a.beginSurface(s)
+	// The Delete button waits for a pause or resume to finish.
+	if !changed && time.Since(a.over.askDrawn) < 500*time.Millisecond {
+		return
+	}
+	a.over.askDrawn = time.Now()
+	s.c.ClearTo(color.RGBA{})
+	a.drawDiscardQuestion(&s.u, gfx.Rect{W: float32(s.c.Img.Rect.Dx()), H: float32(s.c.Img.Rect.Dy())})
+	s.end(image.Rectangle{})
 }
 
 // drawGrip draws the dots of a handle that drags a bar or a panel.
