@@ -120,8 +120,9 @@ func (a *App) drawMind(r gfx.Rect) {
 	md.tiles.SetLimit(per * 4)
 	opts := a.mindOptions(md)
 	md.whole = md.tiles.Draw(u.c, area, md.m, v, opts, mindTileBudget)
-	if md.whole && md.act == nil && md.text == nil {
-		md.whole = md.tiles.Prefetch(area, md.m, v, opts, 1, 6*time.Millisecond)
+	md.ahead = md.act != nil || md.text != nil // nothing is drawn ahead while editing
+	if md.whole && !md.ahead {
+		md.ahead = md.tiles.Prefetch(area, md.m, v, opts, 1, 6*time.Millisecond)
 	}
 	u.c.Push(r)
 	a.drawMindLive(md, r, v)
@@ -146,7 +147,7 @@ func (a *App) mindWait() time.Duration {
 	if md == nil {
 		return 0
 	}
-	if !md.whole || md.m.Routing() {
+	if !md.whole || !md.ahead || md.m.Routing() {
 		return redrawNow
 	}
 	if due := md.overviewDue(); !due.IsZero() && !md.minimap { // a hidden overview catches up once shown

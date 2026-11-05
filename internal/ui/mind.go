@@ -44,6 +44,8 @@ type mindDoc struct {
 	fit   bool      // fit the view to the map at the next frame
 	tiles *mind.Tiles
 	whole bool // the last frame showed every tile
+	// ahead is set once the tiles around the view are drawn too, ready for a pan, or none are wanted while editing.
+	ahead bool
 
 	sel      map[mind.ID]bool
 	primary  mind.ID     // the node chosen last, which keys act on

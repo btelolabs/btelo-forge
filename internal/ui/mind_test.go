@@ -38,7 +38,7 @@ func (x *harness) settleMind() {
 	quiet := 0
 	x.pump(20*time.Second, func() bool {
 		md := x.a.board
-		if md == nil || md.whole && !x.a.mindPics.pictureBusy() && !md.saving {
+		if md == nil || md.whole && md.ahead && !x.a.mindPics.pictureBusy() && !md.saving {
 			quiet++
 		} else {
 			quiet = 0
