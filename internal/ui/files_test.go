@@ -570,7 +570,7 @@ func TestFilesRemembersTheLists(t *testing.T) {
 	fd := a.openResourceManager()
 	x.waitFiles()
 	if len(fd.panes) != 3 || fd.panes[0].dir != deep || fd.panes[0].grid || fd.panes[1].dir != other || !fd.panes[1].grid ||
-		fd.panes[2].dir != a.defaultFolder() {
+		fd.panes[2].dir != firstFolder(a.defaultFolders()) {
 		t.Fatalf("opened %d lists: %+v %+v", len(fd.panes), fd.panes[0], fd.panes[1])
 	}
 }
@@ -712,4 +712,14 @@ func TestExpandPath(t *testing.T) {
 			t.Errorf("expandPath(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+// firstFolder is the first of dirs that is a folder, where a list falls back to.
+func firstFolder(dirs []string) string {
+	for _, d := range dirs {
+		if isFolder(d) {
+			return d
+		}
+	}
+	return ""
 }

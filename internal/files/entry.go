@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Entry is one file or folder in a listing.
@@ -37,6 +38,15 @@ func List(dir string) ([]Entry, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// Stat describes the file or folder at path as List would, a link as what it points to and marked as a link.
+func Stat(path string) (Entry, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return Entry{}, err
+	}
+	return entryOf(filepath.Dir(path), filepath.Base(path), info), nil
 }
 
 // entryOf describes a file from what reading its folder told.
@@ -84,7 +94,15 @@ func SamePath(a, b string) bool { return samePath(filepath.Clean(a), filepath.Cl
 // UniqueName is a name for name in dir that nothing there has yet: the name itself, or with " (2)", " (3)" … before
 // its extension, as Explorer names copies.
 func UniqueName(dir, name string) string {
-	if _, err := os.Lstat(filepath.Join(dir, name)); os.IsNotExist(err) {
+	return UniqueNameBy(name, func(n string) bool {
+		_, err := os.Lstat(filepath.Join(dir, n))
+		return !os.IsNotExist(err)
+	})
+}
+
+// UniqueNameBy is UniqueName with what is taken told by taken, such as the names a listing read.
+func UniqueNameBy(name string, taken func(name string) bool) string {
+	if !taken(name) {
 		return name
 	}
 	ext := filepath.Ext(name)
@@ -94,8 +112,23 @@ func UniqueName(dir, name string) string {
 	}
 	for i := 2; ; i++ {
 		candidate := stem + " (" + strconv.Itoa(i) + ")" + ext
-		if _, err := os.Lstat(filepath.Join(dir, candidate)); os.IsNotExist(err) {
+		if !taken(candidate) {
 			return candidate
 		}
 	}
+}
+
+// foldKey is s with every letter as the smallest of the letters strings.EqualFold takes it for, so two names are
+// equal ignoring case exactly when their keys are equal.
+func foldKey(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		least := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			least = min(least, f)
+		}
+		b.WriteRune(least)
+	}
+	return b.String()
 }

@@ -2,12 +2,12 @@ package ui
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/btelolabs/btelo-forge/internal/assets"
+	"github.com/btelolabs/btelo-forge/internal/files"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
@@ -96,23 +96,24 @@ func (a *App) categoryItems(fd *filesDoc, paths []string) []menuItem {
 func (a *App) drawFileDetails(fd *filesDoc, r gfx.Rect) {
 	u := &a.u
 	paths := a.actedOn(fd)
-	if len(paths) == 0 || fd.pane().atDrives() {
+	p := fd.pane()
+	if len(paths) == 0 || p.atDrives() {
 		return
 	}
 	a.scrolledBy("files/details", r.Inset(u.px(14)), &fd.detailScroll, &fd.detailH, func(c gfx.Rect) float32 {
 		y := c.Y
 		if len(paths) == 1 {
-			e, info, ok := a.entryAt(paths[0])
-			if !ok {
-				return y
+			u.label(u.bold(13), gfx.Rect{X: c.X, Y: y, W: c.W, H: u.px(22)}, filepath.Base(paths[0]), colText, 0)
+			y += u.px(28)
+			if fe, ok := a.actedEntry(p, paths[0]); ok {
+				e, info := a.assetDetails(paths[0], fe)
+				y = a.drawProperties(c.X, y, c.W, e, info)
 			}
-			u.label(u.bold(13), gfx.Rect{X: c.X, Y: y, W: c.W, H: u.px(22)}, e.Name, colText, 0)
-			y = a.drawProperties(c.X, y+u.px(28), c.W, e, info)
 		} else {
-			var total int64
-			for _, p := range paths {
-				if st, err := os.Stat(p); err == nil && !st.IsDir() {
-					total += st.Size()
+			var total int64 // several are marked only in a listing, which read their sizes
+			for _, e := range p.selectedEntries() {
+				if !e.Dir {
+					total += e.Size
 				}
 			}
 			u.label(u.bold(13), gfx.Rect{X: c.X, Y: y, W: c.W, H: u.px(22)}, u.tf("%d marked", len(paths)), colText, 0)
@@ -124,19 +125,28 @@ func (a *App) drawFileDetails(fd *filesDoc, r gfx.Rect) {
 	})
 }
 
-// entryAt is what is known of the item at path: what the asset library knows it as, and its picture's details.
-func (a *App) entryAt(path string) (assets.Entry, assets.Info, bool) {
-	st, err := os.Stat(path)
-	if err != nil {
-		return assets.Entry{}, assets.Info{}, false
+// actedEntry is the one item the commands act on, as the listing read it, or as what a search found was read since
+// in the background; ok is false while it is not known, or when it cannot be read.
+func (a *App) actedEntry(p *filesPane, path string) (files.Entry, bool) {
+	if p.search == nil {
+		if es := p.selectedEntries(); len(es) == 1 {
+			return *es[0], true
+		}
+		return files.Entry{}, false
 	}
-	e := assets.Entry{Path: path, Name: filepath.Base(path), Kind: assets.KindOf(path), Size: st.Size(), Mod: st.ModTime()}
-	if st.IsDir() {
+	st, ok := a.statOf(path)
+	return st.Entry, ok && st.Err == nil
+}
+
+// assetDetails is what is known of the item at path: what the asset library knows it as, and its picture's details.
+func (a *App) assetDetails(path string, fe files.Entry) (assets.Entry, assets.Info) {
+	e := assets.Entry{Path: path, Name: filepath.Base(path), Kind: assets.KindOf(path), Size: fe.Size, Mod: fe.Mod}
+	if fe.Dir {
 		e.Kind, e.Size = assets.Folder, 0
-		return e, assets.Info{}, true
+		return e, assets.Info{}
 	}
 	_, info, _ := a.thumbOf(e)
-	return e, info, true
+	return e, info
 }
 
 // propertyRow draws a name and its value, the value wrapping under it when long; it returns the y below.

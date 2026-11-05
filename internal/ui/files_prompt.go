@@ -160,13 +160,11 @@ func (a *App) answerPrompt(fd *filesDoc) {
 			return
 		}
 		dir := pr.matches[pr.pick]
-		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		a.goWhenFound(p, dir, true, func() {
 			a.fileHistory().Forget(dir)
 			a.fm.historyDirty = true
 			a.toast(u.tf("%s is no longer there", dir), true)
-			return
-		}
-		a.goTo(p, dir, "")
+		})
 	case promptRename:
 		name := strings.TrimSpace(pr.text)
 		if name == "" || name == filepath.Base(pr.target) {
@@ -199,8 +197,8 @@ func (a *App) answerPrompt(fd *filesDoc) {
 		}
 		a.pushUndo(files.Action{Kind: files.Copied, Pairs: []files.Pair{{To: path}}}, u.tf("Making “%s”", name))
 		if parent := a.analysis(p.dir); parent != nil {
-			if info, err := os.Stat(path); err == nil && info.IsDir() {
-				parent.Attach(&files.Node{Name: name, Mod: info.ModTime()})
+			if files.CreatesFolder(name) {
+				parent.Attach(&files.Node{Name: name, Mod: time.Now()})
 			} else {
 				parent.Grow(0, 1)
 			}
@@ -256,15 +254,29 @@ func (a *App) goToTyped(p *filesPane, text string) {
 	if !filepath.IsAbs(path) && p.dir != thisPC {
 		path = filepath.Join(p.dir, path)
 	}
-	info, err := os.Stat(path)
-	switch {
-	case err != nil:
-		a.toast(a.u.tf("%s cannot be found", path), true)
-	case info.IsDir():
-		a.goTo(p, path, "")
-	default:
-		a.goTo(p, filepath.Dir(path), filepath.Base(path))
-	}
+	a.goWhenFound(p, path, false, func() { a.toast(a.u.tf("%s cannot be found", path), true) })
+}
+
+// goWhenFound goes to path once it has been read, in the background, that it is there: into a folder, or to a file's
+// folder with the cursor on it unless only a folder will do. gone is told when it is not there.
+func (a *App) goWhenFound(p *filesPane, path string, folderOnly bool, gone func()) {
+	from := p.dir
+	a.fm.finding++
+	a.background(func(context.Context) {
+		e, err := files.Stat(path)
+		a.post(func() {
+			a.fm.finding--
+			switch {
+			case p.dir != from: // the list went elsewhere meanwhile
+			case err == nil && e.Dir:
+				a.goTo(p, path, "")
+			case err == nil && !folderOnly:
+				a.goTo(p, filepath.Dir(path), filepath.Base(path))
+			default:
+				gone()
+			}
+		})
+	})
 }
 
 // expandPath is a path as typed or pasted, made ready to use: trimmed of spaces and the quotes around it, with
@@ -304,11 +316,11 @@ var percentVar = regexp.MustCompile(`%[A-Za-z_][A-Za-z0-9_()]*%`)
 func (a *App) renameInAnalyses(from, to string) {
 	for _, t := range a.fm.trees {
 		if files.SamePath(t.Path(), from) {
-			t.Name = to
+			t.Rename(to)
 			return
 		}
 		if n := t.Find(from); n != nil {
-			n.Name = filepath.Base(to)
+			n.Rename(filepath.Base(to))
 			return
 		}
 	}
@@ -493,6 +505,9 @@ func (s *filesSearch) move(by int) {
 	}
 	s.pick = min(max(s.pick+by, 0), n-1)
 }
+
+// chosenDir reports whether what is chosen among what was found is a folder, as the names read said.
+func (s *filesSearch) chosenDir() bool { return !s.grep && s.pick < len(s.hits) && s.hits[s.pick].Dir }
 
 // chosen is the path of what is chosen among what was found, and for a line of text, its number.
 func (s *filesSearch) chosen() (string, int) {
@@ -837,8 +852,9 @@ func (a *App) drawMarked(f *gfx.Face, x, y, w float32, text, query string, col c
 // filesConfirm asks before deleting.
 type filesConfirm struct {
 	paths   []string
-	forever bool // asked with Shift: deleting for good is what Enter does
-	canBin  bool // every item is on a drive with a Recycle Bin
+	entries []files.Entry // the paths as the listing read them, which the dialog counts
+	forever bool          // asked with Shift: deleting for good is what Enter does
+	canBin  bool          // every item is on a drive with a Recycle Bin
 	// again is the second question deleting for good asks, once the first was answered: it cannot be undone.
 	again bool
 }
@@ -862,6 +878,9 @@ func (a *App) askDelete(fd *filesDoc, forever bool) {
 		return
 	}
 	c := &filesConfirm{paths: paths, forever: forever, canBin: true}
+	for _, e := range p.selectedEntries() {
+		c.entries = append(c.entries, *e)
+	}
 	for _, path := range paths {
 		if !files.CanTrash(path) {
 			c.canBin = false
@@ -957,19 +976,17 @@ func (a *App) drawConfirm(fd *filesDoc, r gfx.Rect) {
 	var size int64
 	known := true
 	for i, path := range c.paths {
-		info, err := os.Lstat(path)
-		e := files.Entry{Name: filepath.Base(path)}
-		if err == nil {
-			e.Dir = info.IsDir()
-			if e.Dir {
-				if n := a.analysis(path); n != nil {
-					size += n.Size
-				} else {
-					known = false
-				}
+		e := c.entries[i]
+		switch {
+		case e.Link: // deleting a link frees nothing of what it points to
+		case e.Dir:
+			if n := a.analysis(path); n != nil {
+				size += n.Size
 			} else {
-				size += info.Size()
+				known = false
 			}
+		default:
+			size += e.Size
 		}
 		if i < shown {
 			glyph, col := fileGlyph(&e)

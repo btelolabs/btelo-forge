@@ -123,11 +123,13 @@ type App struct {
 	services        *services
 	fm              fileManager             // what the file manager tabs share
 	fileThumbs      thumbCache              // small pictures of files, for the asset manager and file lists
+	fileFacts       fileFacts               // what the file manager read of paths, folders and drives, off the drawing goroutine
 	videoList       *filesPane              // the video editor's list of folders and videos, made when first shown
 	preview         filePreview             // the file previewed in full
 	previewPlayer   *playback.Player        // plays the previewed video, apart from the editor's player
 	positions       map[string]playPosition // where the videos and sounds previewed were left, by positionKey
 	assetLib        *assets.Library         // the tags and categories of files
+	assetLibRead    loadAhead[libraryRead]  // the library being read as the app starts
 	assetLibVersion int                     // counts changes to them, for what is laid out from them
 	mindPics        *mindPics               // the pictures the mind maps show, read in the background
 	mindClip        *mindClipboard          // nodes copied from a mind map
@@ -187,6 +189,10 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	a.keysDomain = domainRecording // the Hotkeys page opens on its first tab, the system-wide hotkeys
 	a.applyHotkeys()
 	a.refreshFileTypes()
+	a.knownDrives() // read before the first file manager needs them
+	a.pumpFacts()
+	a.fm.historyRead.start(a, a.loadFileHistory)
+	a.assetLibRead.start(a, a.openAssetLibrary)
 	a.restoreTabs()
 	return a
 }
@@ -323,6 +329,7 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	u.end()
 	a.syncMailWeb()
 	a.pumpThumbs()
+	a.pumpFacts()
 
 	if u.focus != "" {
 		if f, ok := a.host.(imeFontHost); ok {
@@ -558,7 +565,7 @@ func (a *App) Idle() bool {
 	if a.p != nil && !a.media.settled(a.p) {
 		return false
 	}
-	if a.thumbsBusy() || a.preview.loading || !a.modelSettled() {
+	if a.thumbsBusy() || a.factsBusy() || a.preview.loading || !a.modelSettled() {
 		return false
 	}
 	return !a.music.downloading() && !a.pieMoving()

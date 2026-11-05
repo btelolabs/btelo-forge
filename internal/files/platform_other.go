@@ -18,3 +18,11 @@ func samePath(a, b string) bool {
 	}
 	return a == b
 }
+
+// nameKey is a name as samePath compares it, to find it by.
+func nameKey(name string) string {
+	if runtime.GOOS == "darwin" {
+		return foldKey(name)
+	}
+	return name
+}

@@ -187,8 +187,8 @@ func TestGridBrowsesTagsAndActsOnHover(t *testing.T) {
 	x.frame(Input{})
 	x.frame(Input{})
 	play := "space " + a.u.t("play")
-	if fd.hovered != filepath.Join(dir, "holiday.mp4") || !slices.Contains(a.itemKeys(fd.hovered), play) {
-		t.Fatalf("hovering the video: %q, keys %v", fd.hovered, a.itemKeys(fd.hovered))
+	if fd.hovered != filepath.Join(dir, "holiday.mp4") || !slices.Contains(a.itemKeys(fd.hovered, fd.hoveredDir), play) {
+		t.Fatalf("hovering the video: %q, keys %v", fd.hovered, a.itemKeys(fd.hovered, fd.hoveredDir))
 	}
 	x.shot("assets-hover-keys")
 

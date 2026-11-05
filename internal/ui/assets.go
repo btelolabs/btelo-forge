@@ -39,11 +39,12 @@ const (
 // kindNames name each kind in assets.Kinds' order.
 var kindNames = msgs("Pictures", "Animations", "Videos", "Sounds", "Canvases", "Edits", "Mind maps", "Office documents", "3D models", "Markdown", "Code", "Texts", "Other files")
 
-// assetLibrary is the tags and categories, opened the first time they are needed.
+// assetLibrary is the tags and categories, read in the background as the app starts.
 func (a *App) assetLibrary() *assets.Library {
 	if a.assetLib == nil {
-		path := filepath.Join(a.stateDir, "assets.json")
-		lib, err := assets.OpenLibrary(path)
+		path := a.assetLibraryPath()
+		read := a.assetLibRead.get(a.openAssetLibrary)
+		lib, err := read.lib, read.err
 		if err != nil {
 			// A damaged file is kept aside, not written over, so what it held can still be recovered.
 			aside := path + ".damaged-" + time.Now().Format("20060102-150405")
@@ -54,6 +55,19 @@ func (a *App) assetLibrary() *assets.Library {
 		a.assetLib = lib
 	}
 	return a.assetLib
+}
+
+// libraryRead is the library as opened, or why it could not be.
+type libraryRead struct {
+	lib *assets.Library
+	err error
+}
+
+func (a *App) assetLibraryPath() string { return filepath.Join(a.stateDir, "assets.json") }
+
+func (a *App) openAssetLibrary() libraryRead {
+	lib, err := assets.OpenLibrary(a.assetLibraryPath())
+	return libraryRead{lib, err}
 }
 
 // assetEntry is a list's entry as the asset library and the pictures know it.

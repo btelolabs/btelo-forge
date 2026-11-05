@@ -561,7 +561,8 @@ func (a *App) drawGridCards(fd *filesDoc, i int, p *filesPane, id string, r gfx.
 		if moved && active && u.active == "" && fd.pick == nil {
 			p.cursor = hit
 		}
-		fd.hovered = p.path(&p.entries[p.rows[hit]])
+		he := &p.entries[p.rows[hit]]
+		fd.hovered, fd.hoveredDir = p.path(he), he.Dir
 		if u.rightAt != nil && !u.blocked {
 			a.startSweep(fd, i, p, hit)
 		}

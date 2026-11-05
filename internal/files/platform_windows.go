@@ -20,3 +20,6 @@ func hidden(name string, info fs.FileInfo) bool {
 
 // samePath compares two cleaned paths as NTFS does, without regard to case.
 func samePath(a, b string) bool { return strings.EqualFold(a, b) }
+
+// nameKey is a name as samePath compares it, to find it by.
+func nameKey(name string) string { return foldKey(name) }

@@ -114,7 +114,7 @@ func (a *App) drawFiles(r gfx.Rect) {
 
 	moved := !fd.mouseSeen || u.mx != fd.mouseX || u.my != fd.mouseY
 	defer func() { fd.mouseX, fd.mouseY, fd.mouseSeen = u.mx, u.my, true }()
-	fd.hovered = ""
+	fd.hovered, fd.hoveredDir = "", false
 	if fd.prompt != nil {
 		if u.focus != promptID {
 			a.closePrompt(fd) // its box was not drawn, as when the row being renamed scrolled away
@@ -288,7 +288,7 @@ func (a *App) drawPathBar(p *filesPane, id string, r gfx.Rect, manager bool) boo
 	}
 	room := r.W - iw - u.px(16)
 	var parts []pathPart
-	if p.atDrives() || filepath.VolumeName(p.dir) != "" && len(files.Drives()) > 0 {
+	if p.atDrives() || filepath.VolumeName(p.dir) != "" && len(a.knownDrives()) > 0 {
 		parts = append(parts, pathPart{u.t("This PC"), thisPC})
 	}
 	if !p.atDrives() {
@@ -527,7 +527,7 @@ func (a *App) drawRows(fd *filesDoc, i int, p *filesPane, id string, body gfx.Re
 			p.cursor = row
 		}
 		if hot {
-			fd.hovered = p.path(e)
+			fd.hovered, fd.hoveredDir = p.path(e), e.Dir
 		}
 		if fd.prompt == nil && u.rightAt != nil && rr.Contains(u.rightAt.X, u.rightAt.Y) && !u.blocked {
 			a.startSweep(fd, i, p, row)
@@ -600,7 +600,7 @@ func (a *App) drawFileRow(fd *filesDoc, p *filesPane, row int, e *files.Entry, r
 
 	// A picture of an image or video, else a symbol for what the file holds.
 	if !e.Dir && pictured(e.Name) && busy == nil {
-		a.drawFileThumb("files/thumb/"+path, c.icon, path)
+		a.drawEntryThumb(c.icon, assetEntry(p, e))
 	} else {
 		glyph, col := fileGlyph(e)
 		if p.atDrives() {
@@ -795,7 +795,7 @@ func (a *App) drawKeyList(fd *filesDoc, r gfx.Rect) {
 	list := a.keyList()
 	x0 := r.X + u.px(12)
 	if fd.hovered != "" && fd.prompt == nil && fd.confirm == nil {
-		list = a.itemKeys(fd.hovered)
+		list = a.itemKeys(fd.hovered, fd.hoveredDir)
 		name := filepath.Base(fd.hovered)
 		if name == string(filepath.Separator) || name == "." {
 			name = fd.hovered

@@ -24,6 +24,9 @@ type Node struct {
 
 	own      int64 // the bytes of its own files, while scanning
 	ownItems int64
+	// byName finds a folder among Children at once, as a list sorted by size asks for every one of thousands; made
+	// when first asked for and forgotten when Children or a child's name changes.
+	byName map[string]*Node
 }
 
 // Path is where the folder is.
@@ -34,14 +37,37 @@ func (n *Node) Path() string {
 	return filepath.Join(n.Parent.Path(), n.Name)
 }
 
+// childIndexed is how many folders a folder holds before Child looks them up by name rather than one by one.
+const childIndexed = 16
+
 // Child is the folder under n with that name, or nil.
 func (n *Node) Child(name string) *Node {
-	for _, c := range n.Children {
-		if samePath(c.Name, name) {
-			return c
+	if len(n.Children) < childIndexed {
+		for _, c := range n.Children {
+			if samePath(c.Name, name) {
+				return c
+			}
+		}
+		return nil
+	}
+	if n.byName == nil {
+		n.byName = make(map[string]*Node, len(n.Children))
+		for _, c := range n.Children {
+			n.byName[nameKey(c.Name)] = c
 		}
 	}
+	if c := n.byName[nameKey(name)]; c != nil && samePath(c.Name, name) {
+		return c
+	}
 	return nil
+}
+
+// Rename gives the folder a new name: the last part of a path, or the whole path for a root.
+func (n *Node) Rename(name string) {
+	n.Name = name
+	if n.Parent != nil {
+		n.Parent.byName = nil
+	}
 }
 
 // Find is the analysed folder at path, at or under n, or nil when path is outside it.
@@ -76,6 +102,7 @@ func (n *Node) Detach() {
 	for i, c := range p.Children {
 		if c == n {
 			p.Children = append(p.Children[:i:i], p.Children[i+1:]...)
+			p.byName = nil
 			break
 		}
 	}
@@ -95,6 +122,7 @@ func (n *Node) Grow(bytes, items int64) {
 func (n *Node) Attach(c *Node) {
 	c.Parent = n
 	n.Children = append(n.Children, c)
+	n.byName = nil
 	n.Grow(c.Size, c.Items+1)
 }
 

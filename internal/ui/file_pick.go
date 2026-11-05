@@ -79,16 +79,13 @@ func (a *App) openPick(r pickRequest, mode pickMode, done func([]string)) {
 	if a.files != nil && a.files.preview {
 		a.togglePreview(a.files)
 	}
-	dir := a.pickStart(r)
+	dirs := a.pickStart(r)
 	pk := &filePick{pickRequest: r, mode: mode, done: done, focus: u.focus}
-	p := &filesPane{dir: dir, marked: map[string]bool{}, sort: listByTime}
+	p := &filesPane{dir: dirs[0], orElse: dirs[1:], marked: map[string]bool{}, sort: listByTime}
 	a.showGrid(p)
 	p.g.size = 120
 	p.only = pk.shows
 	a.readPane(p)
-	if dir != thisPC {
-		a.visited(dir)
-	}
 	pk.fd = &filesDoc{panes: []*filesPane{p}, pick: pk}
 	pk.doc = &doc{files: pk.fd}
 	a.filePicker = pk
@@ -101,16 +98,16 @@ func (a *App) openPick(r pickRequest, mode pickMode, done func([]string)) {
 	a.host.Wake()
 }
 
-// pickStart is where the dialog opens: the folder asked for, the one shown last for this kind of file, else the
-// default folder.
-func (a *App) pickStart(r pickRequest) string {
-	if isFolder(r.dir) {
-		return filepath.Clean(r.dir)
+// pickStart are where the dialog may open, the first that can be read: the folder asked for, the one shown last for
+// this kind of file, else the default folders.
+func (a *App) pickStart(r pickRequest) []string {
+	var dirs []string
+	for _, d := range []string{r.dir, a.settings.Files.PickDirs[r.key]} {
+		if d != "" {
+			dirs = append(dirs, filepath.Clean(d))
+		}
 	}
-	if d := a.settings.Files.PickDirs[r.key]; isFolder(d) {
-		return filepath.Clean(d)
-	}
-	return a.defaultFolder()
+	return append(dirs, a.defaultFolders()...)
 }
 
 // shows reports whether the list shows the file called name; a folder is always shown.
@@ -215,7 +212,7 @@ func (pk *filePick) pickFilesChosen() []string {
 	p := pk.fd.pane()
 	var out []string
 	if p.search != nil {
-		if path, _ := p.search.chosen(); path != "" && !isFolder(path) && pk.shows(filepath.Base(path)) {
+		if path, _ := p.search.chosen(); path != "" && !p.search.chosenDir() && pk.shows(filepath.Base(path)) {
 			out = append(out, path)
 		}
 		return out
@@ -226,9 +223,9 @@ func (pk *filePick) pickFilesChosen() []string {
 		}
 		return out
 	}
-	for _, path := range p.selected() {
-		if !isFolder(path) {
-			out = append(out, path)
+	for _, e := range p.selectedEntries() {
+		if !e.Dir {
+			out = append(out, p.path(e))
 		}
 	}
 	return out
@@ -254,7 +251,7 @@ func (a *App) pickEnter(fd *filesDoc) {
 		path, _ := p.search.chosen()
 		switch {
 		case path == "":
-		case isFolder(path):
+		case p.search.chosenDir():
 			a.closeSearch(p)
 			a.goTo(p, path, "")
 		case pk.mode == pickSave:
@@ -292,6 +289,9 @@ func (a *App) pickEnter(fd *filesDoc) {
 // pickConfirm does what the dialog's main button says.
 func (a *App) pickConfirm(pk *filePick) {
 	p := pk.fd.pane()
+	if p.orElse != nil {
+		return // the folder it opens in is not found yet
+	}
 	switch pk.mode {
 	case pickFolder:
 		if p.search != nil {
@@ -501,6 +501,7 @@ func (a *App) drawPickFoot(pk *filePick, r gfx.Rect) {
 	case pickSave:
 		label, ok = u.t("Save"), strings.TrimSpace(pk.name) != "" && !p.atDrives()
 	}
+	ok = ok && p.orElse == nil // until the folder it opens in is found, there is none to answer with
 	bw := u.buttonWidth("", label) + u.px(24)
 	right -= bw + u.px(8)
 	if u.button("pick/confirm", rectAt(right, y, bw, h), "", label, primary, ok) {

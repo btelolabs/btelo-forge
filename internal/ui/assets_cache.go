@@ -4,7 +4,6 @@ import (
 	"context"
 	"image"
 	"image/color"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -75,17 +74,20 @@ func (a *App) thumbOf(e assets.Entry) (*image.RGBA, assets.Info, bool) {
 }
 
 // fileThumb is the picture of the file at path, as thumbOf, for callers that have only the path. It looks the file
-// up once; refreshThumbs makes it look again.
+// up once, in the background (it is not ready until then); refreshThumbs makes it look again.
 func (a *App) fileThumb(path string) (*image.RGBA, assets.Info, bool) {
 	a.fileThumbs.init(a.cacheDir)
 	if it := a.fileThumbs.items[path]; it != nil {
 		return a.thumbOf(it.entry)
 	}
-	st, err := os.Stat(path)
-	if err != nil {
-		return nil, assets.Info{Problem: err.Error()}, true
+	st, known := a.statOf(path)
+	switch {
+	case !known:
+		return nil, assets.Info{}, false
+	case st.Err != nil:
+		return nil, assets.Info{Problem: st.Err.Error()}, true
 	}
-	return a.thumbOf(assets.Entry{Path: path, Name: filepath.Base(path), Kind: assets.KindOf(path), Size: st.Size(), Mod: st.ModTime()})
+	return a.thumbOf(assets.Entry{Path: path, Name: filepath.Base(path), Kind: assets.KindOf(path), Size: st.Size, Mod: st.Mod})
 }
 
 // refreshThumbs forgets the pictures not being made, so files changed since are read again when next shown; the
@@ -187,6 +189,12 @@ func (a *App) thumbsBusy() bool { return a.fileThumbs.inflight > 0 }
 func (a *App) drawFileThumb(id string, r gfx.Rect, path string) {
 	img, info, ready := a.fileThumb(path)
 	a.drawThumbIn(r, a.fileThumbs.items[path], img, info, ready, assets.KindOf(path))
+}
+
+// drawEntryThumb draws the picture of a file a listing read fitted in r, or a card for its kind while it has none.
+func (a *App) drawEntryThumb(r gfx.Rect, e assets.Entry) {
+	img, info, ready := a.thumbOf(e)
+	a.drawThumbIn(r, a.fileThumbs.items[e.Path], img, info, ready, e.Kind)
 }
 
 // drawThumbIn draws a picture fitted inside r, scaled once and kept, or the card of its kind.

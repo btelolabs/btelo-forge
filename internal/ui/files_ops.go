@@ -85,7 +85,7 @@ func (a *App) goUp(p *filesPane) {
 	parent := filepath.Dir(p.dir)
 	if parent == p.dir {
 		// Above a drive's own folder are the drives, where there are several.
-		if vol := filepath.VolumeName(p.dir); vol != "" && len(files.Drives()) > 0 {
+		if vol := filepath.VolumeName(p.dir); vol != "" && len(a.knownDrives()) > 0 {
 			a.goTo(p, thisPC, vol)
 		}
 		return
@@ -152,6 +152,24 @@ func (a *App) previewPath(fd *filesDoc) string {
 	return ""
 }
 
+// previewEntry is the item the preview shows, as its list read it, or as a search found it and it was read since,
+// in the background: whether it is a folder is known at once either way.
+func (a *App) previewEntry(fd *filesDoc) (string, files.Entry) {
+	path := a.previewPath(fd)
+	if path == "" {
+		return "", files.Entry{}
+	}
+	p := fd.pane()
+	if p.search == nil {
+		return path, *p.current()
+	}
+	e := files.Entry{Name: filepath.Base(path), Dir: p.search.chosenDir()}
+	if st, ok := a.statOf(path); ok && st.Err == nil {
+		e = st.Entry
+	}
+	return path, e
+}
+
 // drawPreviewOverlay shows the item under the cursor over the whole tab, with beside it, or under it in a narrow
 // window, its details, tags and categories. A click in the preview gives it the keys; a click outside closes it.
 func (a *App) drawPreviewOverlay(fd *filesDoc, r gfx.Rect) {
@@ -162,7 +180,7 @@ func (a *App) drawPreviewOverlay(fd *filesDoc, r gfx.Rect) {
 	u.c.Outline(card.Inset(-u.px(2)), u.px(6), gfx.Alpha(colBlack, 0.4))
 	u.c.Fill(card, colBackground)
 	u.c.Outline(card, max(1, u.px(1)), colBorderHi)
-	path := a.previewPath(fd)
+	path, entry := a.previewEntry(fd)
 
 	headH := u.px(42)
 	head := rectAt(card.X, card.Y, card.W, headH)
@@ -170,7 +188,7 @@ func (a *App) drawPreviewOverlay(fd *filesDoc, r gfx.Rect) {
 	size := u.px(28)
 	closeAt := rectAt(head.Right()-u.px(8)-size, head.Y+(headH-size)/2, size, size)
 	if path != "" {
-		u.label(u.bold(13), rectAt(head.X+u.px(16), head.Y, closeAt.X-head.X-u.px(24), headH), a.previewHeading(path), colText, 0)
+		u.label(u.bold(13), rectAt(head.X+u.px(16), head.Y, closeAt.X-head.X-u.px(24), headH), a.previewHeading(path, entry), colText, 0)
 	}
 	inner := rectAt(card.X, head.Bottom(), card.W, card.Bottom()-head.Bottom())
 	var details gfx.Rect
@@ -207,7 +225,7 @@ func (a *App) drawPreviewOverlay(fd *filesDoc, r gfx.Rect) {
 	if details.W > 0 {
 		a.drawFileDetails(fd, details)
 	}
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
+	if entry.Dir {
 		a.drawFolderPreview(path, inner)
 		return
 	}
@@ -218,12 +236,12 @@ func (a *App) drawPreviewOverlay(fd *filesDoc, r gfx.Rect) {
 }
 
 // previewHeading is the line above the preview: the item's name, and what is known of it.
-func (a *App) previewHeading(path string) string {
-	if isFolder(path) {
+func (a *App) previewHeading(path string, e files.Entry) string {
+	if e.Dir {
 		return filepath.Base(path)
 	}
 	_, info, _ := a.fileThumb(path)
-	return previewTitle(path, info, assets.KindOf(path), fileSize(path))
+	return previewTitle(path, info, assets.KindOf(path), e.Size)
 }
 
 // drawFolderPreview shows what a folder holds, as its first names, and its size when it has been analysed.
@@ -237,22 +255,20 @@ func (a *App) drawFolderPreview(dir string, r gfx.Rect) {
 		u.label(f, rectAt(r.X+u.px(16), y, r.W-u.px(32), u.px(20)), u.tf("%s in %s", sizeText(n.Size), itemCount(u, n.Items)), colDim, 0)
 		y += u.px(24)
 	}
-	entries, err := files.List(dir)
-	if err != nil {
-		u.label(f, rectAt(r.X+u.px(16), y, r.W-u.px(32), u.px(20)), u.tf("This folder cannot be read: %v", err), colDangerText, 0)
+	l, known := a.listingOf(dir)
+	switch {
+	case !known:
+		u.label(f, rectAt(r.X+u.px(16), y, r.W-u.px(32), u.px(20)), u.t("Loading the preview…"), colFaint, 0)
+		return
+	case l.err != nil:
+		u.label(f, rectAt(r.X+u.px(16), y, r.W-u.px(32), u.px(20)), u.tf("This folder cannot be read: %v", l.err), colDangerText, 0)
 		return
 	}
-	slices.SortFunc(entries, func(x, y files.Entry) int {
-		if x.Dir != y.Dir {
-			if x.Dir {
-				return -1
-			}
-			return 1
+	for _, e := range l.entries {
+		if y+u.px(22) > r.Bottom() {
+			break
 		}
-		return naturalCompare(x.Name, y.Name)
-	})
-	for _, e := range entries {
-		if y+u.px(22) > r.Bottom() || a.settings.Files.HideHidden && e.Hidden {
+		if a.settings.Files.HideHidden && e.Hidden {
 			continue
 		}
 		glyph, col := fileGlyph(&e)
@@ -662,15 +678,15 @@ func (a *App) startJob(kind jobKind, paths []string, dst string) {
 		j.title = u.tf("Extracting %s", itemsText(u, n, name))
 		j.dst = filepath.Dir(paths[0])
 	}
-	for _, p := range paths {
-		if info, err := os.Lstat(p); err == nil && !info.IsDir() {
-			j.sizes[p] = info.Size()
-		}
-	}
 	ctx, cancel := context.WithCancel(a.life)
 	j.cancel = cancel
 	a.fm.jobs = append(a.fm.jobs, j)
 	a.background(func(context.Context) {
+		sizes := fileSizes(paths)
+		if kind == jobCompress {
+			// The name was chosen from the listing, which may be older than the folder.
+			dst = filepath.Join(filepath.Dir(dst), files.UniqueName(filepath.Dir(dst), filepath.Base(dst)))
+		}
 		var res files.Result
 		var trashed []files.Trashed
 		switch kind {
@@ -696,7 +712,10 @@ func (a *App) startJob(kind jobKind, paths []string, dst string) {
 			}
 		}
 		added := scanAdded(ctx, res.Pairs)
-		a.post(func() { a.jobDone(j, res, trashed, added, ctx.Err() != nil) })
+		a.post(func() {
+			j.sizes = sizes
+			a.jobDone(j, res, trashed, added, ctx.Err() != nil)
+		})
 	})
 }
 
@@ -719,13 +738,17 @@ func (a *App) compressFiles(fd *filesDoc) {
 		return
 	}
 	stem := filepath.Base(p.dir)
-	if len(paths) == 1 {
-		stem = filepath.Base(paths[0])
-		if info, err := os.Stat(paths[0]); err == nil && !info.IsDir() {
+	if es := p.selectedEntries(); len(es) == 1 {
+		stem = es[0].Name
+		if !es[0].Dir {
 			stem = strings.TrimSuffix(stem, filepath.Ext(stem))
 		}
 	}
-	dst := filepath.Join(p.dir, files.UniqueName(p.dir, stem+".zip"))
+	taken := map[string]bool{}
+	for _, e := range p.entries {
+		taken[strings.ToLower(e.Name)] = true
+	}
+	dst := filepath.Join(p.dir, files.UniqueNameBy(stem+".zip", func(n string) bool { return taken[strings.ToLower(n)] }))
 	p.marked = map[string]bool{}
 	p.land = filepath.Base(dst)
 	a.startJob(jobCompress, paths, dst)
@@ -766,6 +789,18 @@ type added struct {
 	path  string
 	node  *files.Node // a folder's analysis
 	bytes int64       // a file's length
+}
+
+// fileSizes are the lengths of the files among paths, links and folders left out, read before an operation moves or
+// removes them, for what it takes off the analyses; it runs in the background.
+func fileSizes(paths []string) map[string]int64 {
+	sizes := map[string]int64{}
+	for _, p := range paths {
+		if info, err := os.Lstat(p); err == nil && info.Mode().IsRegular() {
+			sizes[p] = info.Size()
+		}
+	}
+	return sizes
 }
 
 // scanAdded analyses what was copied or moved to, for the analyses of the folders it went into.
@@ -972,15 +1007,11 @@ func (a *App) undoFiles() {
 	}
 	a.fm.undo = a.fm.undo[:len(a.fm.undo)-1]
 	j := &fileJob{kind: jobUndo, title: u.tf("Undoing: %s", last.title), paths: busy, started: time.Now(), sizes: map[string]int64{}}
-	for _, p := range busy {
-		if info, err := os.Lstat(p); err == nil && !info.IsDir() {
-			j.sizes[p] = info.Size()
-		}
-	}
 	ctx, cancel := context.WithCancel(a.life)
 	j.cancel = cancel
 	a.fm.jobs = append(a.fm.jobs, j)
 	a.background(func(context.Context) {
+		sizes := fileSizes(busy)
 		res := files.Undo(ctx, last.action, &j.progress)
 		var back []files.Pair
 		for _, p := range res.Pairs {
@@ -990,6 +1021,7 @@ func (a *App) undoFiles() {
 		}
 		add := scanAdded(ctx, back)
 		a.post(func() {
+			j.sizes = sizes
 			// Undoing takes the items from where they went and puts them back where they were.
 			dirs := map[string]bool{}
 			for _, p := range res.Pairs {
@@ -1082,7 +1114,7 @@ func (a *App) toggleAnalysis(p *filesPane) {
 
 // leaveAnalysis shows the list's folder plainly again, ordered by name where it was ordered by size.
 func (a *App) leaveAnalysis(p *filesPane) {
-	p.analysed = false
+	p.analysed, p.analyses = false, false
 	if p.sort == listBySize {
 		p.sort, p.desc = listByName, false
 	}
@@ -1168,7 +1200,7 @@ func (a *App) scanFolder(p *filesPane) {
 
 // showAnalysis turns a list to its folder's analysis, ordered by size, the largest first.
 func (a *App) showAnalysis(p *filesPane) {
-	p.analysed = true
+	p.analysed, p.analyses = true, true
 	p.sort, p.desc = listBySize, false
 	a.arrange(p)
 }
@@ -1181,7 +1213,7 @@ func (a *App) keepAnalysis(n *files.Node) {
 		if old := t.Find(dir); old != nil && old != t {
 			parent := old.Parent
 			old.Detach()
-			n.Name = filepath.Base(dir)
+			n.Rename(filepath.Base(dir))
 			parent.Attach(n)
 			return
 		}
@@ -1196,14 +1228,7 @@ func (a *App) gitFor(dir string) *gitState {
 	if dir == thisPC {
 		return nil
 	}
-	if a.fm.repoOf == nil {
-		a.fm.repoOf = map[string]string{}
-	}
-	root, ok := a.fm.repoOf[dir]
-	if !ok {
-		root, _ = files.FindRepo(dir)
-		a.fm.repoOf[dir] = root
-	}
+	root, _ := a.repoRoot(dir)
 	if root == "" {
 		return nil
 	}
@@ -1242,15 +1267,16 @@ func (a *App) fileTick(fd *filesDoc) {
 		a.rememberPanes(fd)
 	}
 	if a.fm.wasInactive && !a.u.inactive {
-		a.refreshPanes(nil)
-		a.fm.repoOf = nil
+		a.refreshPanes(nil) // which reads the drives and the repositories again too
 	}
 	a.fm.wasInactive = a.u.inactive
 	a.saveFileHistory(false)
 }
 
-// fileWork reports whether the file manager has work running whose progress is shown.
-func (a *App) fileWork() bool { return len(a.fm.jobs) > 0 || len(a.fm.scans) > 0 || a.searching() }
+// fileWork reports whether the file manager has work running: whose progress is shown, or a path being looked for.
+func (a *App) fileWork() bool {
+	return len(a.fm.jobs) > 0 || len(a.fm.scans) > 0 || a.fm.finding > 0 || a.searching()
+}
 
 // stopFileWork ends the file manager's work when the app closes: what runs is stopped, the folders visited saved.
 func (a *App) stopFileWork() {

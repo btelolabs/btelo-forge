@@ -35,11 +35,11 @@ type filePeek struct {
 	failed bool      // the 3D file could not be read
 }
 
-// peeked reports whether the file at path shows a small picture.
-func peeked(path string) bool {
+// peeked reports whether the item at path, a folder when dir is set, shows a small picture.
+func peeked(path string, dir bool) bool {
 	switch assets.KindOf(path) {
 	case assets.Image, assets.Animation, assets.Canvas, assets.Model:
-		return !isFolder(path)
+		return !dir
 	}
 	return false
 }
@@ -65,7 +65,7 @@ func (a *App) drawFilePeek(fd *filesDoc, r gfx.Rect, above float32) {
 		return // it has the picture itself, and the card may be drawing it
 	}
 	path := fd.hovered
-	if fd.pick != nil || u.blocked || u.active != "" || path == "" || !peeked(path) || a.busyJob(path) != nil {
+	if fd.pick != nil || u.blocked || u.active != "" || path == "" || !peeked(path, fd.hoveredDir) || a.busyJob(path) != nil {
 		a.endPeek()
 		return
 	}

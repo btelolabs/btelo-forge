@@ -37,7 +37,9 @@ type filesDoc struct {
 	// after is what a list's button asked for, done once every list is drawn.
 	after func()
 	// hovered is the item under the pointer this frame, whose keys the list of keys shows; "" when there is none.
-	hovered string
+	// hoveredDir says it is a folder, as its listing read.
+	hovered    string
+	hoveredDir bool
 	// tagText is typed in the preview's tag box; detailScroll and detailH scroll the details.
 	tagText               string
 	detailScroll, detailH float32
@@ -59,12 +61,18 @@ type filesPane struct {
 	desc    bool
 	err     error
 	reading bool
-	gen     int    // counts listings asked for, so a slow one that comes back late is dropped
-	land    string // the name to put the cursor on when the listing comes back
+	gen     int // counts listings asked for, so a slow one that comes back late is dropped
+	// orElse are the folders the list shows instead, the first that can be read, when dir cannot: a folder kept from
+	// the last run may be gone. They are tried in the background and forgotten once one is shown.
+	orElse []string
+	land   string // the name to put the cursor on when the listing comes back
 	// search is the name or content search shown in place of the listing, when there is one.
 	search *filesSearch
 	// analysed is set once the pane has been analysed: it is sorted by size as gdu sorts, until sorted otherwise.
 	analysed bool
+	// analyses is set by i and cleared by i again: the list shows the analysis kept of any folder it goes to, so
+	// going back into a folder analysed shows it at once.
+	analyses bool
 	// drives are the drives a list of them shows, by name, when the list is This PC: dir is then "".
 	drives map[string]files.Drive
 	// grid shows the folder as pictures rather than rows; g is how, kept while the list shows rows again.
@@ -127,16 +135,18 @@ type fileManager struct {
 	trees   []*files.Node // the folders analysed, none inside another
 	scans   []*fileScan
 	jobs    []*fileJob
+	finding int // paths typed or picked being looked for, to go to
 	undo    []fileUndo
 	clip    fileClip
 	history *files.History
+	// historyRead is the history being read as the app starts.
+	historyRead loadAhead[*files.History]
 	// historyDirty is set when a visit was noted and not yet written.
 	historyDirty bool
 	// lastDirty is set when the lists shown changed and the settings, which remember them, are not yet written.
 	lastDirty   bool
 	historyAt   time.Time
 	git         map[string]*gitState // by repository root
-	repoOf      map[string]string    // a folder's repository root, or "" for none, as found
 	wasInactive bool
 	// clock is the time the pies move by, when a test steps it; nil is the time now.
 	clock func() time.Time
@@ -166,13 +176,15 @@ type gitState struct {
 // historyPath is where the folders visited are kept.
 func (a *App) historyPath() string { return filepath.Join(a.stateDir, "folders.json") }
 
-// fileHistory is the folders visited, read on first use.
+// fileHistory is the folders visited, read in the background as the app starts.
 func (a *App) fileHistory() *files.History {
 	if a.fm.history == nil {
-		a.fm.history = files.LoadHistory(a.historyPath())
+		a.fm.history = a.fm.historyRead.get(a.loadFileHistory)
 	}
 	return a.fm.history
 }
+
+func (a *App) loadFileHistory() *files.History { return files.LoadHistory(a.historyPath()) }
 
 // visited notes a folder in the history; it is written a moment later, with any other visits.
 func (a *App) visited(dir string) {
@@ -222,42 +234,36 @@ func (a *App) openResourceManager() *filesDoc {
 	return a.openFilesTab(panes)
 }
 
-// defaultFolder is where a list opens when it has nowhere else to: the resource folder, else the desktop, else the
-// home folder.
-func (a *App) defaultFolder() string {
-	if dir, err := a.resourceDir(); err == nil && isFolder(dir) {
-		return dir
+// defaultFolders are where a list opens when it has nowhere else to, the first that is there: the resource folder,
+// else the desktop, else the home folder.
+func (a *App) defaultFolders() []string {
+	var dirs []string
+	if dir, err := a.resourceDir(); err == nil {
+		dirs = append(dirs, dir)
 	}
-	if dir := files.Desktop(); isFolder(dir) {
-		return dir
+	dirs = append(dirs, files.Desktop())
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, home)
 	}
-	home, _ := os.UserHomeDir()
-	return home
+	return dirs
 }
 
 // openFilesTab opens a file manager tab with the lists given, the empty tab in front becoming it when there is
-// one. A folder that is no longer there opens as the default folder instead.
+// one. A folder that is no longer there opens as the default folder instead, which the listing finds out.
 func (a *App) openFilesTab(saved []savedPane) *filesDoc {
 	fd := &filesDoc{}
 	for _, s := range saved[:min(len(saved), filesMaxPanes)] {
 		dir := s.Dir
-		switch {
-		case dir == thisPC && len(files.Drives()) > 0:
-		case !isFolder(dir):
-			dir = a.defaultFolder()
-		default:
+		if dir != thisPC {
 			dir = filepath.Clean(dir)
 		}
-		p := &filesPane{dir: dir, marked: map[string]bool{}}
+		p := &filesPane{dir: dir, marked: map[string]bool{}, orElse: a.defaultFolders()}
 		if s.Grid {
 			p.sort = listByTime // pictures newest first, as an asset library shows them
 			a.showGrid(p)
 		}
 		a.readPane(p)
 		fd.panes = append(fd.panes, p)
-		if dir != thisPC {
-			a.visited(dir)
-		}
 	}
 	if a.doc != nil && !a.occupied() {
 		a.files = fd // the empty tab becomes the file manager
@@ -366,31 +372,28 @@ func (fd *filesDoc) title(u *ctx) string {
 	return dir
 }
 
-// readPane lists the pane's folder in the background; the old listing stays on screen until the new one comes.
+// readPane lists the pane's folder in the background; the old listing stays on screen until the new one comes. A
+// pane with folders to fall back on shows the first of them that can be read when its own cannot, and notes it as
+// visited once it is shown.
 func (a *App) readPane(p *filesPane) {
 	p.gen++
-	gen, dir := p.gen, p.dir
+	gen, dir, orElse := p.gen, p.dir, p.orElse
 	p.reading = true
 	peek := a.dimsPeeker(p)
 	a.background(func(ctx context.Context) {
-		var entries []files.Entry
-		var drives map[string]files.Drive
-		var err error
-		if dir == thisPC {
-			drives = map[string]files.Drive{}
-			for _, d := range files.Drives() {
-				drives[d.Name] = d
-				entries = append(entries, files.Entry{Name: d.Name, Dir: true, Size: d.Total})
-			}
-		} else {
-			entries, err = files.List(dir)
-		}
+		dir, entries, drives, err := listFolder(dir, orElse)
 		dims := peek(ctx, dir, entries)
 		a.post(func() {
 			if p.gen != gen {
 				return
 			}
 			p.reading, p.err, p.drives = false, err, drives
+			if orElse != nil {
+				p.dir, p.orElse = dir, nil
+				if dir != thisPC {
+					a.visited(dir)
+				}
+			}
 			if dims != nil {
 				p.g.dims, p.g.layoutKey = dims, ""
 			}
@@ -415,8 +418,35 @@ func (a *App) readPane(p *filesPane) {
 	})
 }
 
+// listFolder reads dir, or the drives when it is thisPC; when that fails and there are folders to fall back on, the
+// first of them that can be read. It says which it read.
+func listFolder(dir string, orElse []string) (string, []files.Entry, map[string]files.Drive, error) {
+	var err error
+	for i, d := range append([]string{dir}, orElse...) {
+		if d == thisPC {
+			drives := files.Drives()
+			if len(drives) == 0 && i < len(orElse) {
+				continue // only Windows has the drives above the folders
+			}
+			byName := map[string]files.Drive{}
+			var entries []files.Entry
+			for _, d := range drives {
+				byName[d.Name] = d
+				entries = append(entries, files.Entry{Name: d.Name, Dir: true, Size: d.Total})
+			}
+			return thisPC, entries, byName, nil
+		}
+		var entries []files.Entry
+		if entries, err = files.List(d); err == nil || i == len(orElse) {
+			return d, entries, nil, err
+		}
+	}
+	return dir, nil, nil, err
+}
+
 // refreshPanes lists again every pane, in every tab, that shows one of dirs, or all of them when dirs is nil.
 func (a *App) refreshPanes(dirs []string) {
+	a.forgetFacts(dirs)
 	for _, fd := range a.filesDocs() {
 		for _, p := range fd.panes {
 			if dirs == nil || slices.ContainsFunc(dirs, func(dir string) bool { return files.SamePath(dir, p.dir) }) {
@@ -448,24 +478,22 @@ func (a *App) arrange(p *filesPane) {
 		p.rows = append(p.rows, i)
 	}
 	p.g.arranged = a.filterKey(p)
-	size := func(e files.Entry) int64 {
-		if e.Dir && node != nil {
-			if c := node.Child(e.Name); c != nil {
-				return c.Size
+	// What an analysis found of each folder shown is looked up once, not at every comparison.
+	var size, items []int64
+	if node != nil && (p.sort == listBySize || p.sort == listByItems) {
+		size, items = make([]int64, len(p.entries)), make([]int64, len(p.entries))
+		for _, r := range p.rows {
+			e := &p.entries[r]
+			size[r] = e.Size
+			if e.Dir {
+				if c := node.Child(e.Name); c != nil {
+					size[r], items[r] = c.Size, c.Items
+				}
 			}
 		}
-		return e.Size
-	}
-	items := func(e files.Entry) int64 {
-		if e.Dir && node != nil {
-			if c := node.Child(e.Name); c != nil {
-				return c.Items
-			}
-		}
-		return 0
 	}
 	slices.SortStableFunc(p.rows, func(i, j int) int {
-		x, y := p.entries[i], p.entries[j]
+		x, y := &p.entries[i], &p.entries[j]
 		if p.grid && x.Dir != y.Dir { // pictures show folders first in any order, as an asset library does
 			if x.Dir {
 				return -1
@@ -475,9 +503,15 @@ func (a *App) arrange(p *filesPane) {
 		var c int
 		switch p.sort {
 		case listBySize:
-			c = cmp.Compare(size(y), size(x))
+			if size != nil {
+				c = cmp.Compare(size[j], size[i])
+			} else {
+				c = cmp.Compare(y.Size, x.Size)
+			}
 		case listByItems:
-			c = cmp.Compare(items(y), items(x))
+			if items != nil {
+				c = cmp.Compare(items[j], items[i])
+			}
 		case listByTime:
 			c = y.Mod.Compare(x.Mod)
 		}
@@ -534,15 +568,28 @@ func (p *filesPane) cursorTo(name string) {
 
 // selected are the paths the commands act on: the marked entries, or the one under the cursor.
 func (p *filesPane) selected() []string {
-	var out []string
-	for _, r := range p.rows {
-		if e := &p.entries[r]; p.marked[e.Name] {
-			out = append(out, p.path(e))
+	es := p.selectedEntries()
+	out := make([]string, len(es))
+	for i, e := range es {
+		out[i] = p.path(e)
+	}
+	return out
+}
+
+// selectedEntries are the entries the commands act on, as the listing read them: the marked ones, or the one under
+// the cursor.
+func (p *filesPane) selectedEntries() []*files.Entry {
+	var out []*files.Entry
+	if len(p.marked) > 0 {
+		for _, r := range p.rows {
+			if e := &p.entries[r]; p.marked[e.Name] {
+				out = append(out, e)
+			}
 		}
 	}
 	if len(out) == 0 {
 		if e := p.current(); e != nil {
-			out = append(out, p.path(e))
+			out = append(out, e)
 		}
 	}
 	return out
@@ -560,8 +607,12 @@ func (a *App) goTo(p *filesPane, dir, land string) {
 	if !files.SamePath(dir, p.dir) {
 		p.marked = map[string]bool{}
 		// A list showing an analysis keeps showing it in the folders inside, as gdu does; leaving it, the list
-		// goes back to names.
-		p.analysed = p.analysed && dir != thisPC && a.analysis(dir) != nil
+		// goes back to names, and coming back into a folder analysed, to its analysis, as it was kept.
+		was := p.analysed
+		p.analysed = p.analyses && dir != thisPC && a.analysis(dir) != nil
+		if p.analysed && !was {
+			p.sort, p.desc = listBySize, false
+		}
 		p.top, p.cursor, p.entries, p.rows = 0, 0, nil, nil
 		if p.sort == listBySize && !p.analysed {
 			p.sort, p.desc = listByName, false

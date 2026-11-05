@@ -446,3 +446,59 @@ func TestDrivesHoldTheSystemDrive(t *testing.T) {
 	}
 	t.Errorf("%s is not among %v", sys, ds)
 }
+
+// A folder of thousands of folders finds each by name at once, as the file system compares names, and keeps finding
+// them right as folders are added, taken away and renamed.
+func TestChildFindsFoldersByNameInAFolderOfMany(t *testing.T) {
+	root := &Node{Name: "root"}
+	for i := range 100 {
+		root.Attach(&Node{Name: fmt.Sprintf("Folder %03d", i)})
+	}
+	if c := root.Child("Folder 042"); c == nil || c.Name != "Folder 042" {
+		t.Fatalf("Folder 042 found as %v", c)
+	}
+	caseless := runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+	if c := root.Child("FOLDER 042"); (c != nil) != caseless {
+		t.Errorf("FOLDER 042 found as %v; names are compared ignoring case: %v", c, caseless)
+	}
+	if root.Child("Folder 100") != nil {
+		t.Error("a folder that is not there was found")
+	}
+	root.Child("Folder 007").Rename("Seven")
+	if root.Child("Folder 007") != nil || root.Child("Seven") == nil {
+		t.Error("a renamed folder is found by its old name, or not by its new one")
+	}
+	root.Child("Seven").Detach()
+	if root.Child("Seven") != nil {
+		t.Error("a folder taken away is still found")
+	}
+	root.Attach(&Node{Name: "New"})
+	if root.Child("New") == nil {
+		t.Error("a folder added is not found")
+	}
+	// The key a folder is found by takes two names for the same exactly when samePath does.
+	if caseless {
+		for _, pair := range [][2]string{{"ſ", "S"}, {"K", "k"}, {"Ǆ", "ǆ"}, {"é", "É"}} {
+			if (foldKey(pair[0]) == foldKey(pair[1])) != strings.EqualFold(pair[0], pair[1]) {
+				t.Errorf("foldKey and EqualFold disagree on %q and %q", pair[0], pair[1])
+			}
+		}
+	}
+}
+
+func TestStatReadsAsListDoes(t *testing.T) {
+	root := tree(t, map[string]string{"a.txt": "hello", "sub/": ""})
+	listed, err := List(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range listed {
+		got, err := Stat(filepath.Join(root, want.Name))
+		if err != nil || got != want {
+			t.Errorf("Stat of %s is %+v (%v), List read %+v", want.Name, got, err, want)
+		}
+	}
+	if _, err := Stat(filepath.Join(root, "gone")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Stat of what is not there: %v", err)
+	}
+}

@@ -8,7 +8,6 @@ import (
 	"runtime"
 
 	"github.com/btelolabs/btelo-forge/internal/assets"
-	"github.com/btelolabs/btelo-forge/internal/files"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
@@ -97,23 +96,19 @@ func (a *App) videoListPane() *filesPane {
 	if a.videoList != nil {
 		return a.videoList
 	}
-	dir := a.settings.Files.VideoDir
-	if !isFolder(dir) {
-		dir = ""
-		home, _ := os.UserHomeDir()
-		videos := filepath.Join(home, "Videos")
-		if runtime.GOOS == "darwin" {
-			videos = filepath.Join(home, "Movies")
-		}
-		mine, _ := a.categoryDir(categoryTools)
-		for _, d := range []string{mine, videos, home} {
-			if d != "" && isFolder(d) {
-				dir = d
-				break
-			}
+	home, _ := os.UserHomeDir()
+	videos := filepath.Join(home, "Videos")
+	if runtime.GOOS == "darwin" {
+		videos = filepath.Join(home, "Movies")
+	}
+	mine, _ := a.categoryDir(categoryTools)
+	var dirs []string // the first that can be read is shown, which the listing finds out
+	for _, d := range []string{a.settings.Files.VideoDir, mine, videos, home} {
+		if d != "" {
+			dirs = append(dirs, filepath.Clean(d))
 		}
 	}
-	p := &filesPane{dir: filepath.Clean(dir), marked: map[string]bool{}, grid: true, g: paneGrid{size: 120,
+	p := &filesPane{dir: dirs[0], orElse: dirs[1:], marked: map[string]bool{}, grid: true, g: paneGrid{size: 120,
 		filter: assetFilter{what: showKind, kind: assets.Video, folders: true}}}
 	a.videoList = p
 	a.readPane(p)
@@ -142,7 +137,7 @@ func (a *App) drawVideoList(e emptyEditor, free bool) {
 	p := a.videoListPane()
 	const id = "editor/videos"
 	up := filepath.Dir(p.dir)
-	canUp := !p.atDrives() && (up != p.dir || len(files.Drives()) > 0)
+	canUp := !p.atDrives() && (up != p.dir || len(a.knownDrives()) > 0)
 	if u.iconButton(id+"/up", e.up, icUp, u.t("The folder above"), false, canUp) {
 		land := filepath.Base(p.dir)
 		if up == p.dir {

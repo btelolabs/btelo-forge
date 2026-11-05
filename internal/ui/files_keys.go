@@ -163,13 +163,12 @@ func (a *App) keyList() []string {
 	return out
 }
 
-// itemKeys are the keys that act on the item at path, for the list of keys while the pointer is over it: what
-// opens or previews it first, then what changes it.
-func (a *App) itemKeys(path string) []string {
+// itemKeys are the keys that act on the item at path, a folder when dir is set, for the list of keys while the
+// pointer is over it: what opens or previews it first, then what changes it.
+func (a *App) itemKeys(path string, dir bool) []string {
 	u := &a.u
 	ids := []string{"enter", "preview", "tag", "rename", "copy-path", "copy", "cut", "delete", "open", "mark", "explorer"}
 	kind := assets.KindOf(path)
-	dir := isFolder(path)
 	switch {
 	case dir && filepath.Dir(path) == path:
 		ids = []string{"enter", "explorer"} // a drive

@@ -348,6 +348,9 @@ func extractWithTar(ctx context.Context, archive, root string) error {
 	})
 }
 
+// CreatesFolder reports whether Create makes a folder of name rather than a file: it has no extension.
+func CreatesFolder(name string) bool { return filepath.Ext(strings.TrimPrefix(name, ".")) == "" }
+
 // Create makes a new empty file, or a folder when the name has no extension, as the file manager's n does; it
 // refuses a name already taken.
 func Create(dir, name string) (string, error) {
@@ -355,7 +358,7 @@ func Create(dir, name string) (string, error) {
 		return "", fmt.Errorf("%q is not a file name", name)
 	}
 	path := filepath.Join(dir, name)
-	if filepath.Ext(strings.TrimPrefix(name, ".")) == "" {
+	if CreatesFolder(name) {
 		return path, os.Mkdir(path, 0o755)
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
