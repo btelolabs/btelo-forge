@@ -23,11 +23,12 @@ import (
 
 // Message is a message of the fake server.
 type Message struct {
-	UID    uint32
-	Raw    string
-	Seen   bool
-	Labels []string
-	Box    string
+	UID     uint32
+	Raw     string
+	Seen    bool
+	Flagged bool
+	Labels  []string
+	Box     string
 }
 
 // Server is a small IMAP server. Every command it is sent is kept, so a test can check what was and was not asked.
@@ -47,6 +48,7 @@ type Server struct {
 	Users    []string // who LOGIN was asked for
 	OnlyUser string   // the one user LOGIN accepts, when set
 	NoTrash  bool     // LIST names no trash folder
+	NoSent   bool     // LIST names no sent folder
 }
 
 func selfSigned(t *testing.T) tls.Certificate {
@@ -95,6 +97,11 @@ func (s *Server) Add(from, subject, body string) *Message {
 	s.next++
 	s.Messages = append(s.Messages, m)
 	return m
+}
+
+// holds says that a folder shows a message: Gmail's all-mail folder and starred folder show what lies elsewhere.
+func (s *Server) holds(box string, m *Message) bool {
+	return m.Box == box || box == "Archive" && m.Box != "Trash" || box == "Starred" && m.Flagged
 }
 
 // Return puts a message back in the inbox under a new UID, as a server does.
@@ -184,11 +191,20 @@ func (s *Server) serve(c net.Conn) {
 				if !s.NoTrash {
 					w(`* LIST (\HasNoChildren) "/" "Trash"`)
 				}
+				if !s.NoSent {
+					w(`* LIST (\HasNoChildren) "/" "Sent Messages"`)
+				}
 			} else {
 				w(`* LIST (\All \HasNoChildren) "/" "Archive"`)
 				w(`* LIST (\Drafts \HasNoChildren) "/" "Drafts"`)
 				if !s.NoTrash {
 					w(`* LIST (\Trash \HasNoChildren) "/" "Trash"`)
+				}
+				if !s.NoSent {
+					w(`* LIST (\Sent \HasNoChildren) "/" "Sent"`)
+				}
+				if s.gmail {
+					w(`* LIST (\Flagged \HasNoChildren) "/" "Starred"`)
 				}
 			}
 			w("%s OK done", tag)
@@ -197,7 +213,7 @@ func (s *Server) serve(c net.Conn) {
 			s.mu.Lock()
 			n := 0
 			for _, m := range s.Messages {
-				if m.Box == box || box == "Archive" {
+				if s.holds(box, m) {
 					n++
 				}
 			}
@@ -208,6 +224,7 @@ func (s *Server) serve(c net.Conn) {
 		case "UID":
 			s.uid(tag, rest, box, w)
 		case "APPEND":
+			target := strings.Trim(strings.Fields(rest)[0], `"`)
 			open := strings.LastIndex(rest, "{")
 			n, _ := strconv.Atoi(strings.TrimSuffix(rest[open+1:], "}"))
 			w("+ go")
@@ -216,7 +233,12 @@ func (s *Server) serve(c net.Conn) {
 				return
 			}
 			s.mu.Lock()
-			s.Drafts = append(s.Drafts, string(data[:n]))
+			if target == "Sent" || target == "Sent Messages" {
+				s.Messages = append(s.Messages, &Message{UID: s.next, Box: target, Raw: string(data[:n]), Seen: true})
+				s.next++
+			} else {
+				s.Drafts = append(s.Drafts, string(data[:n]))
+			}
 			s.mu.Unlock()
 			w("%s OK appended", tag)
 		case "LOGOUT":
@@ -245,13 +267,16 @@ func (s *Server) uid(tag, rest, box string, w func(string, ...any)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	word, _, _ := strings.Cut(rest, " ")
-	in := func(m *Message) bool { return m.Box == box || box == "Archive" }
+	in := func(m *Message) bool { return s.holds(box, m) }
 	switch word {
 	case "SEARCH":
 		var uids []string
 		for _, m := range s.Messages {
 			if in(m) {
 				if strings.Contains(rest, "HEADER") && !strings.Contains(rest, fmt.Sprintf("<%d@x>", m.UID)) {
+					continue
+				}
+				if strings.Contains(rest, "X-GM-MSGID") && !strings.HasSuffix(rest, fmt.Sprintf(" %d", 1000+m.UID)) {
 					continue
 				}
 				uids = append(uids, strconv.Itoa(int(m.UID)))
@@ -269,10 +294,14 @@ func (s *Server) uid(tag, rest, box string, w func(string, ...any)) {
 			if !slices.Contains(strings.Split(f[1], ","), strconv.Itoa(int(m.UID))) {
 				continue
 			}
-			flags := ""
+			var marks []string
 			if m.Seen {
-				flags = `\Seen`
+				marks = append(marks, `\Seen`)
 			}
+			if m.Flagged {
+				marks = append(marks, `\Flagged`)
+			}
+			flags := strings.Join(marks, " ")
 			line := fmt.Sprintf("* %d FETCH (UID %d FLAGS (%s)", i+1, m.UID, flags)
 			if s.gmail {
 				line += fmt.Sprintf(` X-GM-MSGID %d X-GM-THRID %d X-GM-LABELS ("\\Inbox" "%s")`, 1000+m.UID, 2000+m.UID, strings.Join(m.Labels, `" "`))
@@ -290,6 +319,10 @@ func (s *Server) uid(tag, rest, box string, w func(string, ...any)) {
 				continue
 			}
 			switch {
+			case parts[2] == "+FLAGS.SILENT" && strings.Contains(parts[3], `Flagged`):
+				m.Flagged = true
+			case parts[2] == "-FLAGS.SILENT" && strings.Contains(parts[3], `Flagged`):
+				m.Flagged = false
 			case parts[2] == "+FLAGS.SILENT":
 				m.Seen = true
 			case parts[2] == "-FLAGS.SILENT":

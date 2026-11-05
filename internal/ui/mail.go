@@ -25,6 +25,7 @@ const (
 	mailNoise
 	mailNew // what no model has read
 	mailStarred
+	mailSent
 	mailAll
 	mailHistory
 )
@@ -39,33 +40,33 @@ type mailJob struct {
 
 // mailProvider is a kind of mailbox the wizard knows.
 type mailProvider struct {
-	name, host, passwordURL string
-	domains                 []string // addresses that are told to be this mailbox
-	note                    string   // what to do for this mailbox, by message
+	name, host, smtp, passwordURL string
+	domains                       []string // addresses that are told to be this mailbox
+	note                          string   // what to do for this mailbox, by message
 }
 
 // mailProviders are offered when an account is bound, the most used first; the last is any other server.
 var mailProviders = []mailProvider{
-	{name: "Gmail", host: "imap.gmail.com:993", passwordURL: "https://myaccount.google.com/apppasswords",
+	{name: "Gmail", host: "imap.gmail.com:993", smtp: "smtp.gmail.com:465", passwordURL: "https://myaccount.google.com/apppasswords",
 		domains: []string{"gmail.com", "googlemail.com"}, note: mailNotes[0]},
-	{name: "iCloud", host: "imap.mail.me.com:993", passwordURL: "https://account.apple.com",
+	{name: "iCloud", host: "imap.mail.me.com:993", smtp: "smtp.mail.me.com:587", passwordURL: "https://account.apple.com",
 		domains: []string{"icloud.com", "me.com", "mac.com"}, note: mailNotes[1]},
-	{name: "Yahoo", host: "imap.mail.yahoo.com:993", passwordURL: "https://login.yahoo.com/account/security",
+	{name: "Yahoo", host: "imap.mail.yahoo.com:993", smtp: "smtp.mail.yahoo.com:465", passwordURL: "https://login.yahoo.com/account/security",
 		domains: []string{"yahoo.com", "ymail.com", "rocketmail.com", "sbcglobal.net"}, note: mailNotes[2]},
-	{name: "AOL / Verizon", host: "imap.aol.com:993", passwordURL: "https://login.aol.com/account/security",
+	{name: "AOL / Verizon", host: "imap.aol.com:993", smtp: "smtp.aol.com:465", passwordURL: "https://login.aol.com/account/security",
 		domains: []string{"aol.com", "verizon.net"}, note: mailNotes[2]},
-	{name: "Proton", host: "127.0.0.1:1143", passwordURL: "https://proton.me/mail/bridge",
+	{name: "Proton", host: "127.0.0.1:1143", smtp: "127.0.0.1:1025", passwordURL: "https://proton.me/mail/bridge",
 		domains: []string{"proton.me", "protonmail.com", "pm.me"}, note: mailNotes[3]},
-	{name: "Fastmail", host: "imap.fastmail.com:993", passwordURL: "https://app.fastmail.com/settings/security",
+	{name: "Fastmail", host: "imap.fastmail.com:993", smtp: "smtp.fastmail.com:465", passwordURL: "https://app.fastmail.com/settings/security",
 		domains: []string{"fastmail.com", "fastmail.fm"}, note: mailNotes[4]},
-	{name: "Zoho", host: "imap.zoho.com:993", passwordURL: "https://accounts.zoho.com",
+	{name: "Zoho", host: "imap.zoho.com:993", smtp: "smtp.zoho.com:465", passwordURL: "https://accounts.zoho.com",
 		domains: []string{"zoho.com", "zohomail.com"}, note: mailNotes[5]},
-	{name: "Xfinity", host: "imap.comcast.net:993", domains: []string{"comcast.net", "xfinity.com"}, note: mailNotes[6]},
-	{name: "AT&T", host: "imap.mail.att.net:993", domains: []string{"att.net"}, note: mailNotes[6]},
-	{name: "GMX", host: "imap.gmx.com:993", domains: []string{"gmx.com", "gmx.us"}, note: mailNotes[7]},
-	{name: "mail.com", host: "imap.mail.com:993", domains: []string{"mail.com"}, note: mailNotes[7]},
-	{name: "QQ", host: "imap.qq.com:993", passwordURL: "https://service.mail.qq.com/detail/0/75", domains: []string{"qq.com"}, note: mailNotes[8]},
-	{name: "163", host: "imap.163.com:993", passwordURL: "https://mail.163.com", domains: []string{"163.com", "126.com"}, note: mailNotes[8]},
+	{name: "Xfinity", host: "imap.comcast.net:993", smtp: "smtp.comcast.net:587", domains: []string{"comcast.net", "xfinity.com"}, note: mailNotes[6]},
+	{name: "AT&T", host: "imap.mail.att.net:993", smtp: "smtp.mail.att.net:465", domains: []string{"att.net"}, note: mailNotes[6]},
+	{name: "GMX", host: "imap.gmx.com:993", smtp: "mail.gmx.com:465", domains: []string{"gmx.com", "gmx.us"}, note: mailNotes[7]},
+	{name: "mail.com", host: "imap.mail.com:993", smtp: "smtp.mail.com:465", domains: []string{"mail.com"}, note: mailNotes[7]},
+	{name: "QQ", host: "imap.qq.com:993", smtp: "smtp.qq.com:465", passwordURL: "https://service.mail.qq.com/detail/0/75", domains: []string{"qq.com"}, note: mailNotes[8]},
+	{name: "163", host: "imap.163.com:993", smtp: "smtp.163.com:465", passwordURL: "https://mail.163.com", domains: []string{"163.com", "126.com"}, note: mailNotes[8]},
 	{},
 }
 
@@ -143,6 +144,7 @@ type mailState struct {
 	email    string
 	password string
 	host     string
+	smtp     string
 	bindErr  string
 	signing  bool
 	removing string // the account whose removal waits for confirmation
@@ -160,9 +162,8 @@ type mailState struct {
 	trashing  bool // the question whether to delete a tier is showing
 	notice    string
 	drafting  bool
-	draft     string
-	draftFor  int64
-	busy      string // the change being made on a server
+	letter    *mailLetter // the letter being written
+	busy      string      // the change being made on a server
 }
 
 func (s *mailState) init(stateDir string, wake func()) {
@@ -257,6 +258,8 @@ func (a *App) mailLoad() {
 		filter.Tiers = []string{""}
 	case mailStarred:
 		filter.Inbox, filter.Starred = false, true
+	case mailSent:
+		filter.Inbox, filter.Box = false, mail.BoxSent
 	}
 	none := len(filter.Accounts) == 0
 	model, _ := a.mailModel()
@@ -311,6 +314,10 @@ func (a *App) describeMail(err error) string {
 		return u.t("The mail server refused the sign-in. Use an app password or authorisation code, not your usual password.")
 	case errors.Is(err, mail.ErrNoTrash):
 		return u.t("This mailbox has no trash folder, so nothing was deleted")
+	case errors.Is(err, mail.ErrNoRecipient):
+		return u.t("Say who this letter is for")
+	case errors.Is(err, mail.ErrTooLarge):
+		return u.t("The files of this letter are too large to send: 25 MB at most")
 	}
 	return a.describe(err)
 }
@@ -344,7 +351,10 @@ func (a *App) mailBind() {
 		s.bindErr = a.u.t("This mailbox is bound already")
 		return
 	}
-	ac := mail.Account{ID: id, Email: email, Host: host}
+	ac := mail.Account{ID: id, Email: email, Host: host, SMTP: strings.TrimSpace(s.smtp)}
+	if ac.SMTP != "" && !strings.Contains(ac.SMTP, ":") {
+		ac.SMTP += ":465"
+	}
 	s.signing, s.bindErr = true, ""
 	mailer := s.mailer
 	a.background(func(ctx context.Context) {
@@ -367,7 +377,7 @@ func (a *App) mailBind() {
 			if err := s.saveAccounts(); err != nil {
 				s.notice = a.describe(err)
 			}
-			s.binding, s.email, s.password, s.host = false, "", "", ""
+			s.binding, s.email, s.password, s.host, s.smtp = false, "", "", "", ""
 			a.mailSync()
 		})
 	})
@@ -393,7 +403,7 @@ func (a *App) mailRemove(id string) {
 	s.current, s.stale = 0, true
 }
 
-// mailSync brings every account up to date, one after another, then has new mail read when a model is on this computer.
+// mailSync brings every account up to date, one after another.
 func (a *App) mailSync() {
 	s := &a.mail
 	if s.syncing || len(s.accounts) == 0 {
@@ -438,20 +448,17 @@ func (a *App) mailSync() {
 // mailBestModel sorted real mail best of the models tried, thinking off: 27 of 32 hard messages, against 22 and 23 of the others.
 const mailBestModel = "qwen3-8b"
 
-// mailModel is the model that reads mail: the user's choice among those of this computer, else mailBestModel, else the
-// first downloaded.
+// mailModel is the model that reads mail: the user's choice, else mailBestModel, else the first downloaded. A model of a
+// service is only ever the user's choice, as the mail then leaves this computer.
 func (a *App) mailModel() (ai.Choice, bool) {
 	var first ai.Choice
 	found, best := false, false
-	for _, ch := range a.ai.config.Choices() {
-		if ch.Kind != ai.KindLLM || ch.Local == nil {
-			continue
-		}
-		if _, have := a.ai.rt.Files(*ch.Local); !have {
-			continue
-		}
+	for _, ch := range a.mailModels() {
 		if ch.ID == a.settings.MailModel {
 			return ch, true
+		}
+		if ch.Online() {
+			continue
 		}
 		if !found || (!best && ch.ID == mailBestModel) {
 			first, found, best = ch, true, ch.ID == mailBestModel
@@ -487,7 +494,7 @@ func (a *App) mailOrganise(limit int) {
 	}
 	ch, ok := a.mailModel()
 	if !ok {
-		s.notice = a.u.t("Download a language model in Settings → AI models first; mail is read only by a model on this computer")
+		s.notice = a.u.t("Download a language model or add an API key in Settings → AI models first")
 		return
 	}
 	accounts := s.chosen()
@@ -639,58 +646,6 @@ func (a *App) mailTasks() []task {
 		out = append(out, t)
 	}
 	return out
-}
-
-// mailDraftReply has the model write a reply into the box, where the user changes it.
-func (a *App) mailDraftReply(m mail.Message) {
-	s := &a.mail
-	ch, ok := a.mailModel()
-	if !ok {
-		s.draftFor, s.draft = m.ID, ""
-		return
-	}
-	s.drafting, s.draftFor, s.draft = true, m.ID, ""
-	ask := a.mailAsk(ch, ai.Options{})
-	a.background(func(ctx context.Context) {
-		text, err := mail.DraftReply(ctx, ask, m)
-		a.post(func() {
-			s := &a.mail
-			s.drafting = false
-			a.mailRelease()
-			if err != nil {
-				s.notice = a.describeAI(err)
-				return
-			}
-			if s.draftFor == m.ID {
-				s.draft = strings.TrimSpace(text)
-			}
-		})
-	})
-}
-
-// mailSaveDraft puts the reply in the account's drafts on the server. It is not sent.
-func (a *App) mailSaveDraft(m mail.Message) {
-	s := &a.mail
-	ac, ok := s.account(m.Account)
-	if !ok || s.busy != "" {
-		return
-	}
-	s.busy = ac.ID
-	text, mailer := s.draft, s.mailer
-	saved := a.u.t("The reply is in the drafts of the mailbox; it was not sent")
-	a.background(func(ctx context.Context) {
-		err := mailer.SaveDraft(ctx, ac, m, text, time.Now())
-		a.post(func() {
-			s := &a.mail
-			s.busy = ""
-			if err != nil {
-				s.notice = a.describeMail(err)
-				return
-			}
-			s.draft, s.draftFor = "", 0
-			a.toast(saved, false)
-		})
-	})
 }
 
 // mailRelease stops the mail's model once nothing of the mail needs it, unless the chat may be using it.

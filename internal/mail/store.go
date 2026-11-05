@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,15 +19,15 @@ import (
 type Account struct {
 	ID    string `json:"id"`
 	Email string `json:"email"`
-	Host  string `json:"host"` // host:port
+	Host  string `json:"host"`           // host:port
+	SMTP  string `json:"smtp,omitempty"` // the outgoing server, host:port; 465 starts in TLS, any other port moves to it
 	Name  string `json:"name,omitempty"`
 }
 
 // iCloudHost asks for the part of the address before the @ on many accounts, and the whole address on others.
 const iCloudHost = "imap.mail.me.com:993"
 
-// Tiers say what a message is worth to its owner. "" is mail no model has read, which is shown with TierMust until one
-// has: mail must not go out of sight because it was not read.
+// Tiers say what a message is worth to its owner. "" is mail no model has read, which has a view of its own.
 const (
 	TierMust  = "must"  // the owner really has to know it or answer it
 	TierMaybe = "maybe" // of some use, and nothing is lost if it stays unread
@@ -35,6 +36,13 @@ const (
 
 // Tiers are the tiers, the highest first.
 var Tiers = []string{TierMust, TierMaybe, TierNoise}
+
+// Boxes are the server's folders kept here. UIDs mean something only within one.
+const (
+	BoxInbox   = "inbox"
+	BoxSent    = "sent"
+	BoxStarred = "starred" // what Gmail has starred and is in neither of the others
+)
 
 // Message is a message kept here. One database holds every account's, which is what makes the common inbox and a choice
 // of accounts one query.
@@ -53,6 +61,9 @@ type Message struct {
 	Date      time.Time
 	Seen      bool
 	Inbox     bool
+	Box       string
+	Cc        string
+	ReplyTo   string
 	Labels    []string
 	Text      string
 	Preview   string // the start of Text for a list, made once as it is read: a list is drawn in every frame
@@ -68,6 +79,7 @@ type Message struct {
 type Filter struct {
 	Accounts []string // the accounts to show; none means all of them
 	Inbox    bool     // only what is in an inbox
+	Box      string   // only what is in a box
 	Tiers    []string // the tiers to show; none means all of them
 	Starred  bool     // only what was starred
 	Search   string
@@ -94,8 +106,8 @@ const (
 	ActionTrash   = "trash" // many messages, moved to the mailbox's trash
 )
 
-const schema = `
-CREATE TABLE IF NOT EXISTS messages (
+// messageColumns are the table's columns and its one constraint.
+const messageColumns = `
 	id INTEGER PRIMARY KEY,
 	account TEXT NOT NULL, validity INTEGER NOT NULL, uid INTEGER NOT NULL,
 	message_id TEXT NOT NULL DEFAULT '', gmail_id TEXT NOT NULL DEFAULT '', thread TEXT NOT NULL DEFAULT '',
@@ -107,8 +119,19 @@ CREATE TABLE IF NOT EXISTS messages (
 	summary TEXT NOT NULL DEFAULT '', tier TEXT NOT NULL DEFAULT '', why TEXT NOT NULL DEFAULT '',
 	organised TEXT NOT NULL DEFAULT '',
 	pick TEXT NOT NULL DEFAULT '', starred INTEGER NOT NULL DEFAULT 0, forged INTEGER NOT NULL DEFAULT 0,
-	UNIQUE (account, validity, uid)
-);
+	html TEXT NOT NULL DEFAULT '',
+	whole INTEGER NOT NULL DEFAULT 0, -- the page holds all of the message
+	paged INTEGER NOT NULL DEFAULT 0, -- its page was fetched, if it has one
+	box TEXT NOT NULL DEFAULT 'inbox', cc TEXT NOT NULL DEFAULT '', reply_to TEXT NOT NULL DEFAULT '',
+	star_dirty INTEGER NOT NULL DEFAULT 0, -- starred differs from the server's until it is told
+	UNIQUE (account, box, validity, uid)`
+
+// messageKept are the columns a database from before the boxes has.
+const messageKept = `id, account, validity, uid, message_id, gmail_id, thread, in_reply_to, sender, address, recipient, subject, date, seen,
+	inbox, labels, body, summary, tier, why, organised, pick, starred, forged, html, whole, paged`
+
+const schema = `
+CREATE TABLE IF NOT EXISTS messages (` + messageColumns + `);
 CREATE INDEX IF NOT EXISTS messages_date ON messages (date DESC);
 CREATE TABLE IF NOT EXISTS state (account TEXT PRIMARY KEY, validity INTEGER NOT NULL, last_uid INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS log (
@@ -161,15 +184,31 @@ func upgrade(db *sql.DB) error {
 			"UPDATE messages SET organised=''",
 			"DROP TABLE IF EXISTS suggestions")
 	}
+	switch box, err := has("box"); {
+	case err != nil:
+		return err
+	case !box:
+		// UIDs are now unique within a box, which only a new table can say. Stars were kept here alone: the server is told.
+		steps = append(steps, "CREATE TABLE messages_boxed ("+messageColumns+")",
+			"INSERT INTO messages_boxed ("+messageKept+") SELECT "+messageKept+" FROM messages",
+			"DROP TABLE messages", "ALTER TABLE messages_boxed RENAME TO messages",
+			"UPDATE messages SET star_dirty=1 WHERE starred=1",
+			"CREATE INDEX IF NOT EXISTS messages_date ON messages (date DESC)")
+	}
 	steps = append(steps, "CREATE INDEX IF NOT EXISTS messages_starred ON messages (account) WHERE starred=1",
 		"CREATE INDEX IF NOT EXISTS messages_gmail_id ON messages (account, gmail_id)",
 		"CREATE INDEX IF NOT EXISTS messages_message_id ON messages (account, message_id)")
+	tx, err := db.Begin() // nothing of a user's mail may hang between two tables
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	for _, q := range steps {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := tx.Exec(q); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // Store is the mail kept on this computer.
@@ -203,7 +242,7 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // RemoveAccount forgets everything kept of an account. The mailbox itself is not touched.
 func (s *Store) RemoveAccount(id string) error {
-	for _, q := range []string{"DELETE FROM messages WHERE account=?", "DELETE FROM state WHERE account=?",
+	for _, q := range []string{"DELETE FROM messages WHERE account=?", "DELETE FROM state WHERE account=?1 OR account=?1||'/sent'",
 		"DELETE FROM log_items WHERE entry IN (SELECT id FROM log WHERE account=?)", "DELETE FROM log WHERE account=?"} {
 		if _, err := s.db.Exec(q, id); err != nil {
 			return err
@@ -212,42 +251,52 @@ func (s *Store) RemoveAccount(id string) error {
 	return nil
 }
 
-func (s *Store) syncState(account string) (validity, last uint32, err error) {
-	err = s.db.QueryRow("SELECT validity, last_uid FROM state WHERE account=?", account).Scan(&validity, &last)
+// stateKey is where a box's place in a sync is kept.
+func stateKey(account, box string) string {
+	if box == BoxInbox {
+		return account
+	}
+	return account + "/" + box
+}
+
+func (s *Store) syncState(account, box string) (validity, last uint32, err error) {
+	err = s.db.QueryRow("SELECT validity, last_uid FROM state WHERE account=?", stateKey(account, box)).Scan(&validity, &last)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, 0, nil
 	}
 	return validity, last, err
 }
 
-func (s *Store) setSyncState(account string, validity, last uint32) error {
+func (s *Store) setSyncState(account, box string, validity, last uint32) error {
 	_, err := s.db.Exec(`INSERT INTO state (account, validity, last_uid) VALUES (?, ?, ?)
-		ON CONFLICT (account) DO UPDATE SET validity=excluded.validity, last_uid=excluded.last_uid`, account, validity, last)
+		ON CONFLICT (account) DO UPDATE SET validity=excluded.validity, last_uid=excluded.last_uid`, stateKey(account, box), validity, last)
 	return err
 }
 
 // put keeps a message that has arrived. One that is already here, as a sync interrupted may fetch it twice, stays. One that
 // comes back under a new number, moved back by another program or renumbered by the server, is the row it had: what a model
 // and the user made of it stays, so no model reads it again. A copy still in the inbox under its own number is left alone.
-func (s *Store) put(account string, validity uint32, f Fetched) error {
+func (s *Store) put(account, box string, validity uint32, f Fetched) error {
 	p := Parse(f.Raw)
 	labels, _ := json.Marshal(f.Labels)
-	back, err := s.db.Exec(`UPDATE messages SET validity=?, uid=?, seen=?, inbox=1, labels=? WHERE id=(
-			SELECT id FROM messages WHERE account=? AND (inbox=0 OR validity<>?)
+	inbox := box == BoxInbox
+	back, err := s.db.Exec(`UPDATE messages SET box=?, validity=?, uid=?, seen=?, inbox=?, labels=? WHERE id=(
+			SELECT id FROM messages WHERE account=? AND box IN (?, 'starred') AND (inbox=0 OR validity<>?)
 				AND ((gmail_id<>'' AND gmail_id=?) OR (message_id<>'' AND message_id=?)) ORDER BY id LIMIT 1)
-		AND NOT EXISTS (SELECT 1 FROM messages WHERE account=? AND validity=? AND uid=?)`,
-		validity, f.UID, hasFlag(f.Flags, `\Seen`), string(labels), account, validity, f.GmailID, p.MessageID, account, validity, f.UID)
+		AND NOT EXISTS (SELECT 1 FROM messages WHERE account=? AND box=? AND validity=? AND uid=?)`,
+		box, validity, f.UID, hasFlag(f.Flags, `\Seen`), inbox, string(labels), account, box, validity, f.GmailID, p.MessageID, account, box, validity, f.UID)
 	if err != nil {
 		return err
 	}
 	if n, err := back.RowsAffected(); err != nil || n > 0 {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT INTO messages (account, validity, uid, message_id, gmail_id, thread, in_reply_to, sender, address,
-		recipient, subject, date, seen, inbox, labels, body, html, whole, paged, forged) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,1,?)
-		ON CONFLICT (account, validity, uid) DO NOTHING`,
-		account, validity, f.UID, p.MessageID, f.GmailID, f.ThreadID, p.InReplyTo, p.From, p.Address, p.To, p.Subject,
-		p.Date.Unix(), hasFlag(f.Flags, `\Seen`), string(labels), p.Text, p.HTML, len(f.Raw) < bodyPart, p.Forged)
+	_, err = s.db.Exec(`INSERT INTO messages (account, box, validity, uid, message_id, gmail_id, thread, in_reply_to, sender, address,
+		recipient, cc, reply_to, subject, date, seen, inbox, starred, labels, body, html, whole, paged, forged)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)
+		ON CONFLICT (account, box, validity, uid) DO NOTHING`,
+		account, box, validity, f.UID, p.MessageID, f.GmailID, f.ThreadID, p.InReplyTo, p.From, p.Address, p.To, p.Cc, p.ReplyTo, p.Subject,
+		p.Date.Unix(), hasFlag(f.Flags, `\Seen`), inbox, hasFlag(f.Flags, `\Flagged`), string(labels), p.Text, p.HTML, len(f.Raw) < bodyPart, p.Forged)
 	return err
 }
 
@@ -260,14 +309,23 @@ func hasFlag(flags []string, flag string) bool {
 	return false
 }
 
-// refresh brings what is known of the inbox up to date: flags and labels of what is in it, and what left it by another
-// program.
-func (s *Store) refresh(account string, validity uint32, present map[uint32]Fetched) error {
+// refresh brings what is known of a box up to date: flags and labels of what is in it, and what left it by another program.
+// A star the server has not been told of yet stays. What left an inbox is kept, with what was made of it, and a copy of what
+// left the sent folder has no other use.
+func (s *Store) refresh(account, box string, validity uint32, present map[uint32]Fetched) error {
+	gone := "UPDATE messages SET inbox=0 WHERE id=?"
+	if box != BoxInbox {
+		gone = "DELETE FROM messages WHERE id=?"
+	}
 	// What a renumbering did not bring back under a new number has left.
-	if _, err := s.db.Exec("UPDATE messages SET inbox=0 WHERE account=? AND validity<>? AND inbox=1", account, validity); err != nil {
+	left := "UPDATE messages SET inbox=0 WHERE account=? AND box=? AND validity<>? AND inbox=1"
+	if box != BoxInbox {
+		left = "DELETE FROM messages WHERE account=? AND box=? AND validity<>?"
+	}
+	if _, err := s.db.Exec(left, account, box, validity); err != nil {
 		return err
 	}
-	rows, err := s.db.Query("SELECT id, uid FROM messages WHERE account=? AND validity=? AND inbox=1", account, validity)
+	rows, err := s.db.Query("SELECT id, uid FROM messages WHERE account=? AND box=? AND validity=? AND (inbox=1 OR box<>'inbox')", account, box, validity)
 	if err != nil {
 		return err
 	}
@@ -291,13 +349,14 @@ func (s *Store) refresh(account string, validity uint32, present map[uint32]Fetc
 	for _, r := range known {
 		f, ok := present[r.uid]
 		if !ok {
-			if _, err := s.db.Exec("UPDATE messages SET inbox=0 WHERE id=?", r.id); err != nil {
+			if _, err := s.db.Exec(gone, r.id); err != nil {
 				return err
 			}
 			continue
 		}
 		labels, _ := json.Marshal(f.Labels)
-		if _, err := s.db.Exec("UPDATE messages SET seen=?, labels=? WHERE id=?", hasFlag(f.Flags, `\Seen`), string(labels), r.id); err != nil {
+		if _, err := s.db.Exec("UPDATE messages SET seen=?, labels=?, starred=CASE WHEN star_dirty=1 THEN starred ELSE ? END WHERE id=?",
+			hasFlag(f.Flags, `\Seen`), string(labels), hasFlag(f.Flags, `\Flagged`), r.id); err != nil {
 			return err
 		}
 	}
@@ -323,14 +382,14 @@ const shownTier = `CASE
 // columns leave out a message's page, which is large and read for the one message open (Body). They are read from messages
 // under the name m.
 const columns = `id, account, uid, message_id, gmail_id, thread, in_reply_to, sender, address, recipient, subject, date,
-	seen, inbox, labels, body, summary, why, organised, (` + shownTier + `), starred`
+	seen, inbox, labels, body, summary, why, organised, (` + shownTier + `), starred, box, cc, reply_to`
 
 func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 	var m Message
 	var date int64
 	var labels string
 	err := row.Scan(&m.ID, &m.Account, &m.UID, &m.MessageID, &m.GmailID, &m.Thread, &m.InReplyTo, &m.From, &m.Address, &m.To,
-		&m.Subject, &date, &m.Seen, &m.Inbox, &labels, &m.Text, &m.Summary, &m.Why, &m.Organised, &m.Tier, &m.Starred)
+		&m.Subject, &date, &m.Seen, &m.Inbox, &labels, &m.Text, &m.Summary, &m.Why, &m.Organised, &m.Tier, &m.Starred, &m.Box, &m.Cc, &m.ReplyTo)
 	if err != nil {
 		return m, err
 	}
@@ -351,6 +410,10 @@ func (f Filter) where() (string, []any) {
 	}
 	if f.Inbox {
 		conds = append(conds, "inbox=1")
+	}
+	if f.Box != "" {
+		conds = append(conds, "box=?")
+		args = append(args, f.Box)
 	}
 	if f.Starred {
 		conds = append(conds, "starred=1")
@@ -536,7 +599,7 @@ func (s *Store) Pick(id int64, tier string) error {
 // Star keeps a message apart, which also lifts its conversation and its sender (shownTier). It is kept here, not on the
 // server.
 func (s *Store) Star(id int64, on bool) error {
-	_, err := s.db.Exec("UPDATE messages SET starred=? WHERE id=?", on, id)
+	_, err := s.db.Exec("UPDATE messages SET starred=?, star_dirty=1 WHERE id=?", on, id)
 	return err
 }
 
@@ -754,7 +817,9 @@ type Mailer struct {
 	Password func(account string) (string, error)
 	// Dial connects to a server; the tests point it at a server of their own.
 	Dial func(ctx context.Context, address string) (*Conn, error)
-	Now  func() time.Time
+	// DialSMTP connects to an outgoing server, the same way.
+	DialSMTP func(ctx context.Context, address string) (net.Conn, error)
+	Now      func() time.Time
 	// Days is how far back the first sync of an account goes.
 	Days int
 }
@@ -807,19 +872,199 @@ func (m *Mailer) Sign(ctx context.Context, a Account, password string) (*Conn, e
 // fetchBatch is how many messages are asked for at once.
 const fetchBatch = 40
 
-// Sync brings an account's inbox up to date and reports how many messages arrived. It keeps its place, so a sync cut
-// short goes on from there.
+// Sync tells the server of the stars set here, brings an account's inbox, sent folder and stars up to date and reports how
+// many messages arrived in the inbox. It keeps its place, so a sync cut short goes on from there.
 func (m *Mailer) Sync(ctx context.Context, a Account, progress func(done, total int)) (int, error) {
 	c, err := m.connect(ctx, a)
 	if err != nil {
 		return 0, err
 	}
 	defer c.Close()
-	sel, err := c.Select("INBOX")
+	folders, err := c.FindFolders()
 	if err != nil {
 		return 0, err
 	}
-	validity, last, err := m.Store.syncState(a.ID)
+	if err := m.pushStars(c, a, folders); err != nil {
+		return 0, err
+	}
+	n, err := m.syncBox(ctx, c, a, BoxInbox, "INBOX", progress)
+	if err != nil {
+		return n, err
+	}
+	if folders.Sent != "" {
+		if _, err := m.syncBox(ctx, c, a, BoxSent, folders.Sent, nil); err != nil {
+			return n, err
+		}
+	}
+	if c.Gmail() && folders.Flagged != "" {
+		return n, m.syncStarred(ctx, c, a, folders.Flagged)
+	}
+	return n, nil
+}
+
+// PushStars tells the server of the stars set here. One it could not be told of stays marked for the next sync.
+func (m *Mailer) PushStars(ctx context.Context, a Account) error {
+	c, err := m.connect(ctx, a)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	folders, err := c.FindFolders()
+	if err != nil {
+		return err
+	}
+	return m.pushStars(c, a, folders)
+}
+
+func (m *Mailer) pushStars(c *Conn, a Account, folders Folders) error {
+	type row struct {
+		id       int64
+		uid      uint32
+		validity uint32
+		box      string
+		gmail    string
+		on       bool
+	}
+	rows, err := m.Store.db.Query("SELECT id, uid, validity, box, gmail_id, starred FROM messages WHERE account=? AND star_dirty=1", a.ID)
+	if err != nil {
+		return err
+	}
+	var list []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.uid, &r.validity, &r.box, &r.gmail, &r.on); err != nil {
+			rows.Close()
+			return err
+		}
+		list = append(list, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	open, validity := "", uint32(0)
+	sel := func(name string) error {
+		if name == open {
+			return nil
+		}
+		s, err := c.Select(name)
+		open, validity = name, s.Validity
+		return err
+	}
+	for _, r := range list {
+		var uids []uint32
+		switch {
+		case c.Gmail() && r.gmail != "" && folders.Archive != "": // all of Gmail's mail is in one folder, wherever it shows
+			if err := sel(folders.Archive); err != nil {
+				return err
+			}
+			if uids, err = c.FindByGmailID(r.gmail); err != nil {
+				return err
+			}
+		case r.box == BoxInbox || r.box == BoxSent && folders.Sent != "":
+			name := "INBOX"
+			if r.box == BoxSent {
+				name = folders.Sent
+			}
+			if err := sel(name); err != nil {
+				return err
+			}
+			if validity == r.validity {
+				uids = []uint32{r.uid}
+			}
+		}
+		if len(uids) > 0 {
+			if err := c.Flag(uids, r.on); err != nil {
+				return err
+			}
+		}
+		// A star changed again meanwhile goes in the next round. What the server no longer has can only stay here.
+		if _, err := m.Store.db.Exec("UPDATE messages SET star_dirty=0 WHERE id=? AND starred=?", r.id, r.on); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// syncStarred brings what Gmail has starred here, wherever it lies, and takes off the stars Gmail no longer has.
+func (m *Mailer) syncStarred(ctx context.Context, c *Conn, a Account, folder string) error {
+	sel, err := c.Select(folder)
+	if err != nil {
+		return err
+	}
+	all, err := c.SearchSince(time.Unix(0, 0))
+	if err != nil {
+		return err
+	}
+	on := make(map[string]bool, len(all))
+	var fresh []uint32
+	for i := 0; i < len(all); i += fetchBatch * 10 {
+		if err := c.Fetch(all[i:min(i+fetchBatch*10, len(all))], false, func(f Fetched) {
+			on[f.GmailID] = true
+			r, err := m.Store.db.Exec("UPDATE messages SET starred=1 WHERE account=? AND gmail_id=? AND star_dirty=0", a.ID, f.GmailID)
+			if err == nil {
+				var kept int
+				m.Store.db.QueryRow("SELECT COUNT(*) FROM messages WHERE account=? AND gmail_id=?", a.ID, f.GmailID).Scan(&kept)
+				if n, _ := r.RowsAffected(); n == 0 && kept == 0 {
+					fresh = append(fresh, f.UID)
+				}
+			}
+		}); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < len(fresh); i += fetchBatch {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var failed error
+		if err := c.Fetch(fresh[i:min(i+fetchBatch, len(fresh))], true, func(f Fetched) {
+			f.Flags = append(f.Flags, `\Flagged`)
+			if err := m.Store.put(a.ID, BoxStarred, sel.Validity, f); err != nil && failed == nil {
+				failed = err
+			}
+		}); err != nil {
+			return err
+		}
+		if failed != nil {
+			return failed
+		}
+	}
+	rows, err := m.Store.db.Query("SELECT id, gmail_id FROM messages WHERE account=? AND starred=1 AND star_dirty=0 AND gmail_id<>''", a.ID)
+	if err != nil {
+		return err
+	}
+	var off []int64
+	for rows.Next() {
+		var id int64
+		var gmail string
+		if err := rows.Scan(&id, &gmail); err != nil {
+			rows.Close()
+			return err
+		}
+		if !on[gmail] {
+			off = append(off, id)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range off {
+		if _, err := m.Store.db.Exec("UPDATE messages SET starred=0 WHERE id=?", id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// syncBox brings one of the server's folders up to date.
+func (m *Mailer) syncBox(ctx context.Context, c *Conn, a Account, box, name string, progress func(done, total int)) (int, error) {
+	sel, err := c.Select(name)
+	if err != nil {
+		return 0, err
+	}
+	validity, last, err := m.Store.syncState(a.ID, box)
 	if err != nil {
 		return 0, err
 	}
@@ -851,7 +1096,7 @@ func (m *Mailer) Sync(ctx context.Context, a Account, progress func(done, total 
 		batch := fresh[i:min(i+fetchBatch, len(fresh))]
 		var failed error
 		err := c.Fetch(batch, true, func(f Fetched) {
-			if err := m.Store.put(a.ID, sel.Validity, f); err != nil && failed == nil {
+			if err := m.Store.put(a.ID, box, sel.Validity, f); err != nil && failed == nil {
 				failed = err
 			}
 		})
@@ -861,7 +1106,7 @@ func (m *Mailer) Sync(ctx context.Context, a Account, progress func(done, total 
 		if err != nil {
 			return i, err
 		}
-		if err := m.Store.setSyncState(a.ID, sel.Validity, batch[len(batch)-1]); err != nil {
+		if err := m.Store.setSyncState(a.ID, box, sel.Validity, batch[len(batch)-1]); err != nil {
 			return i, err
 		}
 		if progress != nil {
@@ -875,11 +1120,11 @@ func (m *Mailer) Sync(ctx context.Context, a Account, progress func(done, total 
 			return len(fresh), err
 		}
 	}
-	return len(fresh), m.Store.refresh(a.ID, sel.Validity, present)
+	return len(fresh), m.Store.refresh(a.ID, box, sel.Validity, present)
 }
 
 // Complete fetches all of a message that is kept only in part, for its page and inline pictures, and gives the page. A
-// message that left the inbox or was renumbered cannot be found by its UID and stays as it is.
+// message that left its folder or was renumbered cannot be found by its UID and stays as it is.
 func (m *Mailer) Complete(ctx context.Context, a Account, id int64) (Body, error) {
 	b, err := m.Store.Body(id)
 	if err != nil || b.Whole {
@@ -887,8 +1132,9 @@ func (m *Mailer) Complete(ctx context.Context, a Account, id int64) (Body, error
 	}
 	var uid, validity uint32
 	var inbox bool
-	err = m.Store.db.QueryRow("SELECT uid, validity, inbox FROM messages WHERE id=? AND account=?", id, a.ID).Scan(&uid, &validity, &inbox)
-	if err != nil || !inbox {
+	var box string
+	err = m.Store.db.QueryRow("SELECT uid, validity, inbox, box FROM messages WHERE id=? AND account=?", id, a.ID).Scan(&uid, &validity, &inbox, &box)
+	if err != nil || !inbox && box == BoxInbox {
 		return b, err
 	}
 	c, err := m.connect(ctx, a)
@@ -896,7 +1142,20 @@ func (m *Mailer) Complete(ctx context.Context, a Account, id int64) (Body, error
 		return b, err
 	}
 	defer c.Close()
-	sel, err := c.Select("INBOX")
+	name := "INBOX"
+	if box != BoxInbox {
+		folders, err := c.FindFolders()
+		if err != nil {
+			return b, err
+		}
+		if name = folders.Sent; box == BoxStarred {
+			name = folders.Flagged
+		}
+		if name == "" {
+			return b, nil
+		}
+	}
+	sel, err := c.Select(name)
 	if err != nil {
 		return b, err
 	}
@@ -1246,22 +1505,4 @@ func (m *Mailer) Undo(ctx context.Context, a Account, entryID int64, progress fu
 		}
 	}
 	return m.Store.markUndone(e.ID)
-}
-
-// SaveDraft saves a reply in the account's drafts; it is not sent.
-func (m *Mailer) SaveDraft(ctx context.Context, a Account, msg Message, text string, at time.Time) error {
-	c, err := m.connect(ctx, a)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	folders, err := c.FindFolders()
-	if err != nil {
-		return err
-	}
-	if folders.Drafts == "" {
-		return errors.New("this mailbox has no drafts folder")
-	}
-	reply := Reply{From: a.Email, To: msg.Address, Subject: msg.Subject, InReplyTo: msg.MessageID, Text: text}
-	return c.Append(folders.Drafts, reply.Build(at))
 }

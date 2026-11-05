@@ -45,7 +45,7 @@ type settings struct {
 
 	AIModel   string  `json:"aiModel,omitempty"`   // the model last chosen in the chat: a local model's id, or provider/model
 	AIEngine  string  `json:"aiEngine,omitempty"`  // where chat models compute: an engine's id
-	MailModel string  `json:"mailModel,omitempty"` // the model that reads mail, one of this computer
+	MailModel string  `json:"mailModel,omitempty"` // the model that reads mail; a service's only by this choice
 	MailShare float64 `json:"mailShare,omitempty"` // how much of the mail not analysed the model reads; 0 is mailShareStart
 	MailEvery int     `json:"mailEvery,omitempty"` // minutes between looks for new mail; 0 is 15, and -1 only when asked
 

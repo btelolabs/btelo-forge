@@ -31,10 +31,12 @@ says. Answer with JSON only, in this form:
 The kinds, take the first that fits:
 person: a real person writing to the owner personally, not a mailing.
 money: the owner's own money or bill: a charge, a failed payment, a statement, an invoice, a payment due, a refund.
-warning: a real warning about the owner's own account or service: a sign-in, a security problem, data shared, something of
-theirs about to stop working, a deadline from a bank, a government or a platform they use.
+warning: something is wrong with the owner's own account or service and they must act: a security problem that did happen,
+data shared, something of theirs about to stop working, a deadline from a bank, a government or a platform they use. Mail
+about a new sign-in or a new password is not a warning, however alarming its subject, unless it says the owner's account
+was taken or locked.
 notice: a plain fact about the owner's own account, plan or order: a plan change, a receipt, shipping, a one-time code, a
-policy update.
+policy update, a new sign-in or new password that needs nothing if it was the owner.
 reading: a newsletter, digest, article, market news or creator's post meant to be read.
 ad: anything that wants the owner to buy, try, join or answer: a discount, offer, referral, product launch, shop, game,
 company event, survey, welcome or "we miss you".`

@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -280,7 +282,7 @@ func TestNewMailWaitsForTheClick(t *testing.T) {
 	x.shot("mail-analyse-zh")
 
 	// The slider says how much of it the model reads, and is kept.
-	x.drag(300, 115, 640, 115)
+	x.drag(300, 148, 640, 148)
 	x.frame(Input{})
 	if x.a.settings.MailShare < 0.99 {
 		t.Fatalf("the slider stands at %v", x.a.settings.MailShare)
@@ -295,6 +297,105 @@ func TestNewMailWaitsForTheClick(t *testing.T) {
 	}
 	x.frame(Input{})
 	x.shot("mail-must-empty-zh")
+}
+
+func TestALetterIsWrittenAndSent(t *testing.T) {
+	x := newHarness(t)
+	_, work := bindTwo(t, x)
+	s := &x.a.mail
+	out := mailtest.NewSMTP(t)
+	s.mailer.DialSMTP = func(ctx context.Context, address string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "tcp", address)
+	}
+	for i := range s.accounts {
+		s.accounts[i].SMTP = out.Addr()
+	}
+	s.view, s.viewChosen, s.stale = mailAll, true, true
+	x.pump(5*time.Second, func() bool { return !s.stale && len(s.list) == 3 })
+	i := slices.IndexFunc(s.list, func(m mail.Message) bool { return m.Subject == "The report" })
+	if i < 0 {
+		t.Fatal(s.list)
+	}
+	s.current = s.list[i].ID
+	x.frame(Input{})
+	x.a.u.lang = "zh"
+	x.frame(Input{})
+	x.shot("mail-reader-actions-zh")
+
+	// A reply has the answer's people and subject, and nothing goes before the click.
+	x.a.mailReply(s.list[i], false, false)
+	x.frame(Input{})
+	x.shot("mail-letter-zh")
+	l := s.letter
+	if l == nil || l.to != "boss@w.com" || l.subject != "Re: The report" || len(out.Taken()) != 0 {
+		t.Fatalf("%+v", l)
+	}
+	l.text = "Yes, at seven.\n" + l.text
+	x.a.mailSend()
+	x.pump(10*time.Second, func() bool { return s.letter == nil && !s.syncing })
+	taken := out.Taken()
+	if len(taken) != 1 || !strings.Contains(mail.Parse([]byte(taken[0].Data)).Text, "Yes, at seven.") {
+		t.Fatalf("%+v", taken)
+	}
+
+	// It shows in the sent view, from the server's folder.
+	s.view, s.stale = mailSent, true
+	x.pump(5*time.Second, func() bool { return !s.stale && len(s.list) == 1 })
+	if s.list[0].Subject != "Re: The report" || !work.Asked(`APPEND "Sent"`) {
+		t.Fatalf("%+v", s.list[0])
+	}
+	s.current = 0
+	x.frame(Input{})
+	x.shot("mail-sent-zh")
+}
+
+func TestAFailedLetterStaysToBeSentAgain(t *testing.T) {
+	x := newHarness(t)
+	bindTwo(t, x)
+	s := &x.a.mail
+	s.accounts[0].SMTP = "127.0.0.1:1"
+	x.a.mailWrite(s.accounts[0].ID, mail.Letter{To: "ann@a.com", Subject: "x"})
+	l := s.letter
+	x.a.mailSend()
+	x.pump(10*time.Second, func() bool { return !l.sending })
+	if s.letter != l || l.err == "" {
+		t.Fatalf("%+v", l)
+	}
+}
+
+func TestOnlyTheUserSendsMailToAService(t *testing.T) {
+	x := newHarness(t)
+	x.a.ai.config = &ai.Config{Providers: []ai.Provider{{ID: "svc", BaseURL: "http://127.0.0.1:1", Models: []ai.RemoteModel{{ID: "big", Model: "big"}}}}}
+	if err := x.a.ai.keys.Set("svc", "key"); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.a.mailModels(); len(got) != 1 || !got[0].Online() {
+		t.Fatalf("%+v", got)
+	}
+	if _, ok := x.a.mailModel(); ok {
+		t.Fatal("a service was picked without a word from the user")
+	}
+	x.a.settings.MailModel = "svc/big"
+	if ch, ok := x.a.mailModel(); !ok || ch.ID != "svc/big" {
+		t.Fatalf("%+v", ch)
+	}
+	x.a.ai.keys.Set("svc", "")
+	if _, ok := x.a.mailModel(); ok {
+		t.Fatal("a service without a key")
+	}
+}
+
+func TestOutgoingServers(t *testing.T) {
+	for _, c := range [][2]string{{"imap.gmail.com:993", "smtp.gmail.com:465"}, {"imap.mail.me.com:993", "smtp.mail.me.com:587"},
+		{"127.0.0.1:1143", "127.0.0.1:1025"}, {"imap.example.com:993", "smtp.example.com:465"}} {
+		if got := mailOutgoing(mail.Account{Host: c[0]}); got != c[1] {
+			t.Errorf("%s: %s", c[0], got)
+		}
+	}
+	if got := mailOutgoing(mail.Account{Host: "imap.gmail.com:993", SMTP: "own:25"}); got != "own:25" {
+		t.Error(got)
+	}
 }
 
 func TestTheMailTabIsPinnable(t *testing.T) {
@@ -317,7 +418,7 @@ func TestMailGoesOnlyToALocalModel(t *testing.T) {
 	s := &x.a.mail
 	x.a.mailOrganise(10)
 	x.frame(Input{})
-	if !strings.Contains(s.notice, "on this computer") {
+	if !strings.Contains(s.notice, "API key") {
 		t.Fatalf("%q", fmt.Sprint(s.notice))
 	}
 	if ch, ok := x.a.mailModel(); ok && ch.Local == nil {

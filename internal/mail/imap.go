@@ -1,6 +1,6 @@
-// Package mail keeps a copy of the user's mailbox on this computer and organises it with a local model. It speaks IMAP,
-// and only the part of it that reads, marks read, archives, moves to the trash and saves drafts: there is no way here to
-// send a message or remove one for good, which TestNothingCanSendOrDelete holds to.
+// Package mail keeps a copy of the user's mailbox on this computer, sorts it with a model and sends what the user writes. It
+// speaks IMAP, and only the part of it that reads, flags, archives, moves to the trash and saves: there is no way here to
+// remove a message for good, which TestNothingIsRemovedForGood holds to. Mail goes out over SMTP, and only from a click.
 package mail
 
 import (
@@ -137,13 +137,13 @@ func (c *Conn) Gmail() bool { return c.Has("X-GM-EXT-1") }
 
 // Folders are the mailboxes that have a use here, by name on the server; "" when the server has none.
 type Folders struct {
-	Inbox, Archive, Drafts, Trash string
+	Inbox, Archive, Drafts, Trash, Sent, Flagged string
 }
 
 // FindFolders asks the server which of its mailboxes are which.
 func (c *Conn) FindFolders() (Folders, error) {
 	f := Folders{Inbox: "INBOX"}
-	var archive, drafts, trash string // named so, on a server that does not say what its folders are for
+	var archive, drafts, trash, sent string // named so, on a server that does not say what its folders are for
 	err := c.run(`LIST "" "*"`, func(fields []any) {
 		if len(fields) < 5 || !strings.EqualFold(atom(fields[1]), "LIST") {
 			return
@@ -157,6 +157,8 @@ func (c *Conn) FindFolders() (Folders, error) {
 			drafts = name
 		case "trash", "deleted messages", "deleted items":
 			trash = name
+		case "sent", "sent messages", "sent items", "sent mail":
+			sent = name
 		}
 		for _, a := range attrs {
 			switch strings.ToLower(atom(a)) {
@@ -168,6 +170,10 @@ func (c *Conn) FindFolders() (Folders, error) {
 				f.Drafts = name
 			case `\trash`:
 				f.Trash = name
+			case `\sent`:
+				f.Sent = name
+			case `\flagged`:
+				f.Flagged = name
 			}
 		}
 	})
@@ -179,6 +185,9 @@ func (c *Conn) FindFolders() (Folders, error) {
 	}
 	if f.Trash == "" {
 		f.Trash = trash
+	}
+	if f.Sent == "" {
+		f.Sent = sent
 	}
 	return f, err
 }
@@ -212,6 +221,11 @@ func (c *Conn) Select(name string) (Selected, error) {
 // SearchSince lists the UIDs of the selected mailbox's messages from a day on, oldest first.
 func (c *Conn) SearchSince(day time.Time) ([]uint32, error) {
 	return c.search("SINCE " + day.Format("2-Jan-2006"))
+}
+
+// FindByGmailID lists the UIDs of the selected mailbox's messages with an id of Gmail's.
+func (c *Conn) FindByGmailID(id string) ([]uint32, error) {
+	return c.search("X-GM-MSGID " + id)
 }
 
 // FindByID lists the UIDs of the selected mailbox's messages with a Message-ID.
@@ -330,12 +344,21 @@ func (c *Conn) Seen(uids []uint32, on bool) error {
 	return c.run(fmt.Sprintf(`UID STORE %s %sFLAGS.SILENT (\Seen)`, uidSet(uids), sign), nil)
 }
 
-// Append saves a message in a mailbox, marked as a draft.
-func (c *Conn) Append(mailbox string, message []byte) error {
+// Flag stars messages of the selected mailbox, or takes the star off; on Gmail \Flagged is the star.
+func (c *Conn) Flag(uids []uint32, on bool) error {
+	sign := "-"
+	if on {
+		sign = "+"
+	}
+	return c.run(fmt.Sprintf(`UID STORE %s %sFLAGS.SILENT (\Flagged)`, uidSet(uids), sign), nil)
+}
+
+// Append saves a message in a mailbox with flags.
+func (c *Conn) Append(mailbox, flags string, message []byte) error {
 	c.deadline()
 	c.tag++
 	tag := "a" + strconv.Itoa(c.tag)
-	if _, err := fmt.Fprintf(c.nc, "%s APPEND %s (\\Draft \\Seen) {%d}\r\n", tag, quote(mailbox), len(message)); err != nil {
+	if _, err := fmt.Fprintf(c.nc, "%s APPEND %s (%s) {%d}\r\n", tag, quote(mailbox), flags, len(message)); err != nil {
 		return err
 	}
 	for {

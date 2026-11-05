@@ -2,9 +2,7 @@ package mail
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"html"
 	"io"
@@ -28,6 +26,8 @@ type Parsed struct {
 	From      string // the name, or the address when it has none
 	Address   string
 	To        string
+	Cc        string
+	ReplyTo   string // where an answer goes, when not to Address
 	Subject   string
 	Date      time.Time
 	Text      string
@@ -65,6 +65,7 @@ func Parse(raw []byte) Parsed {
 	p.InReplyTo = strings.TrimSpace(h.Get("In-Reply-To"))
 	p.Subject = headerText(h.Get("Subject"))
 	p.To = headerText(h.Get("To"))
+	p.Cc = headerText(h.Get("Cc"))
 	p.Date, _ = mail.ParseDate(h.Get("Date"))
 	parser := mail.AddressParser{WordDecoder: &decoder}
 	if a, err := parser.Parse(h.Get("From")); err == nil {
@@ -74,6 +75,9 @@ func Parse(raw []byte) Parsed {
 	}
 	if p.From == "" {
 		p.From = p.Address
+	}
+	if a, err := parser.Parse(h.Get("Reply-To")); err == nil {
+		p.ReplyTo = a.Address
 	}
 	// The newest of these is the receiving server's; older ones came with the message and say nothing.
 	if results := h["Authentication-Results"]; len(results) > 0 {
@@ -268,39 +272,4 @@ func Preview(text string, runes int) string {
 		text = strings.ToValidUTF8(text[:previewSource], "")
 	}
 	return Snippet(previewNoise.ReplaceAllString(text, " "), runes)
-}
-
-// Reply is a draft written in answer to a message.
-type Reply struct {
-	From, To  string
-	Subject   string
-	InReplyTo string
-	Text      string
-}
-
-// Build makes the message that is saved as a draft.
-func (r Reply) Build(at time.Time) []byte {
-	subject := r.Subject
-	if !strings.HasPrefix(strings.ToLower(subject), "re:") {
-		subject = "Re: " + subject
-	}
-	id := make([]byte, 12)
-	rand.Read(id)
-	_, domain, _ := strings.Cut(r.From, "@")
-	clean := strings.NewReplacer("\r", "", "\n", "") // a header cannot hold a line break, which would start another
-	var b bytes.Buffer
-	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\n", clean.Replace(r.From), clean.Replace(r.To),
-		mime.BEncoding.Encode("utf-8", clean.Replace(subject)), at.Format(time.RFC1123Z))
-	fmt.Fprintf(&b, "Message-ID: <%s@%s>\r\n", hex.EncodeToString(id), clean.Replace(domain))
-	if r.InReplyTo != "" {
-		fmt.Fprintf(&b, "In-Reply-To: %s\r\nReferences: %s\r\n", clean.Replace(r.InReplyTo), clean.Replace(r.InReplyTo))
-	}
-	b.WriteString("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n")
-	body := base64.StdEncoding.EncodeToString([]byte(strings.ReplaceAll(r.Text, "\n", "\r\n")))
-	for len(body) > 76 {
-		b.WriteString(body[:76] + "\r\n")
-		body = body[76:]
-	}
-	b.WriteString(body + "\r\n")
-	return b.Bytes()
 }

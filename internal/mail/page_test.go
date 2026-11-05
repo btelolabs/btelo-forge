@@ -213,7 +213,10 @@ func TestAnEarlierDatabaseIsBroughtUpToDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(schema + `INSERT INTO messages (account, validity, uid, body) VALUES ('a', 1, 1, 'one` + "\r\n" + `two')`); err != nil {
+	columns := strings.NewReplacer("html TEXT NOT NULL DEFAULT '',", "", "whole INTEGER NOT NULL DEFAULT 0, -- the page holds all of the message", "",
+		"paged INTEGER NOT NULL DEFAULT 0, -- its page was fetched, if it has one", "").Replace(beforeBoxes())
+	earlier := strings.Replace(schema, messageColumns, columns, 1)
+	if _, err := db.Exec(earlier + `INSERT INTO messages (account, validity, uid, body) VALUES ('a', 1, 1, 'one` + "\r\n" + `two')`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()

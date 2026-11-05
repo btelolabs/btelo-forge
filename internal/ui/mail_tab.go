@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"image/color"
@@ -10,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btelolabs/btelo-forge/internal/ai"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/mail"
 )
@@ -101,12 +102,16 @@ func (a *App) drawMailTab(r gfx.Rect) {
 	}
 	open, hasOpen := a.mailCurrent()
 	switch {
+	case s.letter != nil && !wide:
+		a.drawMailLetter(main, s.letter)
 	case wide:
 		a.drawMailList(rectAt(main.X, main.Y, listW, main.H), side == 0)
 		edge := rectAt(main.X+listW, main.Y, max(1, u.px(1)), main.H)
 		u.c.Fill(edge, colBorder)
 		reader := rectAt(edge.Right(), main.Y, main.W-listW-edge.W, main.H)
-		if hasOpen {
+		if s.letter != nil {
+			a.drawMailLetter(reader, s.letter)
+		} else if hasOpen {
 			a.drawMailReader(reader, open, false)
 		} else {
 			a.drawMailEmpty(reader)
@@ -176,6 +181,11 @@ func (a *App) drawMailSide(r gfx.Rect) {
 			u.c.Text(u.bold(11.5), view.X+u.px(6), y+u.px(8), text, colFaint)
 			y += u.px(30)
 		}
+		if u.button("mail/write", rectAt(view.X, y, view.W, u.px(34)), icPencil, u.t("Write"), primary, len(s.accounts) > 0) {
+			a.mailWriteNew()
+			s.sideOn = false
+		}
+		y += u.px(42)
 		heading(u.t("Views"))
 		total := 0
 		for _, id := range s.chosen() {
@@ -188,7 +198,7 @@ func (a *App) drawMailSide(r gfx.Rect) {
 			{icMail, a.mailTierName(mail.TierMaybe), s.tiers[mail.TierMaybe].Unread},
 			{icClose, a.mailTierName(mail.TierNoise), s.tiers[mail.TierNoise].Unread},
 			{icThink, u.t("Not analysed"), s.tiers[""].All},
-			{icStar, u.t("Starred"), 0}, {icMail, u.t("All mail"), total}, {icRestore, u.t("History"), 0}}
+			{icStar, u.t("Starred"), 0}, {icSend, u.t("Sent"), 0}, {icMail, u.t("All mail"), total}, {icRestore, u.t("History"), 0}}
 		for i, v := range views {
 			if a.mailRow(fmt.Sprintf("mail/view/%d", i), rectAt(view.X, y, view.W, rowH), v.glyph, v.text, v.count, s.view == mailView(i)) {
 				s.view, s.viewChosen, s.stale, s.sideOn, s.trashing = mailView(i), true, true, false, false
@@ -398,6 +408,7 @@ const mailShareStart = 0.1
 func (a *App) drawMailAnalyse(x, y, w float32) float32 {
 	u := &a.u
 	s := &a.mail
+	y = a.drawMailModels("mail/model", x, y, w)
 	share := a.settings.MailShare
 	if share <= 0 {
 		share = mailShareStart
@@ -470,7 +481,11 @@ func (a *App) drawMailRow(view gfx.Rect, y float32, m mail.Message) {
 	if !m.Seen {
 		name = u.bold(13)
 	}
-	u.c.Text(name, x, r.Y+u.px(6), name.Ellipsize(m.From, w-small.Measure(date)-u.px(10)), colText)
+	who := m.From
+	if m.Box == mail.BoxSent {
+		who = u.tf("To %s", m.To)
+	}
+	u.c.Text(name, x, r.Y+u.px(6), name.Ellipsize(who, w-small.Measure(date)-u.px(10)), colText)
 	left := x
 	if m.Tier == mail.TierMust {
 		u.c.Circle(x+u.px(4), r.Y+u.px(36), u.px(3.5), colDanger)
@@ -480,7 +495,7 @@ func (a *App) drawMailRow(view gfx.Rect, y float32, m mail.Message) {
 	u.c.Text(small, x, r.Y+u.px(48), small.Ellipsize(mailOr(m, m.Summary), w), colDim)
 	u.c.Fill(rectAt(r.X, r.Bottom()-max(1, u.px(1)), r.W, max(1, u.px(1))), colBorder)
 	if u.clicked(id, r) {
-		s.current, s.scroll[mailScrollReader] = m.ID, 0
+		s.current, s.scroll[mailScrollReader], s.letter = m.ID, 0, nil
 	}
 }
 
@@ -577,6 +592,14 @@ func (a *App) drawMailReader(r gfx.Rect, m mail.Message, back bool) {
 		}
 		u.c.Text(small, x, y, small.Ellipsize(line, w), colDim)
 		y += small.Height() + u.px(4)
+		if m.To != "" {
+			line = u.tf("To %s", m.To)
+			if m.Cc != "" {
+				line += "  ·  " + u.tf("Cc %s", m.Cc)
+			}
+			u.c.Text(small, x, y, small.Ellipsize(line, w), colDim)
+			y += small.Height() + u.px(4)
+		}
 		line = a.mailAccountName(m.Account)
 		if !m.Date.IsZero() && m.Date.Unix() > 0 {
 			line = m.Date.Format("2006-01-02 15:04") + "  ·  " + line
@@ -589,21 +612,31 @@ func (a *App) drawMailReader(r gfx.Rect, m mail.Message, back bool) {
 		}
 		y = a.drawMailChoices(x, y, w, m)
 		ac, known := s.account(m.Account)
+		bx := x
+		for _, b := range []struct {
+			id, text string
+			click    func()
+		}{{"mail/reply", u.t("Reply"), func() { a.mailReply(m, false, false) }}, {"mail/reply-all", u.t("Reply to all"), func() { a.mailReply(m, true, false) }},
+			{"mail/forward", u.t("Forward…"), func() { a.mailWrite(m.Account, m.Forwarded(ac.Email)) }}} {
+			bw := u.buttonWidth("", b.text)
+			if u.button(b.id, rectAt(bx, y, bw, u.px(30)), "", b.text, plain, known) {
+				b.click()
+			}
+			bx += bw + u.px(6)
+		}
+		y += u.px(38)
 		bw, rw := u.px(120), u.px(150)
 		if u.button("mail/archive", rectAt(x, y, bw, u.px(30)), icArchive, u.t("Archive"), plain, known && m.Inbox && s.busy == "") {
 			a.mailArchive(m.ID, ac)
 			s.current = 0
 		}
-		if u.button("mail/reply", rectAt(x+bw+u.px(8), y, rw, u.px(30)), "", u.t("Draft a reply"), plain, known && !s.drafting) {
-			a.mailDraftReply(m)
+		if u.button("mail/ai-reply", rectAt(x+bw+u.px(8), y, rw, u.px(30)), "", u.t("Draft a reply"), plain, known && !s.drafting) {
+			a.mailReply(m, false, true)
 		}
 		if page {
 			y = a.drawMailPictures(x, y, w, bw+rw+u.px(20), m, p)
 		} else {
 			y += u.px(44)
-		}
-		if s.draftFor == m.ID {
-			y = a.drawMailDraft(x, y, w, m)
 		}
 		if page {
 			return y
@@ -656,7 +689,7 @@ func (a *App) drawMailSummary(x, y, w float32, m mail.Message) float32 {
 }
 
 // drawMailChoices is what the user can say of a message: its tier, which they change with a click, a star, and its
-// sender. All of it stays on this computer, and each button undoes itself.
+// sender. A star goes to the server as well; the rest stays on this computer. Each button undoes itself.
 func (a *App) drawMailChoices(x, y, w float32, m mail.Message) float32 {
 	u := &a.u
 	s := &a.mail
@@ -667,24 +700,29 @@ func (a *App) drawMailChoices(x, y, w float32, m mail.Message) float32 {
 			s.notice = a.describe(err)
 		}
 	}
-	names := make([]string, len(mail.Tiers))
-	for i, t := range mail.Tiers {
-		names[i] = a.mailTierName(t)
+	if m.Inbox {
+		names := make([]string, len(mail.Tiers))
+		for i, t := range mail.Tiers {
+			names[i] = a.mailTierName(t)
+		}
+		at := slices.Index(mail.Tiers, m.Tier)
+		if pick := u.chips("mail/tier", rectAt(x, y, min(w, u.px(300)), u.px(30)), names, at, true); pick != at {
+			done(store.Pick(m.ID, mail.Tiers[pick]))
+		}
+		y += u.px(38)
 	}
-	at := slices.Index(mail.Tiers, m.Tier)
-	if pick := u.chips("mail/tier", rectAt(x, y, min(w, u.px(300)), u.px(30)), names, at, true); pick != at {
-		done(store.Pick(m.ID, mail.Tiers[pick]))
-	}
-	y += u.px(38)
 	rule := s.senders[strings.ToLower(m.Address)]
 	toggles := []struct {
 		id, glyph, off, on string
 		set                bool
 		click              func() error
 	}{
-		{"star", icStar, u.t("Star"), u.t("Starred"), m.Starred, func() error { return store.Star(m.ID, !m.Starred) }},
+		{"star", icStar, u.t("Star"), u.t("Starred"), m.Starred, func() error { return a.mailStar(m) }},
 		{"person", icSort, u.t("Important person"), u.t("Important person"), rule == mail.TierMust, func() error { return a.mailSetSender(m, rule, mail.TierMust) }},
 		{"mute", icClose, u.t("Hide this sender"), u.t("Sender hidden"), rule == mail.TierNoise, func() error { return a.mailSetSender(m, rule, mail.TierNoise) }},
+	}
+	if !m.Inbox {
+		toggles = toggles[:1] // what the user sent, or what lies outside the inbox, is in no tier
 	}
 	bx := x
 	for _, t := range toggles {
@@ -705,34 +743,30 @@ func (a *App) drawMailChoices(x, y, w float32, m mail.Message) float32 {
 	return y + u.px(40)
 }
 
+// mailStar stars a message or takes the star off, here at once and on the server behind it; what the server could not be
+// told of goes with the next sync.
+func (a *App) mailStar(m mail.Message) error {
+	s := &a.mail
+	if err := s.mailer.Store.Star(m.ID, !m.Starred); err != nil {
+		return err
+	}
+	if ac, ok := s.account(m.Account); ok {
+		mailer := s.mailer
+		a.background(func(ctx context.Context) {
+			if err := mailer.PushStars(ctx, ac); err != nil && !errors.Is(err, context.Canceled) {
+				a.post(func() { a.mail.notice = a.describeMail(err) })
+			}
+		})
+	}
+	return nil
+}
+
 // mailSetSender says what a sender's mail is, or takes that back when it was said already.
 func (a *App) mailSetSender(m mail.Message, rule, tier string) error {
 	if rule == tier {
 		tier = ""
 	}
 	return a.mail.mailer.Store.SetSender(m.Address, tier)
-}
-
-// drawMailDraft is the reply being written; it goes to the mailbox's drafts, and there is no way to send it from here.
-func (a *App) drawMailDraft(x, y, w float32, m mail.Message) float32 {
-	u := &a.u
-	s := &a.mail
-	if s.drafting {
-		u.c.Text(u.face(12.5), x, y, u.t("The model is writing a reply…"), colDim)
-		return y + u.px(30)
-	}
-	h := u.px(150)
-	u.textBox("mail/draft", rectAt(x, y, w, h), &s.draft, u.t("Write the reply…"), true)
-	y += h + u.px(8)
-	if u.button("mail/save-draft", rectAt(x, y, u.px(170), u.px(30)), "", u.t("Save to drafts"), primary, strings.TrimSpace(s.draft) != "" && s.busy == "") {
-		a.mailSaveDraft(m)
-	}
-	if u.button("mail/cancel-draft", rectAt(x+u.px(178), y, u.px(80), u.px(30)), "", u.t("Cancel"), plain, true) {
-		s.draft, s.draftFor = "", 0
-	}
-	f := u.face(11.5)
-	u.c.Text(f, x+u.px(270), y+(u.px(30)-f.Height())/2, f.Ellipsize(u.t("It will not be sent"), w-u.px(270)), colFaint)
-	return y + u.px(44)
 }
 
 // drawMailForm binds a mailbox.
@@ -744,7 +778,7 @@ func (a *App) drawMailForm(r gfx.Rect) {
 		x := view.X + (view.W-w)/2
 		y := view.Y + u.px(36)
 		y = a.paragraph(x, y, w, u.t("Bind a mailbox"), 18, colText) + u.px(8)
-		y = a.paragraph(x, y, w, u.t("Your mail stays on this computer and is read by a model on this computer. You can bind several mailboxes, see them together, and choose which to show."), 13, colDim) + u.px(16)
+		y = a.paragraph(x, y, w, u.t("A copy of your mail stays on this computer. You can bind several mailboxes, see them together, write from any of them, and have a model sort them."), 13, colDim) + u.px(16)
 		names := make([]string, len(mailProviders))
 		for i, p := range mailProviders {
 			names[i] = p.name
@@ -771,13 +805,14 @@ func (a *App) drawMailForm(r gfx.Rect) {
 		p := mailProviders[s.provider]
 		if p.host == "" {
 			box("mail/host", u.t("IMAP server, such as imap.example.com:993"), &s.host)
+			box("mail/smtp", u.t("Outgoing server, such as smtp.example.com:465"), &s.smtp)
 		}
 		u.secretBox("mail/password", rectAt(x, y, w, u.px(34)), &s.password, u.t("App password or authorisation code"))
 		y += u.px(42)
 		if p.note != "" {
 			y = a.paragraph(x, y, w, u.t(p.note), 12.5, colDim) + u.px(6)
 		}
-		y = a.paragraph(x, y, w, u.t("This is not your usual password, and it can read everything in the mailbox, so it is kept sealed on this computer. The app never sends mail, and what you delete goes to the mailbox's trash."), 12, colFaint) + u.px(12)
+		y = a.paragraph(x, y, w, u.t("This is not your usual password, and it can read everything in the mailbox and send from it, so it is kept sealed on this computer. Mail is sent only when you press Send, and what you delete goes to the mailbox's trash."), 12, colFaint) + u.px(12)
 		bw := u.px(150)
 		connect := u.t("Bind")
 		if s.signing {
@@ -808,34 +843,9 @@ func (a *App) drawMailForm(r gfx.Rect) {
 // settingsMail holds the preferences of the mail tab: which model reads mail, and how often it is fetched.
 func (a *App) settingsMail(view gfx.Rect, y float32) float32 {
 	u := &a.u
-	lang := string(u.lang)
 	u.c.Text(u.bold(13), view.X, y, u.t("Mail"), colText)
 	y += u.px(24)
-	var models []ai.Choice
-	for _, ch := range a.ai.config.Choices() {
-		if ch.Kind == ai.KindLLM && ch.Local != nil {
-			if _, have := a.ai.rt.Files(*ch.Local); have {
-				models = append(models, ch)
-			}
-		}
-	}
-	if len(models) > 0 {
-		current, _ := a.mailModel()
-		names := make([]string, len(models))
-		at := 0
-		for i, ch := range models {
-			names[i] = ch.Name.In(lang)
-			if ch.ID == current.ID {
-				at = i
-			}
-		}
-		pick, h := u.flowChips("settings/mail/model", rectAt(view.X, y, view.W, u.px(28)), names, at)
-		if pick >= 0 && pick != at {
-			a.settings.MailModel = models[pick].ID
-			a.saveSettings()
-		}
-		y += h + u.px(8)
-	}
+	y = a.drawMailModels("settings/mail/model", view.X, y, view.W) + u.px(2)
 	every := []int{15, 60, -1}
 	names := []string{u.t("Every 15 minutes"), u.t("Every hour"), u.t("Only when asked")}
 	at := 0

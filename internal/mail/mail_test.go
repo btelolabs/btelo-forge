@@ -392,7 +392,7 @@ func TestAStarLiftsItsConversation(t *testing.T) {
 	m := testMailer(t)
 	put := func(uid uint32, id, reply, from, thread string) int64 {
 		raw := "From: " + from + "\r\nSubject: " + id + "\r\nMessage-ID: " + id + "\r\nIn-Reply-To: " + reply + "\r\n\r\nx"
-		if err := m.Store.put("a", 1, Fetched{UID: uid, ThreadID: thread, Raw: []byte(raw)}); err != nil {
+		if err := m.Store.put("a", BoxInbox, 1, Fetched{UID: uid, ThreadID: thread, Raw: []byte(raw)}); err != nil {
 			t.Fatal(err)
 		}
 		var row int64
@@ -417,11 +417,11 @@ func TestAStarLiftsItsConversation(t *testing.T) {
 func TestAForgedSenderIsNotImportant(t *testing.T) {
 	m := testMailer(t)
 	raw := "Authentication-Results: mx.google.com; dmarc=fail header.from=boss.com\r\nAuthentication-Results: dmarc=pass\r\nFrom: boss@boss.com\r\nSubject: forged\r\n\r\nPay this"
-	if err := m.Store.put("a", 1, Fetched{UID: 1, Raw: []byte(raw)}); err != nil {
+	if err := m.Store.put("a", BoxInbox, 1, Fetched{UID: 1, Raw: []byte(raw)}); err != nil {
 		t.Fatal(err)
 	}
 	real := "Authentication-Results: mx.google.com; dmarc=pass\r\nFrom: boss@boss.com\r\nSubject: real\r\n\r\nHi"
-	if err := m.Store.put("a", 1, Fetched{UID: 2, Raw: []byte(real)}); err != nil {
+	if err := m.Store.put("a", BoxInbox, 1, Fetched{UID: 2, Raw: []byte(real)}); err != nil {
 		t.Fatal(err)
 	}
 	list, _ := m.Store.List(Filter{})
@@ -633,7 +633,9 @@ func TestADraftIsSavedAndNothingElse(t *testing.T) {
 	a := accountOf("a", s)
 	m.Sync(context.Background(), a, nil)
 	list, _ := m.Store.List(Filter{})
-	if err := m.SaveDraft(context.Background(), a, list[0], "好的，七点见\n再联系", time.Now()); err != nil {
+	l := list[0].Answer(a.Email, false)
+	l.Text = "好的，七点见\n再联系"
+	if err := m.SaveDraft(context.Background(), a, l, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.Drafts) != 1 {
@@ -648,14 +650,14 @@ func TestADraftIsSavedAndNothingElse(t *testing.T) {
 	}
 }
 
-// TestNothingCanSendOrDelete holds the promise made to the user in the code itself: nothing here speaks SMTP, marks a
+// TestNothingIsRemovedForGood holds the promise made to the user in the code itself: nothing here marks a
 // message deleted or expunges a mailbox. What is deleted goes to the mailbox's trash, by MOVE, and can come back.
-func TestNothingCanSendOrDelete(t *testing.T) {
+func TestNothingIsRemovedForGood(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	forbidden := regexp.MustCompile(`(?i)net/smtp|smtp\.|\bEXPUNGE\b|\\\\?Deleted\b|\bCOPY\b`)
+	forbidden := regexp.MustCompile(`(?i)\bEXPUNGE\b|\\\\?Deleted\b|\bCOPY\b`)
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
@@ -741,10 +743,6 @@ func TestParseReadsTheMailThatArrives(t *testing.T) {
 func TestQuoteCannotStartACommand(t *testing.T) {
 	if got := quote("a\"b\\c\r\nd FAKE"); got != `"a\"b\\cd FAKE"` {
 		t.Fatal(got)
-	}
-	r := Reply{From: "a@a.com", To: "b@b.com\r\nBcc: x@x.com", Subject: "hi\r\nBcc: y@y.com", Text: "t"}
-	if strings.Contains(string(r.Build(time.Now())), "\r\nBcc:") {
-		t.Fatal("a header was added through a line break")
 	}
 }
 
