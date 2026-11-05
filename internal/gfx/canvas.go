@@ -399,8 +399,9 @@ func (w Wedge) bounds(cx, cy float32) (x0, y0, x1, y1 float64) {
 }
 
 // Pie fills wedges around (cx, cy), anti-aliased, leaving a strip gap pixels wide between neighbours. Each wedge
-// touches only the box it lies in, and a pixel of the box beyond its edges is left before any root or arctangent, so a
-// thin piece of a ring costs little and a pie of hundreds stays quick.
+// touches only the box it lies in, and a pixel of the box beyond its edges or outside its ring is left before any root,
+// so a thin piece of a ring costs little and a pie of hundreds stays quick. How far a pixel is from an edge comes from
+// two dot products, not from its angle.
 func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 	if c.rec != nil {
 		for _, w := range wedges {
@@ -416,18 +417,30 @@ func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 		x0, y0, x1, y1 := w.bounds(cx, cy)
 		b := image.Rect(int(math.Floor(x0-1)), int(math.Floor(y0-1)), int(math.Ceil(x1+1)), int(math.Ceil(y1+1))).Intersect(c.clip)
 		span := float64(w.To - w.From)
+		whole := span >= turn-1e-4
 		sinFrom, cosFrom := math.Sincos(float64(w.From))
 		sinTo, cosTo := math.Sincos(float64(w.To))
+		// A pixel covers something only between these squared distances from the centre.
+		outer := float64(w.Radius) + 0.5
+		inner := max(float64(w.Inner)-0.5, 0)
+		outer2, inner2 := outer*outer, inner*inner
 		for y := b.Min.Y; y < b.Max.Y; y++ {
 			i := c.Img.PixOffset(b.Min.X, y)
 			dy := float64(float32(y) + 0.5 - cy)
 			for x := b.Min.X; x < b.Max.X; x, i = x+1, i+4 {
 				dx := float64(float32(x) + 0.5 - cx)
-				// Below half a turn the two edges are lines to be inside of, and a pixel a whole one outside either covers nothing.
-				if span < math.Pi && (dx*cosFrom+dy*sinFrom < -1 || dx*cosTo+dy*sinTo > 1) {
+				// Each edge is a ray from the centre: across from it lies the side within the wedge, along it how far
+				// out a pixel is. Below half a turn the wedge is inside both edges, and a pixel a whole one outside
+				// either covers nothing.
+				acrossFrom, acrossTo := dx*cosFrom+dy*sinFrom, -(dx*cosTo + dy*sinTo)
+				if span < math.Pi && (acrossFrom < -1 || acrossTo < -1) {
 					continue
 				}
-				r := math.Hypot(dx, dy)
+				r2 := dx*dx + dy*dy
+				if r2 >= outer2 || inner > 0 && r2 <= inner2 {
+					continue
+				}
+				r := math.Sqrt(r2)
 				cov := clamp01(w.Radius - float32(r) + 0.5)
 				if w.Inner > 0 {
 					cov = min(cov, clamp01(float32(r)-w.Inner+0.5))
@@ -435,19 +448,22 @@ func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 				if cov <= 0 {
 					continue
 				}
-				if span < turn-1e-4 {
-					// The distance to the nearer of the wedge's two edges, inside positive: the edges are rays, so
-					// past a right angle from one the nearest point of it is the centre.
-					off := math.Mod(math.Atan2(dx, -dy)-float64(w.From), turn) // clockwise from straight up
-					if off < 0 {
-						off += turn
+				if !whole {
+					// The distance to the nearer of the two edges, inside positive. Beside a ray it is the distance
+					// across; behind its start, the distance to the centre.
+					ray := func(across, along float64) float64 {
+						if along >= 0 {
+							return math.Abs(across)
+						}
+						return r
 					}
-					edge := func(a float64) float64 { return r * math.Sin(min(a, math.Pi/2)) }
-					var d float64
-					if off <= span {
-						d = edge(min(off, span-off))
-					} else {
-						d = -edge(min(off-span, turn-off))
+					d := min(ray(acrossFrom, dx*sinFrom-dy*cosFrom), ray(acrossTo, dx*sinTo-dy*cosTo))
+					inside := acrossFrom >= 0 && acrossTo >= 0
+					if span > math.Pi {
+						inside = acrossFrom >= 0 || acrossTo >= 0
+					}
+					if !inside {
+						d = -d
 					}
 					cov = min(cov, clamp01(float32(d)-gap/2+0.5))
 				}

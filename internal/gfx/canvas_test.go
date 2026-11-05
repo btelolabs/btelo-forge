@@ -178,6 +178,68 @@ func TestPieOfOneWholeTurnHasNoSeam(t *testing.T) {
 	}
 }
 
+// referencePie is the plain per-pixel pie Pie must reproduce: every pixel of a wedge's box, its edges found by its
+// angle from them.
+func referencePie(c *Canvas, cx, cy float32, wedges []Wedge, gap float32) {
+	const turn = 2 * math.Pi
+	for _, w := range wedges {
+		x0, y0, x1, y1 := w.bounds(cx, cy)
+		b := image.Rect(int(math.Floor(x0-1)), int(math.Floor(y0-1)), int(math.Ceil(x1+1)), int(math.Ceil(y1+1))).Intersect(c.clip)
+		span := float64(w.To - w.From)
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			for x := b.Min.X; x < b.Max.X; x++ {
+				dx, dy := float64(float32(x)+0.5-cx), float64(float32(y)+0.5-cy)
+				r := math.Hypot(dx, dy)
+				cov := clamp01(w.Radius - float32(r) + 0.5)
+				if w.Inner > 0 {
+					cov = min(cov, clamp01(float32(r)-w.Inner+0.5))
+				}
+				if span < turn-1e-4 {
+					off := math.Mod(math.Atan2(dx, -dy)-float64(w.From), turn)
+					if off < 0 {
+						off += turn
+					}
+					edge := func(a float64) float64 { return r * math.Sin(min(a, math.Pi/2)) }
+					d := -edge(min(off-span, turn-off))
+					if off <= span {
+						d = edge(min(off, span-off))
+					}
+					cov = min(cov, clamp01(float32(d)-gap/2+0.5))
+				}
+				if cov > 0 {
+					c.blend(c.Img.PixOffset(x, y), w.Col, cov)
+				}
+			}
+		}
+	}
+}
+
+// Pie finds how far a pixel is from a wedge's edges without its angle, and leaves pixels before working them out:
+// what it draws is what the angles draw, to a level of rounding, for wedges of every span, ring and gap.
+func TestPieDrawsWhatTheAnglesDraw(t *testing.T) {
+	rng := rand.New(rand.NewPCG(7, 11))
+	for n := range 400 {
+		from := rng.Float32() * 2 * math.Pi
+		span := []float32{0.01, 0.05, 0.3, 1, math.Pi / 2, math.Pi - 0.01, math.Pi, math.Pi + 0.01, 4, 6, 2 * math.Pi}[n%11]
+		w := Wedge{From: from, To: from + span, Radius: 4 + rng.Float32()*40, Col: Hex(0x33cc77)}
+		if n%3 != 0 {
+			w.Inner = rng.Float32() * w.Radius * 0.9
+		}
+		gap := []float32{0, 0.5, 1, 4}[n%4]
+		got, want := NewCanvas(100, 100), NewCanvas(100, 100)
+		got.Clear(Hex(0x101010))
+		want.Clear(Hex(0x101010))
+		got.Pie(50.3, 49.7, []Wedge{w}, gap)
+		referencePie(want, 50.3, 49.7, []Wedge{w}, gap)
+		for i := range got.Img.Pix {
+			if d := int(got.Img.Pix[i]) - int(want.Img.Pix[i]); d < -1 || d > 1 {
+				x, y := i/4%100, i/4/100
+				t.Fatalf("wedge %+v, gap %v: (%d,%d) is %v, the angles make it %v", w, gap, x, y, got.Img.RGBAAt(x, y), want.Img.RGBAAt(x, y))
+			}
+		}
+	}
+}
+
 func TestWrapNeverStartsALineWithClosingPunctuation(t *testing.T) {
 	fonts, err := LoadSystemFonts()
 	if err != nil {
