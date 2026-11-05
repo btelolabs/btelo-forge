@@ -399,7 +399,8 @@ func (w Wedge) bounds(cx, cy float32) (x0, y0, x1, y1 float64) {
 }
 
 // Pie fills wedges around (cx, cy), anti-aliased, leaving a strip gap pixels wide between neighbours. Each wedge
-// touches only the box it lies in, so a thin piece of a ring costs little and a pie of hundreds stays quick.
+// touches only the box it lies in, and a pixel of the box beyond its edges is left before any root or arctangent, so a
+// thin piece of a ring costs little and a pie of hundreds stays quick.
 func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 	if c.rec != nil {
 		for _, w := range wedges {
@@ -415,11 +416,17 @@ func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 		x0, y0, x1, y1 := w.bounds(cx, cy)
 		b := image.Rect(int(math.Floor(x0-1)), int(math.Floor(y0-1)), int(math.Ceil(x1+1)), int(math.Ceil(y1+1))).Intersect(c.clip)
 		span := float64(w.To - w.From)
+		sinFrom, cosFrom := math.Sincos(float64(w.From))
+		sinTo, cosTo := math.Sincos(float64(w.To))
 		for y := b.Min.Y; y < b.Max.Y; y++ {
 			i := c.Img.PixOffset(b.Min.X, y)
 			dy := float64(float32(y) + 0.5 - cy)
 			for x := b.Min.X; x < b.Max.X; x, i = x+1, i+4 {
 				dx := float64(float32(x) + 0.5 - cx)
+				// Below half a turn the two edges are lines to be inside of, and a pixel a whole one outside either covers nothing.
+				if span < math.Pi && (dx*cosFrom+dy*sinFrom < -1 || dx*cosTo+dy*sinTo > 1) {
+					continue
+				}
 				r := math.Hypot(dx, dy)
 				cov := clamp01(w.Radius - float32(r) + 0.5)
 				if w.Inner > 0 {
