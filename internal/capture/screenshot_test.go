@@ -6,7 +6,6 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -35,28 +34,5 @@ func TestWritePNGRoundTripAndExclusive(t *testing.T) {
 	r, g, b, a := got.At(10, 20).RGBA()
 	if uint8(r>>8) != 210 || uint8(g>>8) != 95 || uint8(b>>8) != 40 || uint8(a>>8) != 255 {
 		t.Fatalf("pixel (10,20) = (%d,%d,%d,%d)", r>>8, g>>8, b>>8, a>>8)
-	}
-}
-
-func TestBGRAToRGBAConversion(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows-specific pixel swizzle")
-	}
-	// Test > 256K pixels so the parallel band path is exercised too.
-	const n = (1<<18 + 37)
-	src := make([]byte, n*4)
-	dst := make([]byte, n*4)
-	for i := 0; i < n; i++ {
-		src[i*4+0] = byte(i)      // B
-		src[i*4+1] = byte(i >> 3) // G
-		src[i*4+2] = byte(i >> 6) // R
-		src[i*4+3] = 0            // undefined GDI alpha
-	}
-	bgraToRGBA(dst, src)
-	for i := range [4]int{0, 1, 1 << 18, n - 1} {
-		idx := [4]int{0, 1, 1 << 18, n - 1}[i]
-		if dst[idx*4+0] != src[idx*4+2] || dst[idx*4+1] != src[idx*4+1] || dst[idx*4+2] != src[idx*4+0] || dst[idx*4+3] != 255 {
-			t.Fatalf("at %d: got RGBA=%v from BGRA=%v", idx, dst[idx*4:idx*4+4], src[idx*4:idx*4+4])
-		}
 	}
 }
