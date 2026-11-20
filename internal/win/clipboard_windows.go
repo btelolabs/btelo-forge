@@ -238,13 +238,9 @@ func globalBytes(data []byte) (uintptr, error) {
 	return h, nil
 }
 
-// SetClipboardImage puts a picture on the clipboard twice: as PNG, which keeps transparency for the programs that
-// read it (Photoshop, Office, browsers), and as a bitmap over white for the ones that do not.
+// SetClipboardImage puts a picture on the clipboard: as a 32-bit bitmap over white, and, when it has any
+// non-opaque pixel, also as PNG so programs that read PNG keep its transparency.
 func (w *Window) SetClipboardImage(img image.Image) error {
-	var pngData bytes.Buffer
-	if err := png.Encode(&pngData, img); err != nil {
-		return err
-	}
 	b := img.Bounds()
 	width, height := b.Dx(), b.Dy()
 	if width == 0 || height == 0 {
@@ -258,44 +254,105 @@ func (w *Window) SetClipboardImage(img image.Image) error {
 	binary.LittleEndian.PutUint16(dib[12:], 1)
 	binary.LittleEndian.PutUint16(dib[14:], 32)
 	binary.LittleEndian.PutUint32(dib[20:], uint32(width*height*4))
-	for y := 0; y < height; y++ {
-		row := dib[40+(height-1-y)*width*4:]
-		for x := 0; x < width; x++ {
-			r, g, bl, a := img.At(b.Min.X+x, b.Min.Y+y).RGBA() // premultiplied, 16 bits
-			white := 0xffff - a
-			row[x*4] = uint8((bl + white) >> 8)
-			row[x*4+1] = uint8((g + white) >> 8)
-			row[x*4+2] = uint8((r + white) >> 8)
-			row[x*4+3] = 0xff
+	opaque := fillClipboardDIB(dib[40:], img, b, width, height)
+
+	var hPNG, pngFormat uintptr
+	if !opaque {
+		var pngData bytes.Buffer
+		enc := png.Encoder{CompressionLevel: png.BestSpeed}
+		if err := enc.Encode(&pngData, img); err != nil {
+			return err
 		}
-	}
-	name, _ := syscall.UTF16PtrFromString("PNG")
-	pngFormat, _, _ := registerFormat.Call(uintptr(unsafe.Pointer(name)))
-	hPNG, err := globalBytes(pngData.Bytes())
-	if err != nil {
-		return err
+		name, _ := syscall.UTF16PtrFromString("PNG")
+		pngFormat, _, _ = registerFormat.Call(uintptr(unsafe.Pointer(name)))
+		if pngFormat != 0 {
+			var err error
+			if hPNG, err = globalBytes(pngData.Bytes()); err != nil {
+				return err
+			}
+		}
 	}
 	hDIB, err := globalBytes(dib)
 	if err != nil {
-		globalFree.Call(hPNG)
+		if hPNG != 0 {
+			globalFree.Call(hPNG)
+		}
 		return err
 	}
 	if r, _, _ := openClipboard.Call(w.Handle); r == 0 {
-		globalFree.Call(hPNG)
+		if hPNG != 0 {
+			globalFree.Call(hPNG)
+		}
 		globalFree.Call(hDIB)
 		return errors.New("clipboard busy")
 	}
 	defer closeClipboard.Call()
 	emptyClipboard.Call()
 	// Once set, the clipboard owns the memory; what it refused is freed here.
-	if pngFormat == 0 {
-		globalFree.Call(hPNG)
-	} else if r, _, _ := setClipboardData.Call(pngFormat, hPNG); r == 0 {
-		globalFree.Call(hPNG)
+	if hPNG != 0 {
+		if r, _, _ := setClipboardData.Call(pngFormat, hPNG); r == 0 {
+			globalFree.Call(hPNG)
+		}
 	}
 	if r, _, e := setClipboardData.Call(cfDIB, hDIB); r == 0 {
 		globalFree.Call(hDIB)
 		return e
 	}
 	return nil
+}
+
+// fillClipboardDIB writes bottom-up BGRX rows over white into dst and reports whether every pixel was opaque.
+func fillClipboardDIB(dst []byte, img image.Image, b image.Rectangle, width, height int) bool {
+	opaque := true
+	switch src := img.(type) {
+	case *image.RGBA:
+		for y := 0; y < height; y++ {
+			s := src.Pix[(b.Min.Y+y-src.Rect.Min.Y)*src.Stride+(b.Min.X-src.Rect.Min.X)*4:]
+			row := dst[(height-1-y)*width*4:]
+			for i := 0; i < width*4; i += 4 {
+				r, g, bl, a := s[i], s[i+1], s[i+2], s[i+3]
+				if a == 255 {
+					row[i], row[i+1], row[i+2], row[i+3] = bl, g, r, 0xff
+					continue
+				}
+				opaque = false
+				white := 255 - a
+				row[i], row[i+1], row[i+2], row[i+3] = bl+white, g+white, r+white, 0xff
+			}
+		}
+	case *image.NRGBA:
+		for y := 0; y < height; y++ {
+			s := src.Pix[(b.Min.Y+y-src.Rect.Min.Y)*src.Stride+(b.Min.X-src.Rect.Min.X)*4:]
+			row := dst[(height-1-y)*width*4:]
+			for i := 0; i < width*4; i += 4 {
+				r, g, bl, a := s[i], s[i+1], s[i+2], s[i+3]
+				if a == 255 {
+					row[i], row[i+1], row[i+2], row[i+3] = bl, g, r, 0xff
+					continue
+				}
+				opaque = false
+				aa, ww := uint32(a), uint32(255-a)*255
+				row[i] = uint8((uint32(bl)*aa + ww + 127) / 255)
+				row[i+1] = uint8((uint32(g)*aa + ww + 127) / 255)
+				row[i+2] = uint8((uint32(r)*aa + ww + 127) / 255)
+				row[i+3] = 0xff
+			}
+		}
+	default:
+		for y := 0; y < height; y++ {
+			row := dst[(height-1-y)*width*4:]
+			for x := 0; x < width; x++ {
+				r, g, bl, a := img.At(b.Min.X+x, b.Min.Y+y).RGBA() // premultiplied, 16 bits
+				if a != 0xffff {
+					opaque = false
+				}
+				white := 0xffff - a
+				row[x*4] = uint8((bl + white) >> 8)
+				row[x*4+1] = uint8((g + white) >> 8)
+				row[x*4+2] = uint8((r + white) >> 8)
+				row[x*4+3] = 0xff
+			}
+		}
+	}
+	return opaque
 }

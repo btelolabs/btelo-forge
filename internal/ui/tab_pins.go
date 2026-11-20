@@ -25,6 +25,7 @@ const (
 	tabKeyboard = "keyboard"
 	tabAI       = "ai"
 	tabMail     = "mail"
+	tabPlayer   = "player" // a video played as it is
 )
 
 // savedTab is a pinned tab as it is kept between runs.
@@ -46,6 +47,8 @@ func (s *savedTab) glyph() string {
 		if f := officeFormatOf(s.Path); f != nil {
 			return f.glyph
 		}
+	case tabPlayer:
+		return icPlay
 	}
 	return icVideo
 }
@@ -78,6 +81,8 @@ func tabSpec(d *doc) (savedTab, bool) {
 		return savedTab{Kind: tabMail}, true
 	case d.model != nil:
 		return savedTab{Kind: tabModel, Path: d.model.path}, true
+	case d.movie != nil:
+		return savedTab{Kind: tabPlayer, Path: d.movie.path}, true
 	case d.p != nil && d.file != "":
 		return savedTab{Kind: tabEdit, Path: d.file}, true
 	case d.p != nil:
@@ -258,6 +263,18 @@ func (a *App) restoreTab(d *doc) {
 		a.whenToolsReady(func() { fill(func() { a.openEditFile(path) }) })
 	case tabVideo:
 		a.whenToolsReady(func() { fill(func() { a.openVideoIn(d, path, false) }) })
+	case tabPlayer:
+		// A pinned player comes back paused where it was left: it plays once it is asked to.
+		a.background(func(context.Context) {
+			_, err := os.Stat(path)
+			a.post(func() {
+				if err != nil {
+					lost(err)
+					return
+				}
+				fill(func() { a.doc.movie = &movieDoc{path: path} })
+			})
+		})
 	case tabEditor:
 		fill(a.newEditor)
 	case tabFiles:

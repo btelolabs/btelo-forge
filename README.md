@@ -27,6 +27,9 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
 
 <p align="center"><img src="docs/demos/video.webp" alt="Two clips joined, one cut and sped up, music, a caption and a logo added on the timeline"></p>
 
+- A video opened to watch, from Explorer, the file manager or a path pasted in its bar, plays in a player at the file's
+  own frame rate (4K at 60 pictures a second), with speed, volume, a full window and the place it was left; its Edit
+  button opens it in the editor at the picture being watched.
 - Tabs for separate edits, along the top or down the left side: drag them into any order, and right-click to pin one, which then opens again with the app holding what it held. Drop more videos to extend the main track or stack them on upper tracks.
 - A multi-track timeline for video, overlays (text, images and drawings) and music; upper tracks cover lower ones.
 - Split, trim and per-clip speed from 0.25× to 4×, with the sound's pitch kept.
@@ -142,12 +145,15 @@ drove it over MCP, then cut, sped up and exported as WebP by Btelo Forge.
 - Folder lists side by side, driven as gdu and vim are: hjkl or the arrows move, e opens another list beside. Each
   list shows its folder as rows, or as a grid of pictures filtered by kind, category or tag.
 - i analyses what takes the space, as gdu does: the list is sorted by size with a bar for each item, and a pie of
-  the folder sits under it. Move down the list with the keys or the mouse and the pie turns the item under the
-  cursor to twelve o'clock, on a spring; click a wedge to go to its item.
+  the folder floats on a card in its bottom right corner, sliding to the top while it would hide the row in use.
+  Move down the list with the keys or the mouse and the pie turns the item under the cursor to twelve o'clock, on a
+  spring; the arc under the pointer is outlined, and a click on a wedge goes to its item. The folders' sizes grow
+  and the list sorts itself as the analysis reads them. Analyses are kept between runs: one from an earlier run is
+  shown at once, saying how old it is, while it is read again in the background.
 - Copies, moves and deletions run in the background with their progress shown; deleted items go to the Recycle Bin,
   and u brings them back.
 
-<p align="center"><img src="docs/screenshots/en-files-analyse.gif" alt="A folder analysed: the pie under the list turns to the item under the cursor"></p>
+<p align="center"><img src="docs/screenshots/en-files-analyse.gif" alt="A folder analysed: the pie on its card turns to the item under the cursor"></p>
 
 ## Screen recording (Windows)
 

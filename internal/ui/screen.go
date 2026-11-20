@@ -104,6 +104,7 @@ type screenState struct {
 	bar    *recordBar
 	ask    *surface    // the question before deleting the recording, when asked from the bar
 	frame  *surface    // the outline of the region being recorded
+	notice *shotNotice // the line saying a screenshot was taken
 	barPos image.Point // where the user dragged the recording bar, relative to its display; zero is the default place
 	flow   barFlow     // the options bar being laid out in rows
 
@@ -144,6 +145,9 @@ func (a *App) screenTick() {
 	if sc.ask != nil {
 		a.discardAskTick(sc.ask)
 	}
+	if sc.notice != nil {
+		a.shotNoticeTick(sc.notice)
+	}
 }
 
 // closeScreen closes every window over the screen, as the app closes.
@@ -160,6 +164,7 @@ func (a *App) closeScreen() {
 	sc.ask.close()
 	a.closeScreenDraw()
 	sc.frame.close()
+	a.closeShotNotice()
 	*sc = screenState{}
 }
 
@@ -392,10 +397,7 @@ func (a *App) openRecordBar() {
 		return
 	}
 	d := a.rec.rec.Options().Display
-	scale := float32(1)
-	if host, ok := a.host.(interface{ Scale() float32 }); ok {
-		scale = host.Scale()
-	}
+	scale := a.overlayScale()
 	w, h := int(barWidth*scale), int(barHeight*scale)
 	pos := image.Pt(d.Width-w-int(24*scale), int(24*scale))
 	if sc.barPos != (image.Point{}) {

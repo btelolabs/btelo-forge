@@ -21,10 +21,11 @@ const (
 	domainDrawing
 	domainFiles
 	domainMind
+	domainPlayer
 	domainRecording
 )
 
-var domainNames = msgs("General", "Video editing", "Drawing", "Resource manager", "Mind maps", "System-wide")
+var domainNames = msgs("General", "Video editing", "Drawing", "Resource manager", "Mind maps", "Video player", "System-wide")
 
 // shortcut is a command keys can run: its id, domain, name (translated) and default keys. A tool's key picks the
 // tool; tools may share one, as Photoshop's do, and Shift with it goes to the next. A brush command acts only while
@@ -85,8 +86,9 @@ func keys(ks ...*Key) []Key {
 type appCommand struct {
 	shortcut
 	run func()
-	// video says it needs a project open.
-	video bool
+	// video says it needs a project open, and player a video in a player tab.
+	video  bool
+	player bool
 	// anywhere says it acts also while a dialog, a menu or Settings is open.
 	anywhere bool
 }
@@ -130,7 +132,7 @@ func (a *App) appCommands() []appCommand {
 			a.seek(a.playhead + s)
 		}
 	}
-	return []appCommand{
+	return append([]appCommand{
 		g("tab.new", u.t("New tab"), a.newTab, key('T', "cs")),
 		g("tab.close", u.t("Close the tab"), func() { a.closeTab(a.current()) }, key('W', "c")),
 		g("tab.next", u.t("Next tab"), func() { a.switchTab((a.current() + 1) % len(a.docs)) }, key(keyTab, "c")),
@@ -159,7 +161,7 @@ func (a *App) appCommands() []appCommand {
 		v("deselect", u.t("Deselect"), func() { a.selectOnly(selection{}) }, key(keyEscape, "")),
 		v("select-all", u.t("Select all"), a.selectAll, key('A', "c")),
 		v("watch", u.t("Player mode: hide every tool, leaving the picture and the seek bar"), func() { a.setWatching(!a.watch.on) }, key(keyTab, "")),
-	}
+	}, a.movieCommands()...)
 }
 
 // reservedKeys runs the reserved commands (going to a tab, zooming the window) the keys pressed this frame are
@@ -198,8 +200,12 @@ func (a *App) shortcuts() {
 			a.setWatching(false)
 			continue
 		}
+		if m := a.movie; m != nil && m.full && k == (Key{Code: keyEscape}) {
+			a.setMovieFull(m, false)
+			continue
+		}
 		for _, c := range cmds {
-			if (!c.video || a.p != nil) && (!watching || watchCommands[c.id]) && a.bound(c.id, c.defaults, k) {
+			if (!c.video || a.p != nil) && (!c.player || a.movie != nil) && (!watching || watchCommands[c.id]) && a.bound(c.id, c.defaults, k) {
 				c.run()
 				break
 			}

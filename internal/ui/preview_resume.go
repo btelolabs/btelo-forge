@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// A video or sound previewed goes on, when it is previewed again, from where it was left, as a video player
+// A video or sound previewed or played goes on, when it is opened again, from where it was left, as a video player
 // remembers: the places are kept by file, with the file's size and time so a file changed since starts over.
 
 // playPosition is where a file previewed was left.
@@ -73,17 +73,25 @@ func (a *App) rememberPosition() {
 	if p.path == "" || p.length <= 0 || p.proj == nil && !p.sound {
 		return
 	}
-	at := a.previewPosition()
+	a.keepPosition(p.path, a.previewPosition(), p.length)
+}
+
+// keepPosition keeps at as where the file at path, of length seconds, was left, for the next time it is previewed or
+// played; near its start or its end, it starts from the beginning next time.
+func (a *App) keepPosition(path string, at, length float64) {
+	if path == "" || length <= 0 {
+		return
+	}
 	all := a.playPositions()
-	key := positionKey(p.path)
+	key := positionKey(path)
 	old, had := all[key]
-	if at < resumeEdge || at > p.length-resumeEdge {
+	if at < resumeEdge || at > length-resumeEdge {
 		if !had {
 			return
 		}
 		delete(all, key) // seen to the end, or hardly begun: the next time starts at the beginning
 	} else {
-		st, err := os.Stat(p.path)
+		st, err := os.Stat(path)
 		if err != nil {
 			return
 		}

@@ -322,3 +322,21 @@ func TestDrawingsCoverTheFrameAndKeepTheirCanvas(t *testing.T) {
 		t.Errorf("Canvas is written %d times", n)
 	}
 }
+
+func TestTimeOfFindsWhereASourcePictureShows(t *testing.T) {
+	p := New(source("a.mp4", 10), Export{})
+	first := p.Video[0].Clips[0].ID
+	p.SplitClip(first, 4)
+	second := p.Video[0].Clips[1].ID
+	p.SetSpeed(second, 2) // 4–10 s of the source now take 3 s, from 4 s on
+	if at, ok := p.TimeOf(0, 2); !ok || at != 2 {
+		t.Fatalf("2 s of the source shows at %v (%v)", at, ok)
+	}
+	if at, ok := p.TimeOf(0, 8); !ok || at != 6 {
+		t.Fatalf("8 s of the source shows at %v (%v)", at, ok)
+	}
+	p.DeleteClip(first)
+	if _, ok := p.TimeOf(0, 2); ok {
+		t.Fatal("a part cut away still shows")
+	}
+}

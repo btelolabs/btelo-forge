@@ -14,11 +14,17 @@ import (
 // them up. Only folders are kept, so a drive with millions of files fits in memory; the files of a folder are read
 // again when it is shown, which also keeps the listing current.
 type Node struct {
-	Name     string // the folder's name; the root's is its whole path
-	Size     int64  // the bytes of every file under it
-	Items    int64  // the files and folders under it
-	Mod      time.Time
-	Err      bool // some of it could not be read, so it holds at least Size
+	Name  string // the folder's name; the root's is its whole path
+	Size  int64  // the bytes of every file under it
+	Items int64  // the files and folders under it
+	Mod   time.Time
+	Err   bool // some of it could not be read, so it holds at least Size
+	// At is when the folder was analysed, on the folder an analysis started from; the folders in it are as old as
+	// the nearest folder above them with a time (Analysed).
+	At time.Time
+	// Live marks what an analysis running has found so far (ScanProgress.Live): the folders in it hold none of their
+	// own yet, as what is under them is only added up.
+	Live     bool
 	Parent   *Node
 	Children []*Node
 
@@ -27,6 +33,16 @@ type Node struct {
 	// byName finds a folder among Children at once, as a list sorted by size asks for every one of thousands; made
 	// when first asked for and forgotten when Children or a child's name changes.
 	byName map[string]*Node
+}
+
+// Analysed is when what n holds was read: the time of the analysis it came from.
+func (n *Node) Analysed() time.Time {
+	for at := n; at != nil; at = at.Parent {
+		if !at.At.IsZero() {
+			return at.At
+		}
+	}
+	return time.Time{}
 }
 
 // Path is where the folder is.
@@ -146,6 +162,38 @@ func splitPath(rel string) []string {
 type ScanProgress struct {
 	Files, Dirs, Bytes atomic.Int64
 	current            atomic.Pointer[string]
+	live               atomic.Pointer[liveRoot]
+}
+
+// liveRoot is the folder analysed as it is being read: its own files, read with it, and what each folder in it
+// holds so far. It is made once the folder is read, and only its sums change after.
+type liveRoot struct {
+	own, ownItems int64
+	folders       []*liveFolder
+}
+
+// liveFolder is a folder in the one analysed, adding up what is read under it.
+type liveFolder struct {
+	name        string
+	size, items atomic.Int64
+}
+
+// Live is what the analysis of root has found so far, for a list to show while it runs: the folder and those in it,
+// each holding what has been read of it, with no folders further down; nil until the folder itself is read. Each
+// call makes new nodes, which nothing else changes.
+func (p *ScanProgress) Live(root string) *Node {
+	l := p.live.Load()
+	if l == nil {
+		return nil
+	}
+	top := &Node{Name: filepath.Clean(root), Size: l.own, Items: l.ownItems, Live: true, Children: make([]*Node, len(l.folders))}
+	for i, f := range l.folders {
+		c := &Node{Name: f.name, Size: f.size.Load(), Items: f.items.Load(), Parent: top}
+		top.Children[i] = c
+		top.Size += c.Size
+		top.Items += c.Items + 1
+	}
+	return top
 }
 
 // Current is the folder being read.
@@ -168,10 +216,10 @@ func Scan(ctx context.Context, root string, progress *ScanProgress) (*Node, erro
 	if err != nil {
 		return nil, err
 	}
-	top := &Node{Name: root, Mod: info.ModTime()}
+	top := &Node{Name: root, Mod: info.ModTime(), At: time.Now()}
 	s := &scanner{ctx: ctx, progress: progress}
 	s.cond = sync.NewCond(&s.mu)
-	s.push(top)
+	s.push(folder{node: top})
 	workers := 3 * runtime.GOMAXPROCS(0)
 	var wg sync.WaitGroup
 	for range workers {
@@ -189,13 +237,20 @@ type scanner struct {
 	progress *ScanProgress
 	mu       sync.Mutex
 	cond     *sync.Cond
-	stack    []*Node
+	stack    []folder
 	pending  int // folders pushed and not finished
 }
 
-func (s *scanner) push(n *Node) {
+// folder is a folder waiting to be read, with the folder of the one analysed it lies in, which shows its sums as they
+// come; the folder analysed has none.
+type folder struct {
+	node *Node
+	live *liveFolder
+}
+
+func (s *scanner) push(f folder) {
 	s.mu.Lock()
-	s.stack = append(s.stack, n)
+	s.stack = append(s.stack, f)
 	s.pending++
 	s.mu.Unlock()
 	s.cond.Signal()
@@ -212,12 +267,12 @@ func (s *scanner) work() {
 			s.cond.Broadcast()
 			return
 		}
-		n := s.stack[len(s.stack)-1]
+		f := s.stack[len(s.stack)-1]
 		s.stack = s.stack[:len(s.stack)-1]
 		s.mu.Unlock()
 
 		if s.ctx.Err() == nil {
-			s.read(n)
+			s.read(f)
 		}
 
 		s.mu.Lock()
@@ -231,7 +286,8 @@ func (s *scanner) work() {
 }
 
 // read lists one folder: its files are added to it, its folders are made and pushed to be read in turn.
-func (s *scanner) read(n *Node) {
+func (s *scanner) read(f folder) {
+	n := f.node
 	path := n.Path()
 	s.progress.current.Store(&path)
 	des, err := os.ReadDir(path)
@@ -261,8 +317,22 @@ func (s *scanner) read(n *Node) {
 	}
 	n.Children = subs
 	s.progress.Dirs.Add(1)
+	if n.Parent == nil {
+		// The folder analysed: each folder in it adds up what is read under it, for Live.
+		l := &liveRoot{own: n.own, ownItems: n.ownItems, folders: make([]*liveFolder, len(subs))}
+		for i, c := range subs {
+			l.folders[i] = &liveFolder{name: c.Name}
+		}
+		s.progress.live.Store(l)
+		for i, c := range subs {
+			s.push(folder{node: c, live: l.folders[i]})
+		}
+		return
+	}
+	f.live.size.Add(n.own)
+	f.live.items.Add(n.ownItems + int64(len(subs)))
 	for _, c := range subs {
-		s.push(c)
+		s.push(folder{node: c, live: f.live})
 	}
 }
 

@@ -202,6 +202,7 @@ func (a *App) answerPrompt(fd *filesDoc) {
 			} else {
 				parent.Grow(0, 1)
 			}
+			a.analysesChanged()
 		}
 		p.land = name
 		a.refreshPanes([]string{p.dir})
@@ -243,9 +244,10 @@ func (a *App) answerPrompt(fd *filesDoc) {
 	}
 }
 
-// goToTyped goes to a path typed or pasted in the list's bar: a folder, or a file's folder with the cursor on it.
-// The quotes Explorer's Copy as path adds are dropped, %VARIABLES% and ~ are filled in, and a relative path is from
-// the list's folder.
+// goToTyped goes to a path typed or pasted in the list's bar: into a folder, or to a file's folder with the cursor on
+// it, and the file opened as Enter opens it: a video in the player, a picture or a document in its tab, anything else
+// previewed. The quotes Explorer's Copy as path adds are dropped, %VARIABLES% and ~ are filled in, and a relative path
+// is from the list's folder.
 func (a *App) goToTyped(p *filesPane, text string) {
 	path := expandPath(text)
 	if path == "" || files.SamePath(path, p.dir) {
@@ -257,8 +259,9 @@ func (a *App) goToTyped(p *filesPane, text string) {
 	a.goWhenFound(p, path, false, func() { a.toast(a.u.tf("%s cannot be found", path), true) })
 }
 
-// goWhenFound goes to path once it has been read, in the background, that it is there: into a folder, or to a file's
-// folder with the cursor on it unless only a folder will do. gone is told when it is not there.
+// goWhenFound goes to path once it has been read, in the background, that it is there: into a folder, or, unless only
+// a folder will do, to a file's folder with the cursor on it, opening the file once it is there. gone is told when it
+// is not there.
 func (a *App) goWhenFound(p *filesPane, path string, folderOnly bool, gone func()) {
 	from := p.dir
 	a.fm.finding++
@@ -272,6 +275,7 @@ func (a *App) goWhenFound(p *filesPane, path string, folderOnly bool, gone func(
 				a.goTo(p, path, "")
 			case err == nil && !folderOnly:
 				a.goTo(p, filepath.Dir(path), filepath.Base(path))
+				p.enterLand = true
 			default:
 				gone()
 			}
@@ -314,13 +318,15 @@ var percentVar = regexp.MustCompile(`%[A-Za-z_][A-Za-z0-9_()]*%`)
 
 // renameInAnalyses gives an analysed folder its new name.
 func (a *App) renameInAnalyses(from, to string) {
-	for _, t := range a.fm.trees {
+	for _, t := range a.analysisTrees() {
 		if files.SamePath(t.Path(), from) {
 			t.Rename(to)
+			a.analysesChanged()
 			return
 		}
 		if n := t.Find(from); n != nil {
 			n.Rename(filepath.Base(to))
+			a.analysesChanged()
 			return
 		}
 	}

@@ -248,8 +248,9 @@ func (a *App) drawPaneButtons(fd *filesDoc, i int, id string, head gfx.Rect) flo
 		}
 		x -= size + u.px(2)
 	}
+	p := fd.panes[i]
 	glyph, hint := icCategory, withKey(u.t("Show as pictures, with tags"), a.fileKeyHint("view"))
-	if fd.panes[i].grid {
+	if p.grid {
 		glyph, hint = icFmFiles, withKey(u.t("Show as a list"), a.fileKeyHint("view"))
 	}
 	if u.iconButton(id+"/view", rectAt(x, y, size, size), glyph, hint, false, true) {
@@ -258,7 +259,103 @@ func (a *App) drawPaneButtons(fd *filesDoc, i int, id string, head gfx.Rect) flo
 			a.toggleView(fd)
 		}
 	}
+	editingPath := fd.prompt != nil && fd.prompt.kind == promptPath && i == fd.at
+	if p.search == nil && !p.atDrives() && a.scanFor(p) == nil && !editingPath {
+		x -= a.drawSortButton(fd, i, p, id, head.X, x, y, size)
+	}
 	return head.Right() - x + u.px(4)
+}
+
+// sortLabel is the short description of a list's order, with an arrow for its direction.
+func (a *App) sortLabel(p *filesPane) string {
+	u := &a.u
+	order := []string{u.t("by name"), u.t("by size"), u.t("by items"), u.t("by time")}[p.sort]
+	if p.desc {
+		return order + " ↑"
+	}
+	return order + " ↓"
+}
+
+// sortMenu lists the orders a list can be shown in.
+func (a *App) sortMenu(p *filesPane, keys bool) []menuItem {
+	u := &a.u
+	hint := func(id string) string {
+		if !keys {
+			return ""
+		}
+		return a.fileKeyHint(id)
+	}
+	pick := func(label, keyID string, s filesSort, desc bool) menuItem {
+		return menuItem{
+			label:   label,
+			key:     hint(keyID),
+			checked: p.sort == s && p.desc == desc,
+			run:     func() { a.setSort(p, s, desc) },
+		}
+	}
+	items := []menuItem{
+		pick(u.t("Time: newest first"), "sort-modified", listByTime, false),
+		pick(u.t("Time: oldest first"), "", listByTime, true),
+		menuSep,
+		pick(u.t("Name: A to Z"), "sort-name", listByName, false),
+		pick(u.t("Name: Z to A"), "", listByName, true),
+		menuSep,
+		pick(u.t("Size: largest first"), "sort-size", listBySize, false),
+		pick(u.t("Size: smallest first"), "", listBySize, true),
+	}
+	if a.paneAnalysis(p) != nil || p.sort == listByItems {
+		items = append(items,
+			menuSep,
+			pick(u.t("Items: most first"), "sort-items", listByItems, false),
+			pick(u.t("Items: fewest first"), "", listByItems, true),
+		)
+	}
+	return items
+}
+
+// drawSortButton draws the button that switches a list's sort order, to the left of right; it returns the width taken.
+func (a *App) drawSortButton(fd *filesDoc, i int, p *filesPane, id string, left, right, y, h float32) float32 {
+	u := &a.u
+	f := u.face(12)
+	label := a.sortLabel(p)
+	sw := f.Measure(label) + u.px(28)
+	sx := right - u.px(4) - sw
+	if sx-left < u.px(120) {
+		return 0
+	}
+	sr := rectAt(sx, y, sw, h)
+	sid := id + "/sort"
+	open := a.menuOpen(sid)
+	if open && a.menu.opened && u.pressed && sr.Contains(u.pressX, u.pressY) {
+		a.menu = nil
+		u.pressed = false
+	}
+	hot := u.hover(sid, sr)
+	bg, edge, fg := colSurface, colBorder, colDim
+	switch {
+	case open:
+		bg, edge, fg = colSelected, colAccent, colText
+	case hot:
+		bg, edge, fg = colSurfaceHi, colBorderHi, colText
+		u.cursor = CursorHand
+	}
+	u.c.RoundRect(sr, u.px(5), bg)
+	u.c.RoundOutline(sr, u.px(5), max(1, u.px(1)), edge)
+	u.c.Text(f, sr.X+u.px(8), sr.Y+(sr.H-f.Height())/2, label, fg)
+	u.icon(icOpen, rectAt(sr.Right()-u.px(19), sr.Y, u.px(16), sr.H), 14, fg)
+	u.hint(sid, u.t("Sort"), sr)
+	if u.clicked(sid, sr) {
+		items := a.sortMenu(p, fd != nil)
+		if fd != nil {
+			fd.after = func() {
+				a.focusPane(fd, i)
+				a.openMenu(sid, sr, items)
+			}
+		} else {
+			a.openMenu(sid, sr, items)
+		}
+	}
+	return right - sx
 }
 
 // fileKeyHint is the first key of the file manager command id, for a hint.
@@ -281,12 +378,13 @@ func (a *App) drawPathBar(p *filesPane, id string, r gfx.Rect, manager bool) boo
 	if manager {
 		info = a.paneInfo(p)
 	}
-	inf := u.face(11.5)
-	iw := min(inf.Measure(info)+u.px(16), r.W*0.4)
+	var iw float32
 	if info != "" {
+		inf := u.face(11.5)
+		iw = min(inf.Measure(info)+u.px(16), r.W*0.4)
 		u.label(inf, gfx.Rect{X: r.Right() - iw, Y: r.Y, W: iw - u.px(10), H: r.H}, info, colDim, 1)
 	}
-	room := r.W - iw - u.px(16)
+	room := r.W - iw - u.px(12)
 	var parts []pathPart
 	if p.atDrives() || filepath.VolumeName(p.dir) != "" && len(a.knownDrives()) > 0 {
 		parts = append(parts, pathPart{u.t("This PC"), thisPC})
@@ -398,22 +496,21 @@ func (a *App) paneInfo(p *filesPane) string {
 	if p.atDrives() {
 		return u.tn(len(p.rows), "%d drive", "%d drives", len(p.rows))
 	}
-	if s := a.scanFor(p); s != nil {
-		return u.tf("Analysing… %s files · %s", countText(s.progress.Files.Load()), sizeText(s.progress.Bytes.Load()))
-	}
 	var parts []string
-	if n := a.paneAnalysis(p); n != nil {
+	// The analysis shown, unless it is what an analysis running has found so far, which it counts itself.
+	if n := a.paneAnalysis(p); n != nil && !n.Live {
 		total := u.tf("%s in %s", sizeText(n.Size), itemCount(u, n.Items))
 		if n.Err {
 			total = u.tf("at least %s", total)
 		}
 		parts = append(parts, total)
+		if at := n.Analysed(); !at.IsZero() && at.Before(a.fm.since) {
+			parts = append(parts, u.tf("as of %s", at.Format("2006-01-02 15:04"))) // of an earlier run
+		}
 	}
-	order := []string{u.t("by name"), u.t("by size"), u.t("by items"), u.t("by time")}[p.sort]
-	if p.desc {
-		order += " ↑"
+	if s := a.scanFor(p); s != nil {
+		parts = append(parts, u.tf("Analysing… %s files · %s", countText(s.progress.Files.Load()), sizeText(s.progress.Bytes.Load())))
 	}
-	parts = append(parts, order)
 	return strings.Join(parts, " · ")
 }
 
@@ -459,16 +556,13 @@ func (u *ctx) fileRowH() float32 { return u.px(32) }
 func (a *App) drawRows(fd *filesDoc, i int, p *filesPane, id string, body gfx.Rect, moved bool) {
 	u := &a.u
 	rowH := u.fileRowH()
-	// An analysis has its pie under the rows, where there is room for it.
+	// An analysis has its pie on a card over the rows, where there is room for it.
 	node := a.paneAnalysis(p)
 	var wedges []pieWedge
-	var chart gfx.Rect
+	var cardW, cardH float32
 	if node != nil && len(p.rows) > 0 && !p.atDrives() {
-		if h := a.pieHeight(body); h > 0 {
-			if wedges = a.pieWedges(p, node); len(wedges) > 0 {
-				chart = gfx.Rect{X: body.X, Y: body.Bottom() - h, W: body.W, H: h}
-				body.H -= h
-			}
+		if cardW, cardH = a.pieCardSize(body); cardW > 0 {
+			wedges = a.pieWedges(p, node)
 		}
 	}
 	visible := int(body.H / rowH)
@@ -494,6 +588,23 @@ func (a *App) drawRows(fd *filesDoc, i int, p *filesPane, id string, body gfx.Re
 	if s != nil && len(p.rows) > 0 {
 		under := int(p.top) + int(math.Floor(float64((u.my-body.Y)/rowH)))
 		a.sweepTo(fd, p, s, min(max(under, 0), len(p.rows)-1))
+	}
+	// The card, where it is this frame; it moves away from the row pointed at and the cursor's, and takes the
+	// pointer from the rows behind it.
+	var chart gfx.Rect
+	overChart := func(x, y float32) bool { return false }
+	if len(wedges) > 0 {
+		chart = pieCardAt(u, body, cardW, cardH, p.pie.place.pos)
+		overChart = chart.Contains
+		pointed := -1
+		if fd.prompt == nil && body.Contains(u.mx, u.my) && !chart.Contains(u.mx, u.my) {
+			pointed = int(p.top + (u.my-body.Y)/rowH)
+		}
+		cursor := -1
+		if fd.at == i {
+			cursor = p.cursor
+		}
+		p.pie.placePieCard(u, body, cardW, cardH, p.top, pointed, cursor)
 	}
 
 	if len(p.rows) == 0 {
@@ -522,21 +633,21 @@ func (a *App) drawRows(fd *filesDoc, i int, p *filesPane, id string, body gfx.Re
 		e := &p.entries[p.rows[row]]
 		rr := gfx.Rect{X: body.X, Y: body.Y + float32(row-first)*rowH, W: body.W, H: rowH}
 		rid := fmt.Sprintf("%s/row/%s", id, e.Name)
-		hot := u.hover(rid, rr) && fd.prompt == nil
+		hot := u.hover(rid, rr) && fd.prompt == nil && !overChart(u.mx, u.my)
 		if hot && moved && fd.at == i && fd.pick == nil {
 			p.cursor = row
 		}
 		if hot {
 			fd.hovered, fd.hoveredDir = p.path(e), e.Dir
 		}
-		if fd.prompt == nil && u.rightAt != nil && rr.Contains(u.rightAt.X, u.rightAt.Y) && !u.blocked {
+		if fd.prompt == nil && u.rightAt != nil && rr.Contains(u.rightAt.X, u.rightAt.Y) && !overChart(u.rightAt.X, u.rightAt.Y) && !u.blocked {
 			a.startSweep(fd, i, p, row)
 		}
 		a.drawFileRow(fd, p, row, e, rr, node, wedges, largest, a.fileColumns(rr, node != nil), fd.at == i)
 		if fd.prompt != nil {
 			continue
 		}
-		if u.press(rid, rr) {
+		if !overChart(u.pressX, u.pressY) && u.press(rid, rr) {
 			p.cursor = row
 			a.pickClicked(fd)
 			switch {

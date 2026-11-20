@@ -146,9 +146,18 @@ func TestRecordFromTheWindowAndEditIt(t *testing.T) {
 		t.Errorf("the title does not show the time: %q", h.title)
 	}
 	a.Tick(Input{Hotkeys: []int{hotkeyRecord}})
-	x.pump(time.Minute, func() bool { return a.rec.rec == nil && a.p != nil && a.opening == "" })
+	m := x.recordingWatched()
 	if h.minimized || h.excluded {
 		t.Errorf("window after recording: minimized %v, left out %v", h.minimized, h.excluded)
+	}
+	if m.path != path {
+		t.Fatalf("the player opened %s, want the recording %s", m.path, path)
+	}
+	// The player's Edit button makes it an edit.
+	a.editMovie()
+	x.pump(30*time.Second, func() bool { return a.p != nil && a.opening == "" })
+	if a.p == nil || a.movie != nil {
+		t.Fatalf("Edit: edit %v, player %v", a.p != nil, a.movie != nil)
 	}
 	if got := a.p.Sources[0].Path; got != path {
 		t.Fatalf("opened %s, want the recording %s", got, path)
@@ -203,14 +212,38 @@ func TestRecordingIntoAnEditOpensANewTab(t *testing.T) {
 		}
 		saved <- path
 	})
-	x.pump(time.Minute, func() bool { return len(saved) > 0 && a.opening == "" && a.p != nil })
+	x.pump(time.Minute, func() bool { return len(saved) > 0 })
 	path := <-saved
-	if len(a.docs) != 2 || a.p.Sources[0].Path != path {
-		t.Fatalf("%d tabs, the active one shows %v; want the recording %s in a second tab", len(a.docs), a.p.Sources, path)
+	m := x.recordingWatched()
+	if len(a.docs) != 2 || m.path != path {
+		t.Fatalf("%d tabs, the player shows %s; want the recording %s in a second tab", len(a.docs), m.path, path)
 	}
-	if a.p.Sources[0].HasAudio {
+	if m.info.HasAudio {
 		t.Error("a recording without sound has a sound track")
 	}
+}
+
+// recordingWatched waits until the recording has stopped and opened in the player, ready to play, and returns it.
+func (x *harness) recordingWatched() *movieDoc {
+	x.t.Helper()
+	a := x.a
+	opened := func() bool { return a.rec.rec == nil && a.movie != nil && (a.movie.ready() || a.movie.problem != "") }
+	for deadline := time.Now().Add(time.Minute); !opened(); {
+		if time.Now().After(deadline) {
+			x.t.Fatalf("the recording did not open in the player: recording %v, player %+v, %d tabs; toasts %+v",
+				a.rec.rec != nil, a.movie, len(a.docs), a.toasts)
+		}
+		x.frame(Input{})
+		select {
+		case <-x.h.woke:
+		case <-time.After(15 * time.Millisecond):
+		}
+	}
+	m := a.movie
+	if m.problem != "" {
+		x.t.Fatal(m.problem)
+	}
+	return m
 }
 
 func TestRecordingNameIsNew(t *testing.T) {

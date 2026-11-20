@@ -20,6 +20,7 @@ const (
 	CursorMove
 	CursorCross
 	CursorResizeCorner // a bottom-right corner, dragged to resize
+	CursorNone         // no pointer, as a player hides it over a picture left alone
 )
 
 // Key codes the UI reacts to (Windows virtual keys).

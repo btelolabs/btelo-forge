@@ -3,7 +3,11 @@
 - Pure Go desktop app: Win32 without cgo (`internal/win`), Cocoa through cgo on macOS (`internal/mac`). No Wails, and no
   web view but the one that shows a mail. The UI is immediate-mode, drawn in software (`internal/ui`, `internal/gfx`).
 - ffmpeg does all media work; preview and export share one filter graph (`internal/render`), so what is shown is
-  what is exported.
+  what is exported. A video opened to watch plays in the player tab (`movie.go`, `playback.File`): the file decoded
+  as it is at its own rate, no graph, and the UI draws each picture when `Player.Due` says; its Edit button turns the
+  tab into the editor. Only where editing was asked for (the editor's list and dialog, a drop on an edit, MCP) does a
+  video open in the editor at once. Measured with `FORGE_VIDEO=<file> go test ./internal/ui -run TestRealVideoPlays`;
+  the graphics card's decoders were slower than ffmpeg's own here, as each picture is copied back before scaling.
 - Music sites, speech engines/models and streaming platforms are JSON (`internal/library/sources.json`,
   `internal/transcribe/models.json`, `internal/capture/platforms.json`), editable in Settings → Extensions and
   through the MCP tools `get_config` / `set_config` / `reset_config`. Add a site, model or platform by changing the
@@ -40,7 +44,10 @@
 - Nothing the file manager draws reads the disk: a listing is read by `readPane`, and anything else (a path a search found, a
   folder's preview, the drives, a folder's repository) is asked of `statOf`, `listingOf`, `knownDrives`, `repoRoot`
   (`files_facts.go`), which answer from what was last read and read in the background; prefer what the listing read
-  (`selectedEntries`). An analysis is kept (`fm.trees`) and shown again when a list comes back into it; a folder's children
+  (`selectedEntries`). An analysis is kept (`fm.trees`) and shown again when a list comes back into it, and between runs in the
+  cache folder (`files_analyses.go`, `files.EncodeAnalyses`): one of an earlier run is shown at once and read again in the
+  background (`refreshAnalysis`); while a folder with none is analysed, the list shows what `ScanProgress.Live` has found
+  so far, a `Node` marked `Live` whose folders hold none of their own; a folder's children
   are found by name through `Node.Child`'s index, so sorting thousands by size does not search them one by one.
 - Space in the file manager opens the preview over the tab, with the tags and categories in it, and only the commands in `previewCommands` work behind it. Resting the pointer on a picture or 3D file floats a small picture that takes no input (`files_peek.go`); a 3D file's picture comes from the card through a `modelDoc` no tab shows, and is kept in memory as its thumbnail.
 - A pinned tab opens again with the app (`tab_pins.go`): a new kind of tab needs its line in `tabSpec` and `restoreTab`.

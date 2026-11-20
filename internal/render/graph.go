@@ -53,8 +53,8 @@ func Audible(p *project.Project, from, to float64) bool { return cut(p, from, to
 
 func num(v float64) string { return strconv.FormatFloat(v, 'f', 6, 64) }
 
-// atempo chains tempo filters so each stays within 0.5–2, where the filter sounds cleanest.
-func atempo(speed float64) string {
+// Tempo chains tempo filters so each stays within 0.5–2, where the filter sounds cleanest.
+func Tempo(speed float64) string {
 	var parts []string
 	for speed >= 2-epsilon {
 		parts = append(parts, "atempo=2")
@@ -97,7 +97,7 @@ func fitted(w, h int) string {
 // sound is the chain that turns a piece's audio into the common format at its gain and length.
 func sound(pc piece) string {
 	chain := []string{"asetpts=PTS-STARTPTS"}
-	if t := atempo(pc.Speed); t != "" {
+	if t := Tempo(pc.Speed); t != "" {
 		chain = append(chain, t)
 	}
 	l := num(pc.length())

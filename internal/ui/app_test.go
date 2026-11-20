@@ -208,6 +208,7 @@ func TestClosingStopsBackgroundDecoders(t *testing.T) {
 	x := newHarness(t)
 	dir := x.mediaDir()
 	path := clipFile(t, dir, "long.mp4", "testsrc2=size=1280x720", "60")
+	x.a.newEditor() // dropped on the editor, which decodes its thumbnails
 	x.frame(Input{Dropped: []string{path}})
 	x.pump(20*time.Second, func() bool { return x.a.p != nil })
 	if x.a.media.settled(x.a.p) {
@@ -231,6 +232,7 @@ func TestVideosDroppedBeforeFFmpegIsReadyOpenOnceItIs(t *testing.T) {
 	if x.a.tools.ready {
 		t.Fatal("preparing again should start from not ready")
 	}
+	x.a.newEditor() // dropped on the editor; the player waits for ffmpeg by itself
 	x.frame(Input{Dropped: []string{clip}})
 	if len(x.a.tools.waiting) != 1 || x.a.p != nil {
 		t.Fatalf("the drop was not queued: %v", x.a.tools.waiting)

@@ -1,4 +1,5 @@
-// Package playback plays the edited timeline: ffmpeg renders the preview streams, the sound card drives the clock.
+// Package playback plays the edited timeline, or a video file as it is: ffmpeg decodes the pictures and the sound, the
+// sound card drives the clock.
 package playback
 
 import (
@@ -7,16 +8,17 @@ import (
 	"errors"
 	"image"
 	"io"
+	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/media"
 	"github.com/btelolabs/btelo-forge/internal/project"
-	"github.com/btelolabs/btelo-forge/internal/render"
 	"github.com/btelolabs/btelo-forge/internal/wave"
 )
 
-// FPS is the preview frame rate.
+// FPS is the frame rate the edited timeline is previewed at.
 const FPS = 30
 
 // span is how much of the timeline one pair of ffmpeg processes covers before the player starts the next pair.
@@ -37,15 +39,23 @@ type Player struct {
 	err     error
 	stopped bool
 	running sync.WaitGroup // every session, until its decoders and sound have finished
+	volume  atomic.Uint64  // the gain the sound is played at, as float64 bits
 }
 
 // New returns a player that calls wake whenever a new frame is ready or playback ends.
-func New(wake func()) *Player { return &Player{wake: wake, stopped: true} }
+func New(wake func()) *Player {
+	pl := &Player{wake: wake, stopped: true}
+	pl.volume.Store(math.Float64bits(1))
+	return pl
+}
 
 type session struct {
 	cancel   context.CancelFunc
 	from, to float64
 	end      float64
+	rate     float64 // pictures a second
+	speed    float64 // seconds of the source played in a second
+	picture  bool    // there are pictures to decode; without them the clock starts at once
 	started  time.Time
 	audio    *wave.Output
 	audible  bool
@@ -57,24 +67,51 @@ type session struct {
 	pending  *Frame
 }
 
+// source is what a player plays: the edited timeline, or a file as it is.
+type source interface {
+	// length is how long it plays, in its own seconds.
+	length() float64
+	// span is how much of it one pair of ffmpeg processes covers before the next pair is started.
+	span() float64
+	// rate is how many pictures a second the decoder gives, and speed how many of its seconds play in one.
+	rate() float64
+	speed() float64
+	// picture says whether it has pictures; one that has none plays its sound alone.
+	picture() bool
+	audible(from, to float64) bool
+	// video and audio are the arguments of the ffmpeg processes that decode from to to: w×h RGBA pictures at rate,
+	// and s16 stereo sound at wave.Rate, each to standard output and already at speed.
+	video(from, to float64, w, h int) ([]string, error)
+	audio(from, to float64) ([]string, error)
+}
+
 // Start plays p from output time from with pictures of w×h; it replaces any running playback.
 func (pl *Player) Start(p *project.Project, from float64, w, h int) {
+	pl.start(timeline{p.Clone()}, from, w, h)
+}
+
+// StartFile plays f from its time from with pictures of w×h; it replaces any running playback.
+func (pl *Player) StartFile(f File, from float64, w, h int) {
+	pl.start(f, from, w, h)
+}
+
+func (pl *Player) start(src source, from float64, w, h int) {
 	pl.Stop()
-	snapshot := p.Clone()
-	end := snapshot.Duration()
+	end := src.length()
 	if from >= end-0.05 {
 		from = 0
 	}
 	pl.mu.Lock()
 	pl.err, pl.stopped = nil, false
 	pl.mu.Unlock()
-	pl.begin(snapshot, from, end, w, h)
+	pl.begin(src, from, end, w, h)
 }
 
-func (pl *Player) begin(p *project.Project, from, end float64, w, h int) {
+func (pl *Player) begin(src source, from, end float64, w, h int) {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &session{cancel: cancel, from: from, to: min(from+span, end), end: end, frames: make(chan Frame, 8), ready: make(chan struct{}), ended: make(chan struct{}), done: make(chan struct{}), current: Frame{T: -1}}
-	s.audible = render.Audible(p, s.from, s.to)
+	s := &session{cancel: cancel, from: from, to: min(from+src.span(), end), end: end, rate: src.rate(), speed: src.speed(), picture: src.picture(),
+		frames: make(chan Frame, 8), ready: make(chan struct{}), ended: make(chan struct{}), done: make(chan struct{}), current: Frame{T: -1}}
+	s.audible = src.audible(s.from, s.to)
 	if s.audible {
 		out, err := wave.Open()
 		if err != nil {
@@ -88,27 +125,34 @@ func (pl *Player) begin(p *project.Project, from, end float64, w, h int) {
 	pl.mu.Unlock()
 	pl.running.Add(1)
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := pl.decode(ctx, p, s, w, h); err != nil && ctx.Err() == nil {
-			pl.fail(err)
-		}
-	}()
+	if s.picture {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := pl.decode(ctx, src, s, w, h); err != nil && ctx.Err() == nil {
+				pl.fail(err)
+			}
+		}()
+	} else {
+		s.started = time.Now()
+		close(s.ready)
+	}
 	if s.audio != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := pl.sound(ctx, p, s)
+			err := pl.sound(ctx, src, s)
 			close(s.ended)
 			if err != nil && ctx.Err() == nil && !errors.Is(err, wave.ErrStopped) {
 				pl.fail(err)
 			}
 		}()
 	} else {
-		pl.running.Add(1)
+		// Without sound the clock alone says when the span is over: the decoder reaching the end of its pictures,
+		// up to a channel's worth ahead of the clock, must not end the span early.
+		wg.Add(1)
 		go func() {
-			defer pl.running.Done()
+			defer wg.Done()
 			select {
 			case <-s.ready:
 			case <-ctx.Done():
@@ -116,7 +160,7 @@ func (pl *Player) begin(p *project.Project, from, end float64, w, h int) {
 				return
 			}
 			select {
-			case <-time.After(time.Duration((s.to - s.from) * float64(time.Second))):
+			case <-time.After(time.Duration((s.to - s.from) / s.speed * float64(time.Second))):
 			case <-ctx.Done():
 			}
 			close(s.ended)
@@ -137,7 +181,7 @@ func (pl *Player) begin(p *project.Project, from, end float64, w, h int) {
 		next := pl.run == s && !pl.stopped && s.to < end-0.01
 		pl.mu.Unlock()
 		if next {
-			pl.begin(p, s.to, end, w, h)
+			pl.begin(src, s.to, end, w, h)
 		}
 	}()
 }
@@ -150,12 +194,8 @@ func (pl *Player) fail(err error) {
 	pl.wake()
 }
 
-func (pl *Player) decode(ctx context.Context, p *project.Project, s *session, w, h int) error {
-	g, err := render.Build(render.Spec{Project: p, From: s.from, To: s.to, Width: w, Height: h, FPS: FPS, Video: true, PixFmt: "rgba"})
-	if err != nil {
-		return err
-	}
-	args, err := g.Args("-f", "rawvideo", "pipe:1")
+func (pl *Player) decode(ctx context.Context, src source, s *session, w, h int) error {
+	args, err := src.video(s.from, s.to, w, h)
 	if err != nil {
 		return err
 	}
@@ -200,13 +240,16 @@ func (pl *Player) decode(ctx context.Context, p *project.Project, s *session, w,
 			pl.wake()
 			continue
 		}
-		t := s.from + float64(k)/FPS
-		if now, ok := pl.Position(); ok && t < now-2.0/FPS {
+		t := s.from + float64(k)/s.rate*s.speed
+		if now, ok := pl.Position(); ok && t < now-2*s.speed/s.rate {
 			continue
 		}
 		select {
 		case s.frames <- Frame{Image: img, T: t}:
-			pl.wake()
+			// The UI is told only when this picture may be the one it waits for; ones decoded ahead it finds by Due.
+			if len(s.frames) <= 1 {
+				pl.wake()
+			}
 		case <-s.ended:
 			return nil
 		case <-ctx.Done():
@@ -215,12 +258,8 @@ func (pl *Player) decode(ctx context.Context, p *project.Project, s *session, w,
 	}
 }
 
-func (pl *Player) sound(ctx context.Context, p *project.Project, s *session) error {
-	g, err := render.Build(render.Spec{Project: p, From: s.from, To: s.to, Audio: true})
-	if err != nil {
-		return err
-	}
-	args, err := g.Args("-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
+func (pl *Player) sound(ctx context.Context, src source, s *session) error {
+	args, err := src.audio(s.from, s.to)
 	if err != nil {
 		return err
 	}
@@ -241,7 +280,7 @@ func (pl *Player) sound(ctx context.Context, p *project.Project, s *session) err
 	case <-ctx.Done():
 		return nil
 	}
-	return s.audio.Play(bufio.NewReaderSize(stdout, 1<<16), ctx.Done())
+	return s.audio.Play(&gain{r: bufio.NewReaderSize(stdout, 1<<16), volume: &pl.volume}, ctx.Done())
 }
 
 // Position is the output time being heard, and false once playback has stopped.
@@ -259,12 +298,12 @@ func (pl *Player) Position() (float64, bool) {
 		return s.from, true
 	}
 	if s.audio != nil {
-		t = s.from + float64(s.audio.Played())/wave.Rate
+		t = s.from + float64(s.audio.Played())/wave.Rate*s.speed
 	} else {
 		pl.mu.Lock()
 		started := s.started
 		pl.mu.Unlock()
-		t = s.from + time.Since(started).Seconds()
+		t = s.from + time.Since(started).Seconds()*s.speed
 	}
 	select {
 	case <-s.done:
@@ -306,6 +345,30 @@ func (pl *Player) Frame() (Frame, bool) {
 	}
 }
 
+// Due is how long until the next decoded picture is due on the clock, so the UI can draw it then and no later; it is
+// false while none is decoded yet, and the player wakes the UI when one comes. Like Frame, it is for the UI goroutine.
+func (pl *Player) Due() (time.Duration, bool) {
+	pl.mu.Lock()
+	s := pl.run
+	pl.mu.Unlock()
+	if s == nil {
+		return 0, false
+	}
+	t, playing := pl.Position()
+	if !playing {
+		return 0, false
+	}
+	if s.pending == nil {
+		select {
+		case f := <-s.frames:
+			s.pending = &f
+		default:
+			return 0, false
+		}
+	}
+	return max(time.Duration((s.pending.T-t)/s.speed*float64(time.Second)), 0), true
+}
+
 // Playing reports whether playback is running.
 func (pl *Player) Playing() bool {
 	pl.mu.Lock()
@@ -321,6 +384,12 @@ func (pl *Player) Err() error {
 	pl.err = nil
 	return err
 }
+
+// SetVolume sets the gain the sound plays at: 1 as it is, 0 silent. It applies at once, also while playing.
+func (pl *Player) SetVolume(v float64) { pl.volume.Store(math.Float64bits(max(v, 0))) }
+
+// Volume is the gain the sound plays at.
+func (pl *Player) Volume() float64 { return math.Float64frombits(pl.volume.Load()) }
 
 // Stop ends playback; it returns at once and the decoders wind down in the background (see Wait).
 func (pl *Player) Stop() {

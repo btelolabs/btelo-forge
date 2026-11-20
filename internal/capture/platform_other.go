@@ -2,6 +2,8 @@
 
 package capture
 
+import "image"
+
 // Supported reports whether this system can record its screen.
 func Supported() bool { return false }
 
@@ -21,3 +23,7 @@ func captureAudio(loopback bool, id string, origin int64, deliver func(samples [
 func counter() int64          { return 0 }
 func counterFrequency() int64 { return 1 }
 func wallMicros() int64       { return 0 }
+
+func grabScreen(d Display, area image.Rectangle, cursor, flush bool) (*image.RGBA, error) {
+	return nil, ErrUnsupported
+}

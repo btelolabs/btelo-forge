@@ -45,6 +45,19 @@ func (p *Project) Top(t float64) (Clip, float64, bool) {
 	return Clip{}, 0, false
 }
 
+// TimeOf is where on the timeline the picture of source at its time at shows: in the first clip of the main track that
+// holds it, else of a track above. It is false when no clip holds it, as when that part was cut away.
+func (p *Project) TimeOf(source int, at float64) (float64, bool) {
+	for _, track := range p.Video {
+		for _, c := range track.Clips {
+			if c.Source == source && at >= c.In && at < c.Out {
+				return c.Start + (at-c.In)/c.Speed, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // ClipAt returns the clip on track at time t.
 func (p *Project) ClipAt(track int, t float64) (Clip, bool) {
 	for _, c := range p.Video[track].Clips {

@@ -398,10 +398,11 @@ func (w Wedge) bounds(cx, cy float32) (x0, y0, x1, y1 float64) {
 	return x0, y0, x1, y1
 }
 
-// Pie fills wedges around (cx, cy), anti-aliased, leaving a strip gap pixels wide between neighbours. Each wedge
-// touches only the box it lies in, and a pixel of the box beyond its edges or outside its ring is left before any root,
-// so a thin piece of a ring costs little and a pie of hundreds stays quick. How far a pixel is from an edge comes from
-// two dot products, not from its angle.
+// Pie fills wedges around (cx, cy), anti-aliased, leaving a strip gap pixels wide between neighbours. A negative gap
+// grows each wedge past its edges by half of it, as an outline drawn under a wedge does. Each wedge touches only the box
+// it lies in, and a pixel of the box beyond its edges or outside its ring is left before any root, so a thin piece of a
+// ring costs little and a pie of hundreds stays quick. How far a pixel is from an edge comes from two dot products, not
+// from its angle.
 func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 	if c.rec != nil {
 		for _, w := range wedges {
@@ -410,12 +411,15 @@ func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 		return
 	}
 	const turn = 2 * math.Pi
+	// grow is how far a wedge reaches past its edges; a pixel further out than that and one more covers nothing.
+	grow := float64(max(-gap/2, 0))
 	for _, w := range wedges {
 		if w.Radius <= 0 {
 			continue
 		}
 		x0, y0, x1, y1 := w.bounds(cx, cy)
-		b := image.Rect(int(math.Floor(x0-1)), int(math.Floor(y0-1)), int(math.Ceil(x1+1)), int(math.Ceil(y1+1))).Intersect(c.clip)
+		pad := 1 + grow
+		b := image.Rect(int(math.Floor(x0-pad)), int(math.Floor(y0-pad)), int(math.Ceil(x1+pad)), int(math.Ceil(y1+pad))).Intersect(c.clip)
 		span := float64(w.To - w.From)
 		whole := span >= turn-1e-4
 		sinFrom, cosFrom := math.Sincos(float64(w.From))
@@ -433,7 +437,7 @@ func (c *Canvas) Pie(cx, cy float32, wedges []Wedge, gap float32) {
 				// out a pixel is. Below half a turn the wedge is inside both edges, and a pixel a whole one outside
 				// either covers nothing.
 				acrossFrom, acrossTo := dx*cosFrom+dy*sinFrom, -(dx*cosTo + dy*sinTo)
-				if span < math.Pi && (acrossFrom < -1 || acrossTo < -1) {
+				if span < math.Pi && (acrossFrom < -pad || acrossTo < -pad) {
 					continue
 				}
 				r2 := dx*dx + dy*dy

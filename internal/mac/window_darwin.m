@@ -321,6 +321,15 @@ void forge_cursor(int kind) {
 	case 4:
 		currentCursor = NSCursor.openHandCursor;
 		break;
+	case 5: {
+		// A cursor with nothing drawn hides the pointer over the window alone, as the tracking area sets it there.
+		static NSCursor *hidden;
+		if (!hidden) {
+			hidden = [[NSCursor alloc] initWithImage:[[NSImage alloc] initWithSize:NSMakeSize(1, 1)] hotSpot:NSZeroPoint];
+		}
+		currentCursor = hidden;
+		break;
+	}
 	default:
 		currentCursor = NSCursor.arrowCursor;
 	}

@@ -63,8 +63,11 @@ const (
 	gridSizeMax = 360
 )
 
-// showGrid makes the list show its folder as pictures.
+// showGrid makes the list show its folder as pictures, newest first unless sorted otherwise.
 func (a *App) showGrid(p *filesPane) {
+	if !p.grid && !p.sorted && !p.analysed {
+		p.sort, p.desc = listByTime, false
+	}
 	p.grid = true
 	if p.g.size == 0 {
 		p.g.size = 160
@@ -77,12 +80,20 @@ func (a *App) showGrid(p *filesPane) {
 // toggleView shows the list in use as pictures, or as rows again, the cursor staying on its item.
 func (a *App) toggleView(fd *filesDoc) {
 	p := fd.pane()
+	fromTop := !p.grid && !p.sorted && !p.analysed && p.cursor == 0 && p.top == 0
 	if p.grid {
 		p.grid = false
+		if !p.sorted && !p.analysed {
+			p.sort, p.desc = listByName, false
+		}
 	} else {
 		a.showGrid(p)
 	}
 	a.arrange(p)
+	if fromTop {
+		p.cursor, p.g.scroll = 0, 0
+		return
+	}
 	a.keepInView(fd, p)
 }
 

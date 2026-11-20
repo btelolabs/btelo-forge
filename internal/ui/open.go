@@ -74,8 +74,8 @@ func (a *App) handleDrops(paths []string) {
 }
 
 // openFiles opens files by what they are, as dropping them does: a canvas as a canvas, sounds as music, a picture as
-// a canvas in an empty tab or a layer or overlay where something is open, anything else as video, on an upper
-// track when upper says so.
+// a canvas in an empty tab or a layer or overlay where something is open, a video in the player unless an edit is open
+// to add it to, and anything else as video, on an upper track when upper says so.
 func (a *App) openFiles(paths []string, upper func() bool) {
 	var audio []string
 	for _, p := range paths {
@@ -107,6 +107,8 @@ func (a *App) openFiles(paths []string, upper func() bool) {
 			}
 		case isImage(p):
 			a.addImage(p)
+		case assets.KindOf(p) == assets.Video && a.p == nil && !a.editing && a.opening == "":
+			a.openMovie(p) // watched first: the player's Edit button edits it
 		case a.export == nil:
 			a.openVideo(p, upper())
 		}
@@ -132,7 +134,7 @@ func (a *App) dropUpper() bool {
 
 // occupied reports whether the tab holds something, so what is opened next needs a tab of its own.
 func (a *App) occupied() bool {
-	return a.p != nil || a.art != nil || a.opening != "" || a.files != nil || a.board != nil || a.office != nil || a.liveTab || a.keyboardTab || a.mailTab || a.aiTab || a.model != nil || a.editing
+	return a.p != nil || a.art != nil || a.opening != "" || a.files != nil || a.board != nil || a.office != nil || a.liveTab || a.keyboardTab || a.mailTab || a.aiTab || a.model != nil || a.movie != nil || a.editing
 }
 
 // openVideo probes path in the background. An empty tab opens it, restoring an unfinished edit of the same file;

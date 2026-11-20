@@ -226,15 +226,15 @@ func TestPauseHotkeyWhileRecording(t *testing.T) {
 	}
 	time.Sleep(time.Second)
 	a.Tick(Input{Hotkeys: []int{hotkeyRecord}})
-	x.pump(time.Minute, func() bool { return a.rec.rec == nil && a.p != nil && a.opening == "" })
-	if !strings.HasPrefix(filepath.Base(a.p.Sources[0].Path), "Screen recording") {
-		t.Errorf("opened %s", a.p.Sources[0].Path)
+	path := x.recordingWatched().path
+	if !strings.HasPrefix(filepath.Base(path), "Screen recording") {
+		t.Errorf("opened %s", path)
 	}
 	x.clickToastAction("Copy the path")
-	if x.h.clip != a.p.Sources[0].Path {
-		t.Errorf("copied %q, want %q", x.h.clip, a.p.Sources[0].Path)
+	if x.h.clip != path {
+		t.Errorf("copied %q, want %q", x.h.clip, path)
 	}
-	if !x.toastSays(filepath.Base(a.p.Sources[0].Path)) {
+	if !x.toastSays(filepath.Base(path)) {
 		t.Errorf("copying said nothing: %+v", a.toasts)
 	}
 }

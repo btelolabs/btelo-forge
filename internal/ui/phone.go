@@ -40,10 +40,7 @@ func (a *App) phoneReceived(paths []string) {
 		first := paths[0]
 		actions := []toastAction{{u.t("Show in folder"), func() { a.host.Reveal(first) }}}
 		if !library.IsAudio(first) && !isImage(first) {
-			actions = append([]toastAction{{u.t("Open in a new tab"), func() {
-				a.newTab()
-				a.openVideo(first, false)
-			}}}, actions...)
+			actions = append([]toastAction{{u.t("Open in a new tab"), func() { a.openMovie(first) }}}, actions...)
 		}
 		text := u.tf("Received %s from the phone", filepath.Base(first))
 		if len(paths) > 1 {

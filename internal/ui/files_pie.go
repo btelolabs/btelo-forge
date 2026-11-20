@@ -14,12 +14,13 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/office/dml"
 )
 
-// A list showing an analysis has a map of its folder under its rows, in the manner of DaisyDisk: rings around the
+// A list showing an analysis has a map of its folder floating over its rows, in the manner of DaisyDisk: rings around the
 // folder's size, the inner ring its items and each ring further out what the folders of the one inside hold, coloured
 // through the spectrum by where they lie, with what is too small to draw in grey. The item under the cursor turns to
 // twelve o'clock and stands out a little, both on springs, so moving down the list, with the keys or by pointing at
 // rows, turns the rings smoothly from item to item. A click on the inner ring puts the cursor on its item, one further
-// out opens the folder that holds it, and one in the middle goes up.
+// out opens the folder that holds it, and one in the middle goes up. The arc pointed at is outlined. The map is a card
+// in the list's bottom right corner, and slides to the top right while a row in use lies behind it (pieCard).
 
 // pieSlots is how many items have a wedge of their own in the inner ring; the rest share the last wedge.
 const pieSlots = 32
@@ -82,7 +83,8 @@ func pieArcs(node *files.Node, wedges []pieWedge) []pieArc {
 	}
 	for _, w := range wedges {
 		out = append(out, pieArc{from: w.from, to: w.to, name: w.key, size: w.size, top: w.key, col: w.col})
-		if w.key != pieOther {
+		// While an analysis runs only the inner ring is known: what lies under its folders is only added up.
+		if w.key != pieOther && !node.Live {
 			if c := node.Child(w.key); c != nil {
 				grow(c, w.key, 1, w.from, w.to)
 			}
@@ -110,14 +112,19 @@ type pieMotion struct {
 	at     time.Time
 	moving bool
 	shown  bool // drawn this frame: a pie out of sight does not keep the window drawing
-	// cx, cy and radius are where it was drawn last, before a wedge stands out.
+	// cx, cy and radius are where it was drawn last, before a wedge stands out, on the card at card.
 	cx, cy, radius float32
+	card           gfx.Rect
 	// arcs are the rings of the folder laidOf at its size laidAt, around laidFor, kept as walking the tree each frame
 	// is not free.
 	arcs    []pieArc
 	laidFor []pieWedge
 	laidOf  *files.Node
 	laidAt  int64
+	// place is where the card is, from 0 in the bottom corner to 1 in the top one, sliding to placeGoal; it stays
+	// where it is from folder to folder.
+	place     spring
+	placeGoal float64
 }
 
 // How quickly the pie turns and a wedge stands out, and how damped: the turn settles with hardly a sway, the wedge
@@ -125,6 +132,8 @@ type pieMotion struct {
 const (
 	pieTurnFreq, pieTurnRatio = 1.7, 0.82
 	piePopFreq, piePopRatio   = 2.6, 0.6
+	// The card slides from corner to corner without a bounce.
+	pieSlideFreq, pieSlideRatio = 2.4, 1
 	// piePop is how much larger the wedge turned to grows, of the pie's radius.
 	piePop = 0.08
 )
@@ -223,8 +232,8 @@ func (a *App) pieNow() time.Time {
 func (m *pieMotion) advance(dir string, wedges []pieWedge, focus string, now time.Time) {
 	i := slices.IndexFunc(wedges, func(w pieWedge) bool { return w.key == focus })
 	if m.dir != dir || m.pops == nil {
-		// A folder seen anew starts turned to its wedge, which grows out from the rest.
-		*m = pieMotion{dir: dir, pops: map[string]*spring{}, at: now, focus: focus}
+		// A folder seen anew starts turned to its wedge, which grows out from the rest, in the card where it was.
+		*m = pieMotion{dir: dir, pops: map[string]*spring{}, at: now, focus: focus, place: m.place, placeGoal: m.placeGoal, moving: m.moving}
 		if i >= 0 {
 			m.target = -(wedges[i].from + wedges[i].to) / 2
 			m.turn.pos = m.target
@@ -247,6 +256,9 @@ func (m *pieMotion) advance(dir string, wedges []pieWedge, focus string, now tim
 	}
 	m.at = now
 	moving := m.turn.step(m.target, dt, pieTurnFreq, pieTurnRatio)
+	if m.place.step(m.placeGoal, dt, pieSlideFreq, pieSlideRatio) {
+		moving = true
+	}
 	for _, w := range wedges {
 		s := m.pops[w.key]
 		if s == nil {
@@ -282,14 +294,52 @@ func (a *App) pieMoving() bool {
 	return false
 }
 
-// pieHeight is how much of a list's body its pie takes, or 0 when the list is too small to spare the room.
-func (a *App) pieHeight(body gfx.Rect) float32 {
+// pieCardSize is the size of a list's pie card, or zero when the list is too small to spare the room: it must leave
+// the rows' names beside it, and fit twice in the list's height, so that a row is always clear of one of its places.
+func (a *App) pieCardSize(body gfx.Rect) (w, h float32) {
 	u := &a.u
-	h := min(body.W*0.72, body.H*0.45, u.px(330))
-	if h < u.px(170) || body.H-h < 4*u.fileRowH() {
-		return 0
+	side := min(body.W*0.4, (body.H-3*pieCardMargin(u))/2-pieCardExtra(u), u.px(300))
+	if side < u.px(170) || body.W-side < u.px(280) {
+		return 0, 0
 	}
-	return h
+	return side, side + pieCardExtra(u)
+}
+
+// pieCardMargin is how far the card keeps from the list's edges.
+func pieCardMargin(u *ctx) float32 { return u.px(12) }
+
+// pieCardExtra is how much taller than wide the card is: the line naming what is shown, under the rings.
+func pieCardExtra(u *ctx) float32 { return u.px(32) }
+
+// pieCardAt is where the card of size w by h lies in the list's body at place, from 0 in the bottom corner to 1 in the
+// top one; the scroll bar stays clear beside it.
+func pieCardAt(u *ctx, body gfx.Rect, w, h float32, place float64) gfx.Rect {
+	m := pieCardMargin(u)
+	bottom, top := body.Bottom()-m-h, body.Y+m
+	return gfx.Rect{X: body.Right() - m - u.px(6) - w, Y: bottom + (top-bottom)*float32(place), W: w, H: h}
+}
+
+// placePieCard sets where the card slides to: away from a corner where it hides a row in use (rows, by their place in
+// the list), when the other corner hides none of them; otherwise it stays.
+func (m *pieMotion) placePieCard(u *ctx, body gfx.Rect, w, h, top float32, rows ...int) {
+	rowH := u.fileRowH()
+	covers := func(place float64) bool {
+		card := pieCardAt(u, body, w, h, place)
+		for _, row := range rows {
+			if row < 0 {
+				continue
+			}
+			y := body.Y + (float32(row)-top)*rowH
+			if y < card.Bottom() && y+rowH > card.Y {
+				return true
+			}
+		}
+		return false
+	}
+	other := 1 - m.placeGoal
+	if covers(m.placeGoal) && !covers(other) {
+		m.placeGoal = other
+	}
 }
 
 // rings is the arcs of a folder, laid out again only when it or its wedges change.
@@ -317,14 +367,17 @@ func (m *pieMotion) arcAt(arcs []pieArc, dist, angle float64) *pieArc {
 // them.
 func (a *App) drawPie(fd *filesDoc, i int, p *filesPane, id string, r gfx.Rect, node *files.Node, wedges []pieWedge) {
 	u := &a.u
-	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: max(1, u.px(1))}, colBorder)
+	// A card like those of the work in the corner, floating over the rows.
+	u.c.Outline(r.Inset(-u.px(1)), u.px(4), gfx.Alpha(colBlack, 0.35))
+	u.c.Fill(r, colSurface)
+	u.c.Outline(r, max(1, u.px(1)), colBorderHi)
 	labelH := u.px(46)
-	area := gfx.Rect{X: r.X, Y: r.Y + u.px(12), W: r.W, H: r.H - u.px(12) - labelH}
+	area := gfx.Rect{X: r.X, Y: r.Y + u.px(10), W: r.W, H: r.H - u.px(10) - labelH}
 	radius := float32(math.Max(float64(min(area.W-u.px(24), area.H)/2/(1+piePop)), 1))
 	cx, cy := area.X+area.W/2, area.Y+area.H/2
 
 	m := &p.pie
-	m.cx, m.cy, m.radius = cx, cy, radius
+	m.cx, m.cy, m.radius, m.card = cx, cy, radius, r
 	arcs := m.rings(node, wedges)
 	// The arc under the pointer, found where the last frame drew it.
 	var hovered *pieArc
@@ -373,20 +426,30 @@ func (a *App) drawPie(fd *filesDoc, i int, p *filesPane, id string, r gfx.Rect, 
 
 	gap := max(u.px(1), 1)
 	shapes := make([]gfx.Wedge, len(arcs))
+	outlined := -1
 	for k := range arcs {
 		arc := &arcs[k]
+		if arc == hovered {
+			outlined = k
+		}
 		pop := m.pop(arc.top)
 		scale := radius * float32(1+piePop*pop)
-		col := gfx.Mix(arc.col, colWhite, float32(0.16*pop))
-		if arc == hovered {
-			col = gfx.Mix(arc.col, colWhite, 0.3)
-		}
 		shapes[k] = gfx.Wedge{
 			From: float32(arc.from + m.turn.pos), To: float32(arc.to + m.turn.pos),
-			Inner: pieEdges[arc.ring]*scale + gap, Radius: pieEdges[arc.ring+1] * scale, Col: col,
+			Inner: pieEdges[arc.ring]*scale + gap, Radius: pieEdges[arc.ring+1] * scale,
+			Col: gfx.Mix(arc.col, colWhite, float32(0.16*pop)),
 		}
 	}
 	u.c.Pie(cx, cy, shapes, gap)
+	if k := outlined; k >= 0 {
+		// The arc pointed at is outlined: drawn again over a copy grown by the line's width, in the colour of text, so
+		// that even a sliver stands clear of its neighbours.
+		line := max(u.px(2), 1.5)
+		edge := shapes[k]
+		edge.Inner, edge.Radius, edge.Col = max(edge.Inner-line, 0), edge.Radius+line, colText
+		u.c.Pie(cx, cy, []gfx.Wedge{edge}, gap-2*line)
+		u.c.Pie(cx, cy, shapes[k:k+1], gap)
+	}
 
 	// The whole folder in the middle.
 	colTotal := colText

@@ -16,8 +16,8 @@ import (
 
 func TestAtempoStaysInItsCleanRange(t *testing.T) {
 	for speed, want := range map[float64]string{1: "", 2: "atempo=2", 4: "atempo=2,atempo=2", 3: "atempo=2,atempo=1.500000", 0.25: "atempo=0.5,atempo=0.5", 0.75: "atempo=0.750000"} {
-		if got := atempo(speed); got != want {
-			t.Errorf("atempo(%v) = %q, want %q", speed, got, want)
+		if got := Tempo(speed); got != want {
+			t.Errorf("Tempo(%v) = %q, want %q", speed, got, want)
 		}
 	}
 }

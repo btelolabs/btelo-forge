@@ -106,6 +106,25 @@ func TestFilePickerOpensAFile(t *testing.T) {
 	}
 }
 
+// A file's path typed or pasted in the picker's bar chooses that file, as Enter on it does.
+func TestFilePickerTakesAPathPasted(t *testing.T) {
+	x := newHarness(t)
+	a := x.a
+	dir, r := pickerAt(t, "a.glb")
+	var got []string
+	a.pickFiles(r, func(paths []string) { got = paths })
+	x.listed()
+	fd := a.filePicker.fd
+	fd.pane().cursorTo("inner")
+	a.openPrompt(fd, promptPath)
+	fd.prompt.text = `"` + filepath.Join(dir, "a.glb") + `"`
+	a.answerPrompt(fd)
+	x.pump(10*time.Second, func() bool { return a.filePicker == nil })
+	if len(got) != 1 || got[0] != filepath.Join(dir, "a.glb") {
+		t.Fatalf("the path pasted answered %v", got)
+	}
+}
+
 // Enter goes into a folder, keys stay with the dialog, Esc cancels.
 func TestFilePickerKeepsTheKeysAndCancels(t *testing.T) {
 	x := newHarness(t)

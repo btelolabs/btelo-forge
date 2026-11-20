@@ -47,7 +47,7 @@ func (h macWindow) Input() ui.Input {
 	return in
 }
 
-var cursors = map[ui.Cursor]int{ui.CursorArrow: mac.Arrow, ui.CursorHand: mac.Hand, ui.CursorText: mac.IBeam, ui.CursorResize: mac.ResizeLeftRight, ui.CursorMove: mac.Move, ui.CursorResizeCorner: mac.Move}
+var cursors = map[ui.Cursor]int{ui.CursorArrow: mac.Arrow, ui.CursorHand: mac.Hand, ui.CursorText: mac.IBeam, ui.CursorResize: mac.ResizeLeftRight, ui.CursorMove: mac.Move, ui.CursorResizeCorner: mac.Move, ui.CursorNone: mac.Hidden}
 
 func (h macWindow) Wake()                                   { h.w.Wake() }
 func (h macWindow) SetTitle(title string)                   { h.w.SetTitle(title) }

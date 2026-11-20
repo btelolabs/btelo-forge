@@ -738,10 +738,7 @@ func TestStopHotkeyAnswersTheQuestionBySaving(t *testing.T) {
 	if a.rec.ask != askNothing || !ask.closed {
 		t.Errorf("the question stayed: %v, closed %v", a.rec.ask, ask.closed)
 	}
-	x.pump(time.Minute, func() bool { return a.rec.rec == nil && a.opening == "" })
-	if a.p == nil {
-		t.Errorf("the recording was not saved; toasts %+v", a.toasts)
-	}
+	x.recordingWatched() // saved, and opened to be watched
 }
 
 func TestRecordingARegionWithTheToolbar(t *testing.T) {
@@ -804,5 +801,110 @@ func TestRecordingARegionWithTheToolbar(t *testing.T) {
 	size, _ := cmd.Output()
 	if strings.TrimSpace(string(size)) != "640,360" {
 		t.Errorf("recorded %q, want 640,360", strings.TrimSpace(string(size)))
+	}
+}
+
+// shootWithNotice takes a screenshot of a region with the hotkey for target and returns the notice that says so.
+func shootWithNotice(t *testing.T, x *harness, hotkey int) *shotNotice {
+	t.Helper()
+	a, h := x.a, x.h
+	a.Tick(Input{Hotkeys: []int{hotkey}})
+	open := h.open()
+	if len(open) == 0 {
+		t.Fatal("the screenshot hotkey did not open the picker")
+	}
+	o := open[len(open)-1]
+	o.drag(40, 30, 40+321, 30+201)
+	x.pump(30*time.Second, func() bool { return o.closed && !a.rec.shooting && a.over.notice != nil })
+	n := a.over.notice
+	if n.s.o.(*fakeOverlay).shown == nil {
+		t.Fatal("the notice was not drawn")
+	}
+	return n
+}
+
+// clickNoticeButton clicks the notice's button and waits for it to have done its work.
+func clickNoticeButton(t *testing.T, x *harness, n *shotNotice) {
+	t.Helper()
+	_, _, _, button, _, _ := x.a.shotNoticeParts(&n.s.u, n)
+	if button.W == 0 {
+		t.Fatal("the notice has no button")
+	}
+	n.s.o.(*fakeOverlay).click(button.X+button.W/2, button.Y+button.H/2)
+	x.pump(10*time.Second, func() bool { return n.copied })
+}
+
+// A screenshot says at the top of its display that it was taken, with a button that copies what its hotkey did not:
+// the path, or for the hotkey that copied the path, the picture.
+func TestTheScreenshotNoticeCopiesWhatTheHotkeyDidNot(t *testing.T) {
+	x := overlayHarness(t)
+	a, h := x.a, x.h
+	d, _ := a.chosenDisplay()
+	shots := func() []string {
+		got, _ := filepath.Glob(filepath.Join(a.settings.ResourceDir, "Tools", "*.png"))
+		return got
+	}
+
+	n := shootWithNotice(t, x, hotkeyScreenshotFile)
+	b := n.s.o.Bounds()
+	if b.Min.Y != d.Y+shotNoticeTop || abs(b.Min.X+b.Max.X-2*d.X-d.Width) > 1 || !n.s.o.(*fakeOverlay).opts.Excluded {
+		t.Errorf("the notice is at %v, not at the top centre of %v, left out of captures", b, displayBounds(d))
+	}
+	if _, _, label := a.shotNoticeTexts(n); label != a.u.t("Copy the picture's path") {
+		t.Errorf("a saved screenshot's button says %q", label)
+	}
+	x.shotOverlay(n.s.o.(*fakeOverlay), "overlay-shot-notice-file")
+	clickNoticeButton(t, x, n)
+	if saved := shots(); len(saved) != 1 || h.clip != saved[0] {
+		t.Errorf("the button copied %q; saved %v", h.clip, saved)
+	}
+	x.shotOverlay(n.s.o.(*fakeOverlay), "overlay-shot-notice-copied")
+
+	// The hotkey that copies the path offers the picture.
+	h.clipImage = nil
+	n = shootWithNotice(t, x, hotkeyScreenshotPath)
+	if _, _, label := a.shotNoticeTexts(n); label != a.u.t("Copy the picture") {
+		t.Errorf("the path hotkey's button says %q", label)
+	}
+	x.shotOverlay(n.s.o.(*fakeOverlay), "overlay-shot-notice-path")
+	clickNoticeButton(t, x, n)
+	if h.clipImage == nil || h.clipImage.Bounds().Dx() != 320 {
+		t.Errorf("the button put %v on the clipboard, not the picture", h.clipImage)
+	}
+
+	// A screenshot only on the clipboard is saved when its path is asked for; in Chinese, which has its own words.
+	a.u.lang = Chinese
+	before := len(shots())
+	n = shootWithNotice(t, x, hotkeyScreenshot)
+	if len(shots()) != before {
+		t.Fatal("a screenshot onto the clipboard was saved before its path was asked for")
+	}
+	x.shotOverlay(n.s.o.(*fakeOverlay), "overlay-shot-notice-clipboard-zh")
+	clickNoticeButton(t, x, n)
+	x.shotOverlay(n.s.o.(*fakeOverlay), "overlay-shot-notice-clipboard-zh-copied")
+	saved := shots()
+	if len(saved) != before+1 || !slices.Contains(saved, h.clip) {
+		t.Errorf("the button copied %q; saved %v", h.clip, saved)
+	}
+	if f, err := os.Open(h.clip); err == nil {
+		cfg, err := png.DecodeConfig(f)
+		f.Close()
+		if err != nil || cfg.Width != 320 {
+			t.Errorf("the saved screenshot is %dx%d (%v)", cfg.Width, cfg.Height, err)
+		}
+	}
+
+	// It stays while the pointer is over it and goes when its time is up.
+	n.until = time.Now().Add(-time.Second)
+	h.pointer = n.s.o.Bounds().Min.Add(image.Pt(4, 4))
+	x.frame(Input{})
+	if a.over.notice != n {
+		t.Fatal("the notice went with the pointer over it")
+	}
+	h.pointer = image.Point{X: -1 << 20}
+	n.until = time.Now().Add(-time.Second)
+	x.frame(Input{})
+	if a.over.notice != nil || !n.s.o.(*fakeOverlay).closed {
+		t.Error("the notice stayed after its time")
 	}
 }

@@ -62,6 +62,7 @@ type doc struct {
 	aiTab       bool       // the chat with AI models instead of an edit; there is one at most
 	mailTab     bool       // the mail of the mailboxes bound; there is one at most
 	model       *modelDoc  // a 3D tab instead of an edit
+	movie       *movieDoc  // a video played as it is, in the player, instead of an edit
 	// editing makes a tab with no edit yet the video editor, waiting for videos to be added or dropped.
 	editing bool
 	queued  []queuedVideo // videos to open in this tab once the one opening is in
@@ -91,6 +92,8 @@ func (d *doc) title(a *App) string {
 		return a.u.t("Local models")
 	case d.mailTab:
 		return a.u.t("Mail")
+	case d.movie != nil:
+		return filepath.Base(d.movie.path)
 	case d.p != nil && d.file != "":
 		return strings.TrimSuffix(filepath.Base(d.file), project.EditExt)
 	case d.p != nil:
@@ -127,6 +130,8 @@ func (d *doc) glyph() string {
 		return icAI
 	case d.mailTab:
 		return icMail
+	case d.movie != nil:
+		return icPlay
 	case d.p != nil || d.opening != "" || d.editing:
 		return icVideo
 	}
@@ -153,6 +158,7 @@ func (a *App) switchTab(i int) {
 		return
 	}
 	a.player.Stop()
+	a.leaveMovie(a.doc)
 	a.leaveFiles(a.doc, false)
 	a.u.focus = ""
 	a.doc = a.docs[i]
@@ -186,6 +192,7 @@ func (a *App) closeTab(i int) {
 	if d.mailTab {
 		a.mailClosed()
 	}
+	a.closeMovie(d)
 	if a.doc == d {
 		a.player.Stop()
 	}

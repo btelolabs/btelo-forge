@@ -59,6 +59,7 @@ type filesPane struct {
 	marked  map[string]bool
 	sort    filesSort
 	desc    bool
+	sorted  bool // set once the user chooses an order, so switching between rows and pictures keeps it
 	err     error
 	reading bool
 	gen     int // counts listings asked for, so a slow one that comes back late is dropped
@@ -66,6 +67,8 @@ type filesPane struct {
 	// the last run may be gone. They are tried in the background and forgotten once one is shown.
 	orElse []string
 	land   string // the name to put the cursor on when the listing comes back
+	// enterLand opens land once the cursor is on it, as Enter on it does: a path typed or pasted to a file opens it.
+	enterLand bool
 	// search is the name or content search shown in place of the listing, when there is one.
 	search *filesSearch
 	// analysed is set once the pane has been analysed: it is sorted by size as gdu sorts, until sorted otherwise.
@@ -110,6 +113,14 @@ const (
 	listByTime
 )
 
+// defaultSort is the order a list takes until sorted otherwise: pictures newest first, rows by name.
+func (p *filesPane) defaultSort() filesSort {
+	if p.grid {
+		return listByTime
+	}
+	return listByName
+}
+
 // filesSettings are the file manager's choices kept between runs.
 type filesSettings struct {
 	HideHidden bool `json:"hideHidden,omitempty"` // hidden files are left out of the lists
@@ -131,14 +142,25 @@ type savedPane struct {
 
 // fileManager is what the file manager tabs share.
 type fileManager struct {
-	peek    filePeek
-	trees   []*files.Node // the folders analysed, none inside another
-	scans   []*fileScan
-	jobs    []*fileJob
-	finding int // paths typed or picked being looked for, to go to
-	undo    []fileUndo
-	clip    fileClip
-	history *files.History
+	peek filePeek
+	// trees are the folders analysed, none inside another: those of earlier runs, read as the app starts
+	// (treesRead, analysisTrees), and this run's. They are written a moment after they change (saveAnalyses).
+	trees       []*files.Node
+	treesRead   loadAhead[[]*files.Node]
+	treesLoaded bool
+	treesDirty  bool
+	treesAt     time.Time
+	treesSaver  analysesSaver
+	// since is when this run started: an analysis older is of an earlier run, and is read again in the background
+	// when a list shows it, once per folder (refreshed).
+	since     time.Time
+	refreshed map[string]bool
+	scans     []*fileScan
+	jobs      []*fileJob
+	finding   int // paths typed or picked being looked for, to go to
+	undo      []fileUndo
+	clip      fileClip
+	history   *files.History
 	// historyRead is the history being read as the app starts.
 	historyRead loadAhead[*files.History]
 	// historyDirty is set when a visit was noted and not yet written.
@@ -150,6 +172,8 @@ type fileManager struct {
 	wasInactive bool
 	// clock is the time the pies move by, when a test steps it; nil is the time now.
 	clock func() time.Time
+	// scan analyses a folder, when a test holds it running; nil is files.Scan.
+	scan func(ctx context.Context, root string, progress *files.ScanProgress) (*files.Node, error)
 }
 
 // fileClip is what was cut or copied, to be pasted.
@@ -308,6 +332,7 @@ func (a *App) openAssets(dir string) *filesPane {
 		p := a.files.pane()
 		if !p.grid {
 			a.showGrid(p)
+			p.cursor, p.g.scroll = 0, 0
 		}
 		a.goTo(p, dir, "")
 		return p
@@ -414,6 +439,10 @@ func (a *App) readPane(p *filesPane) {
 			}
 			a.arrange(p)
 			p.cursorTo(name)
+			if p.enterLand {
+				p.enterLand = false
+				a.enterLanded(p, name)
+			}
 		})
 	})
 }
@@ -609,25 +638,40 @@ func (a *App) goTo(p *filesPane, dir, land string) {
 		// A list showing an analysis keeps showing it in the folders inside, as gdu does; leaving it, the list
 		// goes back to names, and coming back into a folder analysed, to its analysis, as it was kept.
 		was := p.analysed
-		p.analysed = p.analyses && dir != thisPC && a.analysis(dir) != nil
+		p.analysed = p.analyses && dir != thisPC && (a.analysis(dir) != nil || a.liveFor(p, dir) != nil)
 		if p.analysed && !was {
 			p.sort, p.desc = listBySize, false
 		}
 		p.top, p.cursor, p.entries, p.rows = 0, 0, nil, nil
-		if p.sort == listBySize && !p.analysed {
-			p.sort, p.desc = listByName, false
+		if was && !p.analysed && p.sort == listBySize {
+			p.sort, p.desc, p.sorted = p.defaultSort(), false, false
 		}
 		if dir != thisPC {
 			a.visited(dir)
 		}
 	}
-	p.dir, p.land, p.search, p.err = dir, land, nil, nil
+	p.dir, p.land, p.enterLand, p.search, p.err = dir, land, false, nil, nil
 	a.readPane(p)
+}
+
+// enterLanded does what Enter on the item named name does, now that the listing put the cursor on it, in the list
+// whose keys act: a file opens in the app or is previewed, and in the file picker it is chosen.
+func (a *App) enterLanded(p *filesPane, name string) {
+	e := p.current()
+	if e == nil || e.Name != name || e.Dir {
+		return // not shown, as a hidden file is while hidden files are
+	}
+	for _, fd := range a.filesDocs() {
+		if fd.pane() == p {
+			a.enter(fd)
+			return
+		}
+	}
 }
 
 // analysis is the analysed folder for dir, or nil when it has not been analysed.
 func (a *App) analysis(dir string) *files.Node {
-	for _, t := range a.fm.trees {
+	for _, t := range a.analysisTrees() {
 		if n := t.Find(dir); n != nil {
 			return n
 		}

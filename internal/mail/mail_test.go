@@ -703,6 +703,68 @@ func TestAMailingIsNotAPerson(t *testing.T) {
 	}
 }
 
+// codeMail are messages a model called warnings: those with a code to sign in are of some use, the others must be read.
+var codeMail = []struct {
+	subject, text string
+	code          bool
+}{
+	{"Your Security Code", "Hi Amarkdown, Enter this 6-digit code to verify it's you: 214368 This code is valid for 10 minutes.", true},
+	{"Sign in to Steam", "Your Steam Guard code is needed. Login Code: F7K2Q", true},
+	{"您的验证码", "验证码 482913，5 分钟内有效。", true},
+	{"【某银行】", "您的验证码482913，5分钟内有效。", true},
+	{"Action needed", "Your verification code is 90017725.", true},
+	{"Your OTP for login", "Use it within 5 minutes.", true},
+	{"Security alert", "A new sign-in to your Google Account from Windows, 2026-11-01.", false},
+	{"Your account was locked", "We saw 12345 failed attempts. Reset your password now.", false},
+	{"Hotpot tonight?", "Table for 4 at 1900.", false},
+	{"Invoice 202611", "Your invoice of 1200 USD is due.", false},
+}
+
+func TestACodeIsNeverAMust(t *testing.T) {
+	ask := func(context.Context, string, string) (string, error) { return `{"summary":"s","kind":"warning"}`, nil }
+	for _, c := range codeMail {
+		want := TierMust
+		if c.code {
+			want = TierMaybe
+		}
+		if v, err := Organise(context.Background(), ask, Message{Address: "noreply@acct-auth.epicgames.com", Subject: c.subject, Text: c.text}); err != nil || v.Tier != want {
+			t.Errorf("%q: %+v %v, want %s", c.subject, v, err, want)
+		}
+	}
+}
+
+func TestACodeSortedBeforeTheRuleIsSettled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mail.db")
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, c := range codeMail {
+		if _, err := s.db.Exec("INSERT INTO messages (account, validity, uid, subject, body, tier, organised, pick) VALUES ('a', 1, ?, ?, ?, ?, 'model', ?)",
+			i+1, c.subject, c.text, TierMust, TierMust); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Close()
+	if s, err = OpenStore(path); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, c := range codeMail {
+		var tier, pick string
+		if err := s.db.QueryRow("SELECT tier, pick FROM messages WHERE subject=?", c.subject).Scan(&tier, &pick); err != nil {
+			t.Fatal(err)
+		}
+		want := TierMust
+		if c.code {
+			want = TierMaybe
+		}
+		if tier != want || pick != TierMust {
+			t.Errorf("%q: tier %s pick %s, want tier %s and the pick kept", c.subject, tier, pick, want)
+		}
+	}
+}
+
 func TestTheMessageIsMarkedAsDataForTheModel(t *testing.T) {
 	var asked string
 	ask := func(_ context.Context, system, text string) (string, error) {

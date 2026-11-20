@@ -80,6 +80,10 @@ const (
 	// icFullscreen and icFullscreenExit enter and leave player mode.
 	icFullscreen     = "\ue5d0"
 	icFullscreenExit = "\ue5d1"
+	// The video player's.
+	icReplay10  = "\ue059"
+	icForward10 = "\ue056"
+	icEdit      = "\ue3c9"
 	// The asset manager's symbols.
 	icDescription = "\ue873"
 	icCode        = "\ue86f"

@@ -176,8 +176,8 @@ func opensInApp(kind assets.Kind) bool {
 	return false
 }
 
-// openAsset opens a file where it belongs: a video, edit or canvas in a tab of its own, a picture as a canvas,
-// anything else with the program the system has for it.
+// openAsset opens a file where it belongs: a video in the player, an edit or canvas in a tab of its own, a picture as
+// a canvas, anything else with the program the system has for it.
 func (a *App) openAsset(path string) {
 	if isPSD(path) {
 		a.openPSD(path)
@@ -185,8 +185,7 @@ func (a *App) openAsset(path string) {
 	}
 	switch assets.KindOf(path) {
 	case assets.Video:
-		a.newTab()
-		a.openVideo(path, false)
+		a.openMovie(path)
 	case assets.Edit:
 		a.openEditFile(path)
 	case assets.Canvas:
@@ -284,10 +283,7 @@ func (a *App) openFromSystem(paths []string) {
 		}
 		switch assets.KindOf(p) {
 		case assets.Video:
-			if a.occupied() {
-				a.newTab()
-			}
-			a.openVideo(p, false)
+			a.openMovie(p)
 		case assets.Edit:
 			a.openEditFile(p)
 		case assets.Canvas:

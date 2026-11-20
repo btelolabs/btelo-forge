@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -325,7 +326,7 @@ func (a *App) splitPane(fd *filesDoc) {
 		return
 	}
 	from := fd.pane()
-	p := &filesPane{dir: from.dir, marked: map[string]bool{}, sort: from.sort, desc: from.desc}
+	p := &filesPane{dir: from.dir, marked: map[string]bool{}, sort: from.sort, desc: from.desc, sorted: from.sorted}
 	if from.grid {
 		p.g.size = from.g.size
 		a.showGrid(p)
@@ -511,14 +512,20 @@ func (a *App) toggleHidden() {
 	}
 }
 
+// setSort orders a list as chosen, starting at the top of the new order.
+func (a *App) setSort(p *filesPane, s filesSort, desc bool) {
+	p.sort, p.desc, p.sorted = s, desc, true
+	a.arrange(p)
+	p.cursor, p.top, p.g.scroll = 0, 0, 0
+}
+
 // sortBy orders a list; choosing the order it already has turns it round, as gdu does.
 func (a *App) sortBy(p *filesPane, s filesSort) {
+	desc := false
 	if p.sort == s {
-		p.desc = !p.desc
-	} else {
-		p.sort, p.desc = s, false
+		desc = !p.desc
 	}
-	a.arrange(p)
+	a.setSort(p, s, desc)
 }
 
 // escapeFiles closes the preview, or leaves a search, or unmarks, or shows a filtered grid whole again, or forgets
@@ -947,17 +954,20 @@ func (a *App) describeFileError(err error) string {
 
 // takeFromAnalyses takes an item that was deleted or moved away off the analyses it was in.
 func (a *App) takeFromAnalyses(path string, bytes int64) {
-	for i, t := range a.fm.trees {
+	for i, t := range a.analysisTrees() {
 		if files.SamePath(t.Path(), path) {
 			a.fm.trees = slices.Delete(a.fm.trees, i, i+1)
+			a.analysesChanged()
 			return
 		}
 		if n := t.Find(path); n != nil {
 			n.Detach()
+			a.analysesChanged()
 			return
 		}
 		if parent := t.Find(filepath.Dir(path)); parent != nil {
 			parent.Grow(-bytes, -1)
+			a.analysesChanged()
 			return
 		}
 	}
@@ -969,6 +979,7 @@ func (a *App) addToAnalyses(ad added) {
 	if parent == nil {
 		return
 	}
+	a.analysesChanged()
 	if ad.node == nil {
 		parent.Grow(ad.bytes, 1)
 		return
@@ -1070,6 +1081,52 @@ type fileScan struct {
 	panes    []*filesPane // the lists that asked for it, which show it once it is done
 	progress files.ScanProgress
 	cancel   context.CancelFunc
+	// live is what it has found so far of dir and the folders in it, taken from progress every liveEvery while
+	// a list shows it, which one with no analysis of dir does (liveFor).
+	live   *files.Node
+	liveAt time.Time
+}
+
+// liveEvery is how often a list showing an analysis as it runs takes what it has found and sorts itself again:
+// often enough to see the sizes grow, not so often that rows jump about.
+const liveEvery = 250 * time.Millisecond
+
+// liveFor is the analysis running for the list's own folder that the list asked for, while the list has no
+// analysis to show of it, or nil.
+func (a *App) liveFor(p *filesPane, dir string) *fileScan {
+	for _, s := range a.fm.scans {
+		if files.SamePath(s.dir, dir) && slices.Contains(s.panes, p) {
+			if a.analysis(dir) == nil {
+				return s
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// followScans takes what each analysis running has found so far for the lists that show it as it runs, and sorts
+// them again by it.
+func (a *App) followScans() {
+	now := time.Now()
+	for _, s := range a.fm.scans {
+		if now.Sub(s.liveAt) < liveEvery {
+			continue
+		}
+		var showing []*filesPane
+		for _, p := range s.panes {
+			if p.analysed && a.liveFor(p, p.dir) == s {
+				showing = append(showing, p)
+			}
+		}
+		if len(showing) == 0 {
+			continue
+		}
+		s.live, s.liveAt = s.progress.Live(s.dir), now
+		for _, p := range showing {
+			a.arrange(p)
+		}
+	}
 }
 
 // scanOf is the analysis running on dir or a folder it is in, or nil.
@@ -1096,7 +1153,13 @@ func (a *App) paneAnalysis(p *filesPane) *files.Node {
 	if !p.analysed {
 		return nil
 	}
-	return a.analysis(p.dir)
+	if n := a.analysis(p.dir); n != nil {
+		return n
+	}
+	if s := a.liveFor(p, p.dir); s != nil {
+		return s.live // what it has found so far, while it runs
+	}
+	return nil
 }
 
 // toggleAnalysis is what i does: it turns the list to its folder's analysis, as gdu shows it, or back to the plain
@@ -1112,11 +1175,11 @@ func (a *App) toggleAnalysis(p *filesPane) {
 	a.analyse(p)
 }
 
-// leaveAnalysis shows the list's folder plainly again, ordered by name where it was ordered by size.
+// leaveAnalysis shows the list's folder plainly again, ordered by its default where it was ordered by size.
 func (a *App) leaveAnalysis(p *filesPane) {
 	p.analysed, p.analyses = false, false
 	if p.sort == listBySize {
-		p.sort, p.desc = listByName, false
+		p.sort, p.desc, p.sorted = p.defaultSort(), false, false
 	}
 	a.arrange(p)
 }
@@ -1151,9 +1214,15 @@ func (a *App) analyse(p *filesPane) {
 			if len(s.panes) == 0 {
 				s.cancel()
 			}
+			if a.analysis(dir) == nil {
+				a.leaveAnalysis(p) // what it had found so far is not an analysis
+			}
 			return
 		}
-		s.panes = append(s.panes, p) // already running for another list: this one waits for it too
+		s.panes = append(s.panes, p) // already running for another list: this one shows it too, as it runs
+		if files.SamePath(s.dir, dir) || a.analysis(dir) != nil {
+			a.showAnalysis(p)
+		}
 		return
 	}
 	if a.analysis(dir) != nil {
@@ -1161,9 +1230,11 @@ func (a *App) analyse(p *filesPane) {
 		return
 	}
 	a.scanFolder(p)
+	a.showAnalysis(p) // what it finds, as it finds it
 }
 
-// scanFolder analyses the list's folder, anew, in the background, showing the analysis in the list once it is done.
+// scanFolder analyses the list's folder, anew, in the background; the list shows the analysis once it is done, and what
+// it has found so far while it runs when it shows its analysis already (liveFor).
 func (a *App) scanFolder(p *filesPane) {
 	dir := p.dir
 	s := &fileScan{dir: dir, panes: []*filesPane{p}}
@@ -1171,12 +1242,25 @@ func (a *App) scanFolder(p *filesPane) {
 	s.cancel = cancel
 	a.fm.scans = append(a.fm.scans, s)
 	a.background(func(context.Context) {
-		node, err := files.Scan(ctx, dir, &s.progress)
+		scan := a.fm.scan
+		if scan == nil {
+			scan = files.Scan
+		}
+		node, err := scan(ctx, dir, &s.progress)
 		a.post(func() {
 			a.fm.scans = slices.DeleteFunc(a.fm.scans, func(x *fileScan) bool { return x == s })
 			if err != nil {
 				if ctx.Err() == nil {
 					a.toast(a.u.tf("%s could not be analysed: %v", filepath.Base(dir), a.describeFileError(err)), true)
+				}
+				if errors.Is(err, fs.ErrNotExist) {
+					a.takeFromAnalyses(dir, 0) // gone since an earlier run analysed it
+				}
+				// A list that showed what it was finding has nothing left to show.
+				for _, q := range s.panes {
+					if q.analysed && files.SamePath(q.dir, dir) && a.analysis(dir) == nil {
+						a.leaveAnalysis(q)
+					}
 				}
 				return
 			}
@@ -1187,10 +1271,10 @@ func (a *App) scanFolder(p *filesPane) {
 				}
 				for _, q := range d.files.panes {
 					switch {
-					case slices.Contains(s.panes, q) && files.Within(q.dir, dir):
+					case slices.Contains(s.panes, q) && files.Within(q.dir, dir) && !q.analysed:
 						a.showAnalysis(q)
 					case q.analysed:
-						a.arrange(q) // the analysis it shows may have been replaced
+						a.arrange(q) // the analysis it shows was replaced, or it showed it as it ran: in its order
 					}
 				}
 			}
@@ -1209,7 +1293,8 @@ func (a *App) showAnalysis(p *filesPane) {
 // takes the place of those of folders inside it.
 func (a *App) keepAnalysis(n *files.Node) {
 	dir := n.Path()
-	for _, t := range a.fm.trees {
+	a.analysesChanged()
+	for _, t := range a.analysisTrees() {
 		if old := t.Find(dir); old != nil && old != t {
 			parent := old.Parent
 			old.Detach()
@@ -1271,6 +1356,11 @@ func (a *App) fileTick(fd *filesDoc) {
 	}
 	a.fm.wasInactive = a.u.inactive
 	a.saveFileHistory(false)
+	a.followScans()
+	for _, p := range fd.panes {
+		a.refreshAnalysis(p)
+	}
+	a.saveAnalyses(false)
 }
 
 // fileWork reports whether the file manager has work running: whose progress is shown, or a path being looked for.
@@ -1287,6 +1377,7 @@ func (a *App) stopFileWork() {
 		s.cancel()
 	}
 	a.saveFileHistory(true)
+	a.saveAnalyses(true)
 }
 
 // drawFileJobs floats what is running over the bottom right of the lists: each job's name, the file it is on, its

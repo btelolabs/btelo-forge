@@ -12,6 +12,7 @@ import (
 	"image"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/media"
@@ -208,6 +209,12 @@ func ProbeEncoder(ctx context.Context, d Display, fps int) (Encoder, error) {
 	return Encoder{}, fmt.Errorf("%w: %w", ErrNoEncoder, errors.Join(errs...))
 }
 
+var (
+	filtersMu   sync.Mutex
+	filtersPath string
+	filtersSet  map[string]bool
+)
+
 // hasGrabber checks that the ffmpeg in use has ddagrab; a build made without Direct3D 11 lacks it.
 func hasGrabber(ctx context.Context) error {
 	ok, err := hasFilter(ctx, "ddagrab")
@@ -217,22 +224,34 @@ func hasGrabber(ctx context.Context) error {
 	return err
 }
 
-// hasFilter reports whether the ffmpeg in use has a filter.
+// hasFilter reports whether the ffmpeg in use has a filter, caching the list for that binary.
 func hasFilter(ctx context.Context, name string) (bool, error) {
 	cmd, err := media.Command(ctx, "ffmpeg", "-hide_banner", "-filters")
 	if err != nil {
 		return false, err
 	}
+	filtersMu.Lock()
+	if cmd.Path != "" && cmd.Path == filtersPath && filtersSet != nil {
+		ok := filtersSet[name]
+		filtersMu.Unlock()
+		return ok, nil
+	}
+	filtersMu.Unlock()
+
 	out, err := cmd.Output()
 	if err != nil {
 		return false, err
 	}
+	set := map[string]bool{}
 	for _, line := range strings.Split(string(out), "\n") {
-		if f := strings.Fields(line); len(f) >= 2 && f[1] == name {
-			return true, nil
+		if f := strings.Fields(line); len(f) >= 2 {
+			set[f[1]] = true
 		}
 	}
-	return false, nil
+	filtersMu.Lock()
+	filtersPath, filtersSet = cmd.Path, set
+	filtersMu.Unlock()
+	return set[name], nil
 }
 
 func tryEncoder(ctx context.Context, o Options) error {

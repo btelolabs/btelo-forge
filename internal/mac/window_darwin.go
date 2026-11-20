@@ -108,6 +108,7 @@ const (
 	IBeam
 	ResizeLeftRight
 	Move
+	Hidden // no pointer over the window
 )
 
 func (w *Window) SetCursor(kind int) { C.forge_cursor(C.int(kind)) }

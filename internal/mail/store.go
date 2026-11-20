@@ -234,7 +234,43 @@ func OpenStore(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	s := &Store{db: db}
+	if err := s.settleCodes(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// settleCodes holds the mail a model read before OneTimeCode was asked to the same rule: a code is never a must. Only a
+// model's tier changes; the owner's pick is a column of its own. It reads the few musts, so it costs nothing at each opening.
+func (s *Store) settleCodes() error {
+	rows, err := s.db.Query("SELECT id, subject, body FROM messages WHERE tier=? AND organised<>''", TierMust)
+	if err != nil {
+		return err
+	}
+	var codes []int64
+	for rows.Next() {
+		var id int64
+		var subject, body string
+		if err := rows.Scan(&id, &subject, &body); err != nil {
+			rows.Close()
+			return err
+		}
+		if OneTimeCode(subject, body) {
+			codes = append(codes, id)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range codes {
+		if _, err := s.db.Exec("UPDATE messages SET tier=? WHERE id=?", TierMaybe, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close closes the database.

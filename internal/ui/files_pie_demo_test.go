@@ -204,7 +204,7 @@ func recordPieDemo(t *testing.T, lang Language, gif string) {
 	x.frame(Input{})
 
 	r.hold(900 * time.Millisecond)
-	// Analyse: the list is sorted by size and the pie grows under it.
+	// Analyse: the list is sorted by size and the pie floats on its card over it.
 	r.frame(Input{Keys: []Key{*key('I', "")}})
 	x.waitFiles()
 	r.hold(1300 * time.Millisecond)

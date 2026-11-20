@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/png"
 	"os"
 	"path/filepath"
 	"slices"
@@ -477,10 +476,7 @@ func (a *App) stopRecording(done func(path string, err error)) {
 				}
 				return
 			}
-			if a.p != nil || a.opening != "" {
-				a.newTab()
-			}
-			a.openVideo(path, false)
+			a.openMovie(path)
 			a.toastActions(a.u.tf("Saved the recording %s", filepath.Base(path)), false, []toastAction{
 				{a.u.t("Show in folder"), func() { a.host.Reveal(path) }},
 				{a.u.t("Copy the path"), func() { a.copyPathList([]string{path}) }},
@@ -618,7 +614,7 @@ func (a *App) Tick(in Input) time.Duration {
 	if sd := a.over.draw; sd != nil && (sd.wait > 0 || sd.again) {
 		return max(min(sd.wait, 250*time.Millisecond), redrawNow) // a hint on the drawing's panel, or its options wrapped
 	}
-	if a.recording() || a.streaming() || a.cameraSettling() || a.over.bar != nil || a.over.pick != nil || a.over.draw != nil {
+	if a.recording() || a.streaming() || a.cameraSettling() || a.over.bar != nil || a.over.pick != nil || a.over.draw != nil || a.over.notice != nil {
 		return 250 * time.Millisecond
 	}
 	return 0
@@ -771,11 +767,23 @@ func (a *App) screenshotRegion(to shotTarget) {
 		a.takeScreenshot(capture.Display{}, image.Rectangle{}, to, nil) // says why it cannot
 		return
 	}
+	a.closeShotNotice() // the picker takes the screen; a new screenshot brings its own
 	a.pickRegion(a.shotPick(to), func(d capture.Display, region image.Rectangle, ok bool) {
 		if ok {
-			a.takeScreenshot(d, region, to, nil)
+			a.takeScreenshot(d, region, to, func(shot shotTaken, err error) {
+				if err == nil {
+					a.showShotNotice(d, to, shot)
+				}
+			})
 		}
 	})
+}
+
+// shotTaken is a screenshot that was taken: its file when saved, its picture in memory, and its size in pixels.
+type shotTaken struct {
+	path string
+	img  image.Image
+	size image.Point
 }
 
 // withKey adds a hotkey to a hint, when there is one.
@@ -787,59 +795,57 @@ func withKey(hint, key string) string {
 }
 
 // takeScreenshot takes a PNG of a region of a display (the chosen one when d is zero, all of it when region is
-// empty), leaving this window out when the recording settings say so, and sends it to the target; done, when not nil, hears the file, "" for one only on the clipboard.
-func (a *App) takeScreenshot(d capture.Display, region image.Rectangle, to shotTarget, done func(path string, err error)) {
+// empty), leaving this window out when the recording settings say so, and sends it to the target; done, when not nil,
+// hears what was taken.
+func (a *App) takeScreenshot(d capture.Display, region image.Rectangle, to shotTarget, done func(shot shotTaken, err error)) {
 	r := &a.rec
-	report := func(path string, err error) {
+	report := func(shot shotTaken, err error) {
 		if err != nil {
 			a.toast(a.u.tf("The screenshot could not be taken: %s", a.describe(err)), true)
 		}
 		if done != nil {
-			done(path, err)
+			done(shot, err)
 		}
 	}
 	host := a.recorder()
 	if host == nil {
-		report("", capture.ErrUnsupported)
+		report(shotTaken{}, capture.ErrUnsupported)
 		return
 	}
 	if r.shooting {
-		report("", errors.New(a.u.t("A screenshot is already being taken")))
+		report(shotTaken{}, errors.New(a.u.t("A screenshot is already being taken")))
 		return
 	}
-	if !a.tools.ready || r.listErr != nil || !r.listed {
-		reason, _ := a.recordBlocker()
-		if reason == "" {
+	if r.listErr != nil || !r.listed {
+		reason := ""
+		if r.listErr != nil {
+			reason = a.describe(r.listErr)
+		} else {
 			reason = a.u.t("Checking how this computer can record…")
 		}
-		report("", errors.New(reason))
+		report(shotTaken{}, errors.New(reason))
 		return
 	}
 	if d.Width == 0 {
 		var ok bool
 		if d, ok = a.chosenDisplay(); !ok {
-			report("", errors.New(a.u.t("No screen to record was found")))
+			report(shotTaken{}, errors.New(a.u.t("No screen to record was found")))
 			return
 		}
 	}
 	cb, pictures := a.host.(imageClipboard)
 	if to == shotClipboard && !pictures {
-		report("", errors.New(a.u.t("Pictures cannot be put on the clipboard on this system")))
+		report(shotTaken{}, errors.New(a.u.t("Pictures cannot be put on the clipboard on this system")))
 		return
 	}
 	var path string
-	var err error
-	if to == shotClipboard {
-		path, err = tempShotPath()
-	} else {
-		var dir string
-		if dir, err = a.categoryDir(categoryTools); err == nil {
-			path = a.datedPath(dir, a.u.t("Screenshot %s"), ".png", time.Now())
+	if to != shotClipboard {
+		dir, err := a.categoryDir(categoryTools)
+		if err != nil {
+			report(shotTaken{}, err)
+			return
 		}
-	}
-	if err != nil {
-		report("", err)
-		return
+		path = a.datedPath(dir, a.u.t("Screenshot %s"), ".png", time.Now())
 	}
 	s := a.settings.Record
 	hide := s.HideWindow && r.rec == nil // while recording the window is already handled
@@ -848,65 +854,50 @@ func (a *App) takeScreenshot(d capture.Display, region image.Rectangle, to shotT
 	}
 	r.shooting = true
 	a.background(func(ctx context.Context) {
-		err := capture.Screenshot(ctx, d, region, s.Cursor, path)
-		var img image.Image
-		if err == nil && to == shotClipboard {
-			img, err = readPNG(path)
-			os.Remove(path)
+		img, err := capture.GrabScreenshot(ctx, d, region, s.Cursor, hide)
+		if err == nil && to != shotClipboard {
+			err = capture.WritePNG(path, img, false)
 		}
 		a.post(func() {
 			r.shooting = false
 			if hide {
 				host.ExcludeFromCapture(false)
 			}
-			if err == nil && img != nil {
+			if err == nil && to == shotClipboard {
 				err = cb.SetClipboardImage(img)
 			}
 			if err == nil && to == shotPath {
 				err = a.host.SetClipboard(path)
 			}
 			if err != nil {
-				report("", err)
+				report(shotTaken{}, err)
 				return
 			}
+			b := img.Bounds()
 			if to == shotClipboard {
-				b := img.Bounds()
 				a.toast(a.u.tf("Copied a screenshot of %d × %d", b.Dx(), b.Dy()), false)
-				report("", nil)
+				report(shotTaken{img: img, size: b.Size()}, nil)
 				return
 			}
-			actions := []toastAction{{a.u.t("Edit"), func() { a.openImageAsArt(path) }}, {a.u.t("Show in folder"), func() { a.host.Reveal(path) }}}
-			if a.p != nil {
-				actions = append([]toastAction{{a.u.t("Add to the edit"), func() { a.addImage(path) }}}, actions...)
-			}
+			a.refreshPanes([]string{filepath.Dir(path)})
+			actions := a.shotActions(path)
 			msg := a.u.tf("Saved the screenshot %s", filepath.Base(path))
 			if to == shotPath {
 				msg = a.u.tf("Saved the screenshot %s and copied its path", filepath.Base(path))
 			}
 			a.toastActions(msg, false, actions)
-			report(path, nil)
+			report(shotTaken{path: path, img: img, size: b.Size()}, nil)
 		})
 	})
 }
 
-// tempShotPath is a free name in the temporary folder for a screenshot that goes only onto the clipboard.
-func tempShotPath() (string, error) {
-	f, err := os.CreateTemp("", "forge-screenshot-*.png")
-	if err != nil {
-		return "", err
+// shotActions are what a saved screenshot's toast offers: putting it on the edit, editing it, showing it in its folder.
+func (a *App) shotActions(path string) []toastAction {
+	actions := []toastAction{{a.u.t("Edit"), func() { a.openImageAsArt(path) }}, {a.u.t("Show in folder"), func() { a.host.Reveal(path) }}}
+	if a.p != nil {
+		actions = append([]toastAction{{a.u.t("Add to the edit"), func() { a.addImage(path) }}}, actions...)
 	}
-	f.Close()
-	return f.Name(), nil
-}
-
-// readPNG decodes the PNG at path.
-func readPNG(path string) (image.Image, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return png.Decode(f)
+	return actions
 }
 
 // drawRecorder is the dialog that sets up a recording. It is as tall as its content, which scrolls when the

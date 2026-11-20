@@ -184,6 +184,7 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	a.loadConfigs()
 	a.startKeyboard()
 	a.prepareTools()
+	a.checkRecording()
 	a.applyServices()
 	a.hotkeys.capturing = -1
 	a.keysDomain = domainRecording // the Hotkeys page opens on its first tab, the system-wide hotkeys
@@ -192,6 +193,8 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	a.knownDrives() // read before the first file manager needs them
 	a.pumpFacts()
 	a.fm.historyRead.start(a, a.loadFileHistory)
+	a.fm.since = time.Now()
+	a.fm.treesRead.start(a, a.loadAnalyses)
 	a.assetLibRead.start(a, a.openAssetLibrary)
 	a.restoreTabs()
 	return a
@@ -251,6 +254,8 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	switch {
 	case a.watching():
 		a.drawWatching(a.screen)
+	case a.movie != nil && a.movie.full:
+		a.drawMovie(a.screen)
 	case a.slideshowOn():
 		a.drawSlideshow(a.screen)
 	case a.art != nil:
@@ -280,6 +285,9 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 	case a.mailTab:
 		a.drawTabs(l.tabs)
 		a.drawMailTab(l.body)
+	case a.movie != nil:
+		a.drawTabs(l.tabs)
+		a.drawMovie(l.body)
 	case a.p == nil && a.editing:
 		a.drawTabs(l.tabs)
 		a.drawEmptyEditor(l)
@@ -426,13 +434,14 @@ func (a *App) nextFrame(tip time.Duration, acted bool) time.Duration {
 	}
 	// Progress and clocks that change without telling: an export's progress, a recording's time, toasts running
 	// out. Work that posts its result (opening a video, checking the screen recorder) wakes the window itself.
-	if a.export != nil || len(a.toasts) > 0 || a.recording() || a.streaming() || a.cameraSettling() || a.over.bar != nil || a.fileWork() || a.thumbsBusy() {
+	if a.export != nil || len(a.toasts) > 0 || a.recording() || a.streaming() || a.cameraSettling() || a.over.bar != nil || a.over.notice != nil || a.fileWork() || a.thumbsBusy() {
 		sooner(time.Second / 10)
 	}
 	if sd := a.over.draw; sd != nil {
 		sooner(sd.wait) // a hint on the drawing's panel
 	}
 	sooner(a.previewWait())
+	sooner(a.movieWait())
 	sooner(a.peekWait())
 	return next
 }
@@ -492,6 +501,9 @@ func (a *App) Close() {
 	a.closeScreen()
 	a.stopFileWork()
 	a.rememberPosition()
+	for _, d := range a.docs {
+		a.leaveMovie(d)
+	}
 	a.rememberTabs()
 	for _, d := range a.docs {
 		a.keepModel(d.model)
@@ -532,6 +544,11 @@ func (a *App) Close() {
 		if a.previewPlayer != nil {
 			a.previewPlayer.Wait()
 		}
+		for _, d := range a.docs {
+			if d.movie != nil && d.movie.player != nil {
+				d.movie.player.Wait()
+			}
+		}
 		close(done)
 	}()
 	select {
@@ -565,7 +582,7 @@ func (a *App) Idle() bool {
 	if a.p != nil && !a.media.settled(a.p) {
 		return false
 	}
-	if a.thumbsBusy() || a.factsBusy() || a.preview.loading || !a.modelSettled() {
+	if a.thumbsBusy() || a.factsBusy() || a.preview.loading || !a.modelSettled() || !a.movieSettled() {
 		return false
 	}
 	return !a.music.downloading() && !a.pieMoving()

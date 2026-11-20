@@ -317,6 +317,8 @@ const (
 	SizeWE   Cursor = 32644
 	SizeAll  Cursor = 32646
 	Hand     Cursor = 32649
+	// Hidden shows no pointer over the client area.
+	Hidden Cursor = 0
 )
 
 // SetCursor changes the cursor shown over the client area.
@@ -329,6 +331,9 @@ func (w *Window) SetCursor(c Cursor) {
 }
 
 func (w *Window) applyCursor() {
-	h, _, _ := loadCursor.Call(0, uintptr(w.cursor))
+	var h uintptr // no cursor at all hides the pointer
+	if w.cursor != Hidden {
+		h, _, _ = loadCursor.Call(0, uintptr(w.cursor))
+	}
 	setCursorProc.Call(h)
 }

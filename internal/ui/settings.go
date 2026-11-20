@@ -42,6 +42,7 @@ type settings struct {
 	Files        filesSettings       `json:"files"`
 	Updates      updateSettings      `json:"updates"`
 	PinnedTabs   []savedTab          `json:"pinnedTabs,omitempty"` // the pinned tabs, in their order, opened again with the app
+	Player       playerSettings      `json:"player"`
 
 	AIModel   string  `json:"aiModel,omitempty"`   // the model last chosen in the chat: a local model's id, or provider/model
 	AIEngine  string  `json:"aiEngine,omitempty"`  // where chat models compute: an engine's id
@@ -71,7 +72,7 @@ const maxExportRecords = 200
 func (a *App) settingsPath() string { return filepath.Join(a.stateDir, "settings.json") }
 
 func defaultSettings() settings {
-	return settings{Language: English, Export: project.Export{Quality: project.Balanced}, MCP: true, Record: defaultRecordSettings(), Live: defaultLiveSettings(), Camera: defaultCameraSettings(), Hotkeys: defaultHotkeys(), Paint: defaultPaintSettings(), Updates: updateSettings{Daily: true}}
+	return settings{Language: English, Export: project.Export{Quality: project.Balanced}, MCP: true, Record: defaultRecordSettings(), Live: defaultLiveSettings(), Camera: defaultCameraSettings(), Hotkeys: defaultHotkeys(), Paint: defaultPaintSettings(), Updates: updateSettings{Daily: true}, Player: playerSettings{Volume: 1}}
 }
 
 func (a *App) loadSettings() {

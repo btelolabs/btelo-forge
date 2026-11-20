@@ -37,3 +37,27 @@ func TestClipboardImageRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestFillClipboardDIBOpaqueAndTranslucent(t *testing.T) {
+	rgba := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	rgba.SetRGBA(0, 0, color.RGBA{R: 200, G: 100, B: 50, A: 255})
+	rgba.SetRGBA(1, 0, color.RGBA{R: 10, G: 20, B: 30, A: 255})
+	rgba.SetRGBA(0, 1, color.RGBA{R: 40, G: 50, B: 60, A: 255})
+	rgba.SetRGBA(1, 1, color.RGBA{R: 70, G: 80, B: 90, A: 255})
+	dst := make([]byte, 2*2*4)
+	if !fillClipboardDIB(dst, rgba, rgba.Bounds(), 2, 2) {
+		t.Fatal("fully opaque RGBA reported as non-opaque")
+	}
+	// Bottom-up row 0 in DIB is y=1 of image: (0,1) = B=60,G=50,R=40,0xff.
+	if dst[0] != 60 || dst[1] != 50 || dst[2] != 40 || dst[3] != 0xff {
+		t.Fatalf("bottom-left DIB pixel = %v, want [60 50 40 255]", dst[:4])
+	}
+
+	nrgba := image.NewNRGBA(image.Rect(0, 0, 2, 1))
+	nrgba.SetNRGBA(0, 0, color.NRGBA{R: 255, G: 0, B: 0, A: 255})
+	nrgba.SetNRGBA(1, 0, color.NRGBA{R: 0, G: 255, B: 0, A: 128})
+	dst2 := make([]byte, 2*1*4)
+	if fillClipboardDIB(dst2, nrgba, nrgba.Bounds(), 2, 1) {
+		t.Fatal("translucent NRGBA reported as opaque")
+	}
+}

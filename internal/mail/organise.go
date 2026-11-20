@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // Verdict is what a model makes of a message. It is only ever a place in the list: a model changes nothing on a server.
@@ -34,7 +35,7 @@ money: the owner's own money or bill: a charge, a failed payment, a statement, a
 warning: something is wrong with the owner's own account or service and they must act: a security problem that did happen,
 data shared, something of theirs about to stop working, a deadline from a bank, a government or a platform they use. Mail
 about a new sign-in or a new password is not a warning, however alarming its subject, unless it says the owner's account
-was taken or locked.
+was taken or locked. A code to sign in, verify or confirm is never a warning: it is a notice.
 notice: a plain fact about the owner's own account, plan or order: a plan change, a receipt, shipping, a one-time code, a
 policy update, a new sign-in or new password that needs nothing if it was the owner.
 reading: a newsletter, digest, article, market news or creator's post meant to be read.
@@ -66,7 +67,46 @@ func Organise(ctx context.Context, ask Ask, m Message) (Verdict, error) {
 	if address := strings.ToLower(m.Address); err == nil && v.Kind == "person" && slices.ContainsFunc(massSender, func(part string) bool { return strings.Contains(address, part) }) {
 		v.Tier = TierMaybe
 	}
+	if err == nil && v.Tier == TierMust && OneTimeCode(m.Subject, m.Text) {
+		v.Tier = TierMaybe
+	}
 	return v, err
+}
+
+// codeWords name a code sent to sign in or confirm. A model reads "security code" as a warning, so the code decides instead:
+// such a code is asked for by the owner a moment before and read at once, so it is never a must.
+var codeWords = []string{"security code", "verification code", "verify code", "one-time code", "one time code", "one-time passcode",
+	"one-time password", "passcode", "sign-in code", "signin code", "login code", "log-in code", "log in code", "confirmation code",
+	"authentication code", "2fa code", "两步验证码", "验证码", "校验码", "动态码", "确认码", "驗證碼", "認証コード", "確認コード", "인증번호", "인증 코드"}
+
+// codeLead is how far into a message's text a code's words are looked for.
+const codeLead = 400
+
+// OneTimeCode tells mail that carries a code to sign in or confirm: its subject names one, or its opening names one beside a
+// code (isCode).
+func OneTimeCode(subject, text string) bool {
+	names := func(s string) bool {
+		s = strings.ToLower(s)
+		return slices.ContainsFunc(codeWords, func(w string) bool { return strings.Contains(s, w) }) || slices.Contains(strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }), "otp")
+	}
+	if names(subject) {
+		return true
+	}
+	lead := Snippet(text, codeLead)
+	if !names(lead) && !strings.Contains(strings.ToLower(lead), "digit code") {
+		return false
+	}
+	// Only ASCII holds a code together, as Chinese writes "验证码482913" without a space.
+	ascii := func(r rune) bool { return r > unicode.MaxASCII || !unicode.IsLetter(r) && !unicode.IsDigit(r) }
+	return slices.ContainsFunc(strings.FieldsFunc(lead, ascii), isCode)
+}
+
+// isCode tells a word that reads as a code: four to eight digits or capital letters, at least one of them a digit.
+func isCode(word string) bool {
+	if len(word) < 4 || len(word) > 8 || !strings.ContainsAny(word, "0123456789") {
+		return false
+	}
+	return !strings.ContainsFunc(word, func(r rune) bool { return (r < '0' || r > '9') && (r < 'A' || r > 'Z') })
 }
 
 // organiseBatch is how many messages one round reads.

@@ -649,7 +649,7 @@ func TestFilesAnalyseOnlyTheListInUse(t *testing.T) {
 }
 
 func TestFilesTypeOrPasteAPath(t *testing.T) {
-	x, root := filesHarness(t, map[string]string{"one/two/file.txt": "f", "other/": ""})
+	x, root := filesHarness(t, map[string]string{"one/two/file.txt": "f", "other/": "", "other/clip.mp4": "v"})
 	fd := x.a.files
 	p := fd.pane()
 	// Ctrl+L turns the bar into a box with the folder chosen, so a path pasted replaces it.
@@ -666,6 +666,11 @@ func TestFilesTypeOrPasteAPath(t *testing.T) {
 	if p.dir != filepath.Join(root, "one", "two") || p.current() == nil || p.current().Name != "file.txt" {
 		t.Fatalf("a file's path went to %s with the cursor on %v", p.dir, p.current())
 	}
+	// The file is opened as Enter opens it: a text, which the app does not edit, is previewed.
+	if !fd.preview {
+		t.Fatal("a text's path pasted was not previewed")
+	}
+	x.a.togglePreview(fd)
 	// A relative path goes from the list's folder; one that is not there stays put and says so.
 	x.press('L', "c")
 	x.frame(Input{})
@@ -674,6 +679,23 @@ func TestFilesTypeOrPasteAPath(t *testing.T) {
 	x.waitFiles()
 	if p.dir != filepath.Join(root, "other") {
 		t.Fatalf("a relative path went to %s", p.dir)
+	}
+	// A video's path plays it in a player tab of its own, the list staying on its folder with the cursor on it.
+	files := x.a.doc
+	x.press('L', "c")
+	x.frame(Input{})
+	x.typeText(filepath.Join(root, "other", "clip.mp4"))
+	x.press(keyEnter, "")
+	x.waitFiles()
+	if x.a.doc == files || x.a.movie == nil || x.a.movie.path != filepath.Join(root, "other", "clip.mp4") {
+		t.Fatalf("a video's path pasted opened %+v", x.a.movie)
+	}
+	if p.current() == nil || p.current().Name != "clip.mp4" {
+		t.Fatalf("the list's cursor is on %v", p.current())
+	}
+	x.a.closeTab(x.a.current())
+	if x.a.doc != files {
+		t.Fatal("closing the player did not bring the files back")
 	}
 	x.press('L', "c")
 	x.frame(Input{})
@@ -722,4 +744,95 @@ func firstFolder(dirs []string) string {
 		}
 	}
 	return ""
+}
+
+func TestResourceGridDefaultsToNewestAndSortButtonSwitchesOrder(t *testing.T) {
+	x, root := filesHarness(t, map[string]string{
+		"alpha.png": strings.Repeat("a", 300),
+		"beta.png":  strings.Repeat("b", 1000),
+		"gamma.png": strings.Repeat("g", 100),
+	})
+	t0 := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
+	for i, name := range []string{"alpha.png", "beta.png", "gamma.png"} {
+		mt := t0.Add(time.Duration(i) * 24 * time.Hour)
+		if err := os.Chtimes(filepath.Join(root, name), mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	x.a.refreshPanes(nil)
+	x.waitFiles()
+
+	fd := x.a.files
+	p := fd.pane()
+	// As a list of rows, the folder starts sorted by name; turned into pictures, it defaults to newest first.
+	if got := names(p); !slices.Equal(got, []string{"alpha.png", "beta.png", "gamma.png"}) {
+		t.Fatalf("rows listed %v", got)
+	}
+	x.press('Q', "")
+	if !p.grid || p.sort != listByTime || p.desc || p.cursor != 0 {
+		t.Fatalf("grid view: grid %v, sort %v, desc %v, cursor %d", p.grid, p.sort, p.desc, p.cursor)
+	}
+	if got := names(p); !slices.Equal(got, []string{"gamma.png", "beta.png", "alpha.png"}) {
+		t.Fatalf("pictures default order: %v, want newest first", got)
+	}
+
+	x.a.u.lang = Chinese
+	x.frame(Input{})
+	x.shot("zh-resource-sort-default")
+
+	u := &x.a.u
+	sortButton := func() gfx.Rect {
+		w := float32(x.c.Img.Rect.Dx())
+		size := u.px(26)
+		// Single pane: + is rightmost, view is to its left, sort button is to the left of view.
+		viewX := w - u.px(6) - size - (size + u.px(2))
+		sw := u.face(12).Measure(x.a.sortLabel(p)) + u.px(28)
+		return rectAt(viewX-u.px(4)-sw, u.px(40)+(u.px(38)-size)/2, sw, size)
+	}
+	pickMenu := func(label string) {
+		t.Helper()
+		x.click(sortButton())
+		if !x.a.menuOpen("files/pane/0/sort") {
+			t.Fatalf("clicking the sort button did not open the sort menu")
+		}
+		m := x.a.menu
+		box := x.a.menuBelow(m.items, m.anchor)
+		rows := u.menuRows(m.items, box)
+		for i, it := range m.items {
+			if it.label == label {
+				x.click(rows[i])
+				return
+			}
+		}
+		t.Fatalf("no sort menu item %q", label)
+	}
+
+	x.click(sortButton())
+	if !x.a.menuOpen("files/pane/0/sort") {
+		t.Fatal("sort menu did not open")
+	}
+	x.frame(Input{})
+	x.shot("zh-resource-sort-menu")
+	// Clicking the sort button again while open closes it.
+	x.click(sortButton())
+	if x.a.menu != nil {
+		t.Fatal("clicking the open sort button did not close its menu")
+	}
+
+	pickMenu(u.t("Time: oldest first"))
+	if got := names(p); !slices.Equal(got, []string{"alpha.png", "beta.png", "gamma.png"}) || p.sort != listByTime || !p.desc {
+		t.Fatalf("oldest first: %v (sort %v, desc %v)", got, p.sort, p.desc)
+	}
+	pickMenu(u.t("Size: largest first"))
+	if got := names(p); !slices.Equal(got, []string{"beta.png", "alpha.png", "gamma.png"}) || p.sort != listBySize || p.desc {
+		t.Fatalf("largest first: %v (sort %v, desc %v)", got, p.sort, p.desc)
+	}
+	pickMenu(u.t("Name: A to Z"))
+	if got := names(p); !slices.Equal(got, []string{"alpha.png", "beta.png", "gamma.png"}) || p.sort != listByName || p.desc {
+		t.Fatalf("name A-Z: %v (sort %v, desc %v)", got, p.sort, p.desc)
+	}
+	pickMenu(u.t("Time: newest first"))
+	if got := names(p); !slices.Equal(got, []string{"gamma.png", "beta.png", "alpha.png"}) || p.sort != listByTime || p.desc {
+		t.Fatalf("newest first again: %v (sort %v, desc %v)", got, p.sort, p.desc)
+	}
 }

@@ -265,3 +265,103 @@ func TestPieOfHundredsOfArcsIsQuick(t *testing.T) {
 		t.Errorf("a frame of %d arcs took %v", len(shapes), d)
 	}
 }
+
+// pieLongHarness is an analysed folder of forty folders, more than the list shows at once, so that rows lie behind the
+// pie's card in either corner.
+func pieLongHarness(t *testing.T) (*harness, *time.Time, *filesPane) {
+	layout := map[string]string{}
+	for i := 0; i < 40; i++ {
+		layout[fmt.Sprintf("f%02d/data.bin", i)] = strings.Repeat("d", 200*(41-i)*(41-i))
+	}
+	x, _ := filesHarness(t, layout)
+	now := time.Unix(1_000_000, 0)
+	x.a.fm.clock = func() time.Time { return now }
+	x.press('I', "")
+	x.waitFiles()
+	p := x.a.files.pane()
+	for pieFrame(x, &now, Input{}); x.a.pieMoving(); {
+		pieFrame(x, &now, Input{})
+	}
+	if p.pie.card.W <= 0 {
+		t.Fatal("no pie card")
+	}
+	return x, &now, p
+}
+
+// pieSettle draws frames until the pie is still.
+func pieSettle(x *harness, now *time.Time) {
+	for pieFrame(x, now, Input{}); x.a.pieMoving(); {
+		pieFrame(x, now, Input{})
+	}
+}
+
+func TestPieCardFloatsBottomRightAndMovesAwayFromTheRowPointedAt(t *testing.T) {
+	x, now, p := pieLongHarness(t)
+	u := &x.a.u
+	bottom := p.pie.card
+	if bottom.X < float32(x.c.Img.Bounds().Dx())/2 || bottom.Y < float32(x.c.Img.Bounds().Dy())/2 {
+		t.Fatalf("the card starts at %+v, not in the bottom right", bottom)
+	}
+	// Pointing at a row beside the card, where the card hides its size, sends the card to the top.
+	x.mx, x.my = u.px(360), bottom.Y+bottom.H/2
+	pieSettle(x, now)
+	top := p.pie.card
+	if top.Y >= bottom.Y || top.Bottom() > bottom.Y || top.X != bottom.X {
+		t.Fatalf("pointing behind the card at %+v left it at %+v", bottom, top)
+	}
+	under := p.cursor
+	// Pointing at the card itself moves neither it nor the cursor to the row behind it.
+	x.mx, x.my = top.X+u.px(4), top.Y+u.px(4)
+	pieSettle(x, now)
+	if p.pie.card != top || p.cursor != under {
+		t.Errorf("pointing at the card moved it to %+v and the cursor from %d to %d", p.pie.card, under, p.cursor)
+	}
+	// A row behind the card at the top sends it back down.
+	x.mx, x.my = u.px(360), top.Y+top.H/2
+	pieSettle(x, now)
+	if p.pie.card != bottom {
+		t.Errorf("pointing behind the card at the top left it at %+v", p.pie.card)
+	}
+	// So does the cursor, moved there with the keys while the pointer rests on the card.
+	x.mx, x.my = bottom.X+u.px(4), bottom.Bottom()-u.px(4)
+	pieSettle(x, now)
+	for i := 0; i < 40 && p.pie.placeGoal == 0; i++ {
+		x.press('J', "")
+	}
+	pieSettle(x, now)
+	if p.pie.card != top {
+		t.Errorf("the cursor at row %d behind the card left it at %+v", p.cursor, p.pie.card)
+	}
+}
+
+func TestPieOutlinesTheArcPointedAt(t *testing.T) {
+	x, now := pieHarness(t)
+	p := x.a.files.pane()
+	pieSettle(x, now)
+	w := x.a.pieWedges(p, x.a.paneAnalysis(p))
+	m := &p.pie
+	// The middle of f03's wedge, which is not the one the cursor stands out, just past its outer edge: the gap
+	// before the next ring.
+	a := (w[3].from+w[3].to)/2 + m.turn.pos
+	at := func(r float64) (float32, float32) {
+		return m.cx + float32(r*math.Sin(a)), m.cy - float32(r*math.Cos(a))
+	}
+	edgeX, edgeY := at(float64(m.radius*pieEdges[1]) + 1)
+	far := func() int {
+		c := x.c.Img.RGBAAt(int(edgeX), int(edgeY))
+		return max(abs(int(c.R)-int(colText.R)), abs(int(c.G)-int(colText.G)), abs(int(c.B)-int(colText.B)))
+	}
+	if d := far(); d < 40 {
+		t.Fatalf("before it is pointed at, the edge of the arc is already %d from the outline's colour", d)
+	}
+	x.mx, x.my = at(float64(m.radius) * 0.4)
+	pieSettle(x, now)
+	if d := far(); d > 24 {
+		t.Errorf("the arc pointed at has no outline: its edge is %v", x.c.Img.RGBAAt(int(edgeX), int(edgeY)))
+	}
+	// The outline is a line, not a glow: two lines further out the next ring has its own colour again.
+	ox, oy := at(float64(m.radius*pieEdges[1]) + 6)
+	if c := x.c.Img.RGBAAt(int(ox), int(oy)); max(abs(int(c.R)-int(colText.R)), abs(int(c.G)-int(colText.G)), abs(int(c.B)-int(colText.B))) < 40 {
+		t.Errorf("the outline spreads: %v further out", c)
+	}
+}

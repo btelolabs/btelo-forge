@@ -58,7 +58,7 @@ func uiInput(raw *win.Input) ui.Input {
 	return in
 }
 
-var cursors = map[ui.Cursor]win.Cursor{ui.CursorArrow: win.Arrow, ui.CursorHand: win.Hand, ui.CursorText: win.IBeam, ui.CursorResize: win.SizeWE, ui.CursorMove: win.SizeAll, ui.CursorCross: win.Cross, ui.CursorResizeCorner: win.SizeNWSE}
+var cursors = map[ui.Cursor]win.Cursor{ui.CursorArrow: win.Arrow, ui.CursorHand: win.Hand, ui.CursorText: win.IBeam, ui.CursorResize: win.SizeWE, ui.CursorMove: win.SizeAll, ui.CursorCross: win.Cross, ui.CursorResizeCorner: win.SizeNWSE, ui.CursorNone: win.Hidden}
 
 func (h winWindow) Wake()                                   { h.w.Wake() }
 func (h winWindow) SetTitle(title string)                   { h.w.SetTitle(title) }

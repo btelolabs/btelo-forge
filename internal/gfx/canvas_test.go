@@ -184,7 +184,8 @@ func referencePie(c *Canvas, cx, cy float32, wedges []Wedge, gap float32) {
 	const turn = 2 * math.Pi
 	for _, w := range wedges {
 		x0, y0, x1, y1 := w.bounds(cx, cy)
-		b := image.Rect(int(math.Floor(x0-1)), int(math.Floor(y0-1)), int(math.Ceil(x1+1)), int(math.Ceil(y1+1))).Intersect(c.clip)
+		pad := 1 + float64(max(-gap/2, 0))
+		b := image.Rect(int(math.Floor(x0-pad)), int(math.Floor(y0-pad)), int(math.Ceil(x1+pad)), int(math.Ceil(y1+pad))).Intersect(c.clip)
 		span := float64(w.To - w.From)
 		for y := b.Min.Y; y < b.Max.Y; y++ {
 			for x := b.Min.X; x < b.Max.X; x++ {
@@ -215,17 +216,18 @@ func referencePie(c *Canvas, cx, cy float32, wedges []Wedge, gap float32) {
 }
 
 // Pie finds how far a pixel is from a wedge's edges without its angle, and leaves pixels before working them out:
-// what it draws is what the angles draw, to a level of rounding, for wedges of every span, ring and gap.
+// what it draws is what the angles draw, to a level of rounding, for wedges of every span, ring and gap, and grown past
+// their edges by a negative gap.
 func TestPieDrawsWhatTheAnglesDraw(t *testing.T) {
 	rng := rand.New(rand.NewPCG(7, 11))
-	for n := range 400 {
+	for n := range 500 {
 		from := rng.Float32() * 2 * math.Pi
 		span := []float32{0.01, 0.05, 0.3, 1, math.Pi / 2, math.Pi - 0.01, math.Pi, math.Pi + 0.01, 4, 6, 2 * math.Pi}[n%11]
 		w := Wedge{From: from, To: from + span, Radius: 4 + rng.Float32()*40, Col: Hex(0x33cc77)}
 		if n%3 != 0 {
 			w.Inner = rng.Float32() * w.Radius * 0.9
 		}
-		gap := []float32{0, 0.5, 1, 4}[n%4]
+		gap := []float32{0, 0.5, 1, 4, -5}[n%5]
 		got, want := NewCanvas(100, 100), NewCanvas(100, 100)
 		got.Clear(Hex(0x101010))
 		want.Clear(Hex(0x101010))

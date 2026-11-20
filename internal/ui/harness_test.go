@@ -257,8 +257,12 @@ func (x *harness) fixture() string {
 	return clipFile(x.t, x.mediaDir(), "clip.mp4", "testsrc2=size=640x360", "8")
 }
 
+// open drops a video on the video editor, which edits it; dropped on an empty tab, it would play in the player.
 func (x *harness) open(path string) {
 	x.t.Helper()
+	if x.a.p == nil && !x.a.editing {
+		x.a.newEditor() // in a tab of its own when this one holds something else
+	}
 	x.frame(Input{Dropped: []string{path}})
 	x.settle(30 * time.Second)
 	if x.a.p == nil {

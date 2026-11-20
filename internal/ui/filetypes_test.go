@@ -84,13 +84,12 @@ func TestFilesOpenedFromTheSystemGoWhereTheyBelong(t *testing.T) {
 	x := newHarness(t)
 	a := x.a
 	dir := assetFolder(t, x)
-	// A video opens in a tab of its own, even while another edit is open.
+	// A video plays in a tab of its own, even while an edit is open.
 	x.open(x.fixture())
 	tabs := len(a.docs)
 	x.frame(Input{Opened: []string{filepath.Join(dir, "holiday.mp4")}})
-	x.pump(30*time.Second, func() bool { return a.p != nil && a.opening == "" })
-	if len(a.docs) != tabs+1 || filepath.Base(a.p.Sources[0].Path) != "holiday.mp4" {
-		t.Fatalf("%d tabs, showing %v", len(a.docs), a.p.Sources[0].Path)
+	if len(a.docs) != tabs+1 || a.movie == nil || filepath.Base(a.movie.path) != "holiday.mp4" {
+		t.Fatalf("%d tabs, player %+v", len(a.docs), a.movie)
 	}
 	// A text opens in the file manager as pictures, at its folder, with its preview open.
 	x.frame(Input{Opened: []string{filepath.Join(dir, "README.md")}})

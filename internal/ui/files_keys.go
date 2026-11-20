@@ -18,8 +18,9 @@ type fileCommand struct {
 	listed bool
 }
 
-// The file manager's virtual keys besides letters: '.', '/', '[', ']' and F2, F5.
+// Virtual keys besides letters: ',', '.', '/', '[', ']' and F2, F5.
 const (
+	keyComma   = 0xbc
 	keyPeriod  = 0xbe
 	keySlash   = 0xbf
 	keyBracket = 0xdb

@@ -108,7 +108,7 @@ func (a *App) videoListPane() *filesPane {
 			dirs = append(dirs, filepath.Clean(d))
 		}
 	}
-	p := &filesPane{dir: dirs[0], orElse: dirs[1:], marked: map[string]bool{}, grid: true, g: paneGrid{size: 120,
+	p := &filesPane{dir: dirs[0], orElse: dirs[1:], marked: map[string]bool{}, sort: listByTime, grid: true, g: paneGrid{size: 120,
 		filter: assetFilter{what: showKind, kind: assets.Video, folders: true}}}
 	a.videoList = p
 	a.readPane(p)
@@ -144,6 +144,10 @@ func (a *App) drawVideoList(e emptyEditor, free bool) {
 			up, land = thisPC, filepath.VolumeName(p.dir) // a drive's top: the drives
 		}
 		a.videoListGo(p, up, land)
+	}
+	if !p.atDrives() {
+		size := u.px(26)
+		e.path.W -= a.drawSortButton(nil, 0, p, id, e.path.X, e.path.Right(), e.path.Y+(e.path.H-size)/2, size)
 	}
 	a.drawPathBar(p, id, e.path, false)
 	a.keepVideoDir(p) // a folder above, clicked in the bar
