@@ -55,7 +55,7 @@ func (a *App) drawTagMatches(fd *filesDoc, pr *filesPrompt, r gfx.Rect, rowH flo
 	f := u.face(12.5)
 	for i := range int(r.H / rowH) {
 		row := rectAt(r.X, r.Y+float32(i)*rowH, r.W, rowH)
-		id := fmt.Sprintf("files/tags/%d", i)
+		id := promptRowID(pr.kind, i)
 		if u.hover(id, row) && (u.mx != fd.mouseX || u.my != fd.mouseY || u.pressed) {
 			pr.pick = i
 		}

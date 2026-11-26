@@ -131,7 +131,7 @@ func (a *App) drawFiles(r gfx.Rect) {
 
 	// A dialog or the preview takes the mouse and the keys from the lists behind it.
 	held := u.blocked
-	u.blocked = held || fd.confirm != nil || fd.preview
+	u.blocked = held || fd.confirm != nil || fd.preview || a.overPrompt(fd)
 	w := lists.W / float32(len(fd.panes))
 	for i, p := range fd.panes {
 		pr := gfx.Rect{X: lists.X + float32(i)*w, Y: lists.Y, W: w, H: lists.H}

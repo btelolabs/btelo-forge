@@ -361,6 +361,11 @@ func (a *App) drawGrid(fd *filesDoc, i int, p *filesPane, id string, body gfx.Re
 	p.g.barH = bar.H
 	grid := gfx.Rect{X: body.X, Y: bar.Bottom(), W: body.W, H: body.H - bar.H}
 	p.g.targets = p.g.targets[:0]
+	// The cards are drawn before the search box and take a press on them first, so the box never sees the click
+	// elsewhere that ends its typing: a press on the cards takes the keys from it here, for the commands.
+	if box := filterBoxID(p); u.focus == box && u.pressed && !u.blocked && grid.Contains(u.pressX, u.pressY) {
+		u.focus = ""
+	}
 	a.drawGridCards(fd, i, p, id, grid, moved)
 	a.drawFilterBar(p, id, bar, chips, widths, xs, lines, n)
 	a.drawGridDrag(p, id)

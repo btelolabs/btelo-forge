@@ -95,7 +95,7 @@ func (a *App) goUp(p *filesPane) {
 }
 
 // enter goes into the folder under the cursor, or opens the file in a tab of its own when the app works on it (a
-// video, an edit, a canvas, a picture) and previews it otherwise; in a search, it goes to what was found.
+// video, an edit, a canvas, a picture) and previews it otherwise; in a search, it opens what was found the same way.
 func (a *App) enter(fd *filesDoc) {
 	if fd.pick != nil {
 		a.pickEnter(fd)
@@ -103,7 +103,7 @@ func (a *App) enter(fd *filesDoc) {
 	}
 	p := fd.pane()
 	if p.search != nil {
-		a.openFound(fd, p)
+		a.openChosen(p)
 		return
 	}
 	e := p.current()

@@ -39,6 +39,20 @@ type filesPrompt struct {
 	// paths are the items a tag is given to; category says whether a label renamed is a category.
 	paths    []string
 	category bool
+	// box is where the prompt was drawn at the last frame, which the lists beneath it keep the mouse out of; list is
+	// where its matches were, one row of promptRowH each: a press there is a row's.
+	box, list gfx.Rect
+}
+
+// promptRowH is the height of a match's row under a prompt's box.
+func (u *ctx) promptRowH() float32 { return u.px(30) }
+
+// promptRowID is the widget of a match's row under a prompt's box.
+func promptRowID(kind promptKind, i int) string {
+	if kind == promptTag {
+		return fmt.Sprintf("files/tags/%d", i)
+	}
+	return fmt.Sprintf("files/jump/%d", i)
 }
 
 // promptID is the prompt's text box.
@@ -107,6 +121,14 @@ func (a *App) openPrompt(fd *filesDoc, kind promptKind) {
 func (a *App) openLabelRename(fd *filesDoc, category bool, name string) {
 	fd.prompt = &filesPrompt{kind: promptLabel, text: name, target: name, category: category}
 	a.u.focusEdit(promptID, name, false)
+}
+
+// overPrompt reports whether the pointer, or a press, is on the prompt's box: the lists are drawn before it, and
+// would otherwise take what is meant for it.
+func (a *App) overPrompt(fd *filesDoc) bool {
+	u := &a.u
+	pr := fd.prompt
+	return pr != nil && (pr.box.Contains(u.mx, u.my) || u.pressed && pr.box.Contains(u.pressX, u.pressY))
 }
 
 // closePrompt ends the prompt without doing anything.
@@ -368,7 +390,7 @@ func (a *App) drawPromptBox(fd *filesDoc, lists gfx.Rect) {
 			title = u.tf("Rename the category %s", pr.target)
 		}
 	}
-	rowH := u.px(30)
+	rowH := u.promptRowH()
 	shown := 0
 	if listed(pr.kind) {
 		shown = min(len(pr.matches), 10)
@@ -379,11 +401,21 @@ func (a *App) drawPromptBox(fd *filesDoc, lists gfx.Rect) {
 		h += rowH
 	}
 	box := gfx.Rect{X: lists.X + (lists.W-w)/2, Y: lists.Y + u.px(56), W: w, H: h}
+	pr.box = box
 	u.c.Outline(box.Inset(-u.px(2)), u.px(6), gfx.Alpha(colBlack, 0.4))
 	panel(u, box)
 	in := box.Inset(u.px(12))
 	u.label(u.bold(13), rectAt(in.X, in.Y, in.W, u.px(22)), title, colText, 0)
 	field := rectAt(in.X, in.Y+u.px(30), in.W, u.px(36))
+	// The text box takes any press outside it for a click elsewhere, which closes the prompt, so a press on the box
+	// is claimed first: on a match it is that row's, whose click answers the prompt, and anywhere else it is nobody's.
+	if !u.blocked && u.pressed && box.Contains(u.pressX, u.pressY) && !field.Contains(u.pressX, u.pressY) {
+		if pr.list.Contains(u.pressX, u.pressY) {
+			i := int((u.pressY - pr.list.Y) / rowH)
+			u.press(promptRowID(pr.kind, i), rectAt(pr.list.X, pr.list.Y+float32(i)*rowH, pr.list.W, rowH))
+		}
+		u.pressed = false
+	}
 	changed, done := u.textBox(promptID, field, &pr.text, placeholder, false)
 	if done && fd.prompt == pr {
 		a.closePrompt(fd) // a click elsewhere
@@ -403,6 +435,7 @@ func (a *App) drawPromptBox(fd *filesDoc, lists gfx.Rect) {
 		shown = min(shown, len(pr.matches))
 	}
 	y := field.Bottom() + u.px(8)
+	pr.list = rectAt(in.X, y, in.W, float32(shown)*rowH)
 	if shown == 0 {
 		if pr.kind == promptJump {
 			u.label(u.face(12.5), rectAt(in.X, y, in.W, rowH), u.t("No folder visited matches"), colFaint, 0)
@@ -416,7 +449,7 @@ func (a *App) drawPromptBox(fd *filesDoc, lists gfx.Rect) {
 	for i := range shown {
 		dir := pr.matches[i]
 		row := rectAt(in.X, y+float32(i)*rowH, in.W, rowH)
-		id := fmt.Sprintf("files/jump/%d", i)
+		id := promptRowID(pr.kind, i)
 		if u.hover(id, row) && (u.mx != fd.mouseX || u.my != fd.mouseY || u.pressed) {
 			pr.pick = i
 		}
@@ -538,6 +571,23 @@ func (a *App) openFound(fd *filesDoc, p *filesPane) {
 	}
 	a.closeSearch(p)
 	a.goTo(p, filepath.Dir(path), filepath.Base(path))
+}
+
+// openChosen opens what was found, as Enter on it in its folder would: a folder is gone into, and a file is shown in
+// its folder with the cursor on it and opened there.
+func (a *App) openChosen(p *filesPane) {
+	path, _ := p.search.chosen()
+	if path == "" {
+		return
+	}
+	dir := p.search.chosenDir()
+	a.closeSearch(p)
+	if dir {
+		a.goTo(p, path, "")
+		return
+	}
+	a.goTo(p, filepath.Dir(path), filepath.Base(path))
+	p.enterLand = true
 }
 
 // searchTick keeps a search's results in step with what was typed: names are filtered again as the index grows,
@@ -725,15 +775,12 @@ func (a *App) drawSearch(fd *filesDoc, i int, p *filesPane, head, body gfx.Rect,
 		} else {
 			a.drawFoundRow(s, s.hits[row], r)
 		}
-		if u.press(rid, r) {
+		// A click on what was found goes to it, as Enter does: a search's list is a list to choose from.
+		if u.clicked(rid, r) && fd.at == i {
 			s.pick = row
-			if u.double {
-				a.openFound(fd, p)
-				u.letGo(rid)
-				break
-			}
+			a.enter(fd)
+			break
 		}
-		u.letGo(rid)
 	}
 	u.c.Pop()
 }

@@ -432,3 +432,26 @@ func TestPreviewGoesOnWhereTheVideoWasLeft(t *testing.T) {
 		t.Fatalf("after the end it starts at %.2f", at)
 	}
 }
+
+func TestClickingACardTakesTheKeysFromTheSearch(t *testing.T) {
+	x := newHarness(t)
+	a := x.a
+	dir := assetFolder(t, x)
+	p := openGrid(t, x, dir)
+	x.mx, x.my = 5, 300
+	x.press(keySlash, "")
+	x.typeText("main")
+	x.frame(Input{})
+	if a.u.focus != filterBoxID(p) || len(p.rows) != 1 {
+		t.Fatalf("the search has the keys %v and shows %v", a.u.focus == filterBoxID(p), names(p))
+	}
+	// The card is drawn before the search box, and takes the press first: the box must give up the keys all the same.
+	x.click(x.cardOf("main.go"))
+	if a.u.focus == filterBoxID(p) {
+		t.Error("clicking a card left the keys in the search")
+	}
+	x.frame(Input{Keys: []Key{{Code: 'Y'}}, Typed: []rune("y")}) // a key the system also types
+	if p.g.search != "main" || x.h.clip != filepath.Join(dir, "main.go") {
+		t.Errorf("y after clicking the card typed into the search %q and copied %q", p.g.search, x.h.clip)
+	}
+}

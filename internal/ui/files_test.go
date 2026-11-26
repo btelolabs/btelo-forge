@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -402,6 +403,66 @@ func TestFilesJumpToAFolderVisited(t *testing.T) {
 	}
 }
 
+func TestFilesJumpByClickingAFolder(t *testing.T) {
+	tree := map[string]string{"projects/btelo/": "", "music/": "", "a/": "", "b/": "", "c/": ""}
+	for i := range 40 {
+		tree[fmt.Sprintf("file%02d.txt", i)] = "x" // rows under the prompt all the way down
+	}
+	x, root := filesHarness(t, tree)
+	p := x.a.files.pane()
+	for _, dir := range []string{"projects/btelo", "music", "a", "b", "c"} {
+		x.a.goTo(p, filepath.Join(root, filepath.FromSlash(dir)), "")
+		x.waitFiles()
+	}
+	x.a.goTo(p, root, "")
+	x.waitFiles()
+	x.press('Z', "")
+	x.frame(Input{})
+	pr := x.a.files.prompt
+	at := -1
+	for i, dir := range pr.matches {
+		if dir == filepath.Join(root, "projects", "btelo") {
+			at = i
+		}
+	}
+	if at < 0 || pr.list.H == 0 {
+		t.Fatalf("z listed %v in %v", pr.matches, pr.list)
+	}
+	rowH := x.a.u.promptRowH()
+	// The row lies over the list of the folder, whose rows would otherwise take the click.
+	x.click(rectAt(pr.list.X, pr.list.Y+float32(at)*rowH, pr.list.W, rowH))
+	x.waitFiles()
+	if x.a.files.prompt != nil || p.dir != filepath.Join(root, "projects", "btelo") {
+		t.Errorf("clicking a folder visited left the prompt %v and the list in %s", x.a.files.prompt != nil, p.dir)
+	}
+}
+
+func TestFilesClickWhatWasFound(t *testing.T) {
+	x, root := filesHarness(t, map[string]string{"deep/inner/": "", "deep/notes.md": "# Notes"})
+	fd := x.a.files
+	p := fd.pane()
+	find := func(name string) gfx.Rect {
+		x.t.Helper()
+		x.press('F', "")
+		x.frame(Input{})
+		x.typeText(name)
+		x.pump(5*time.Second, func() bool { return p.search != nil && p.search.asked == name && len(p.search.hits) == 1 })
+		return rectAt(0, x.rowY(0)-x.a.u.fileRowH()/2, 400, x.a.u.fileRowH())
+	}
+	x.click(find("inner"))
+	x.waitFiles()
+	if p.search != nil || p.dir != filepath.Join(root, "deep", "inner") {
+		t.Fatalf("clicking a folder found left the list in %s, searching %v", p.dir, p.search != nil)
+	}
+	x.a.goTo(p, root, "")
+	x.waitFiles()
+	x.click(find("notes"))
+	x.waitFiles()
+	if p.dir != filepath.Join(root, "deep") || p.current() == nil || p.current().Name != "notes.md" || !fd.preview {
+		t.Errorf("clicking a file found went to %s at %v, previewed %v", p.dir, p.current(), fd.preview)
+	}
+}
+
 func TestFilesFindByNameAndText(t *testing.T) {
 	x, root := filesHarness(t, map[string]string{"src/main.go": "package main\nfunc needle() {}\n", "docs/readme.md": "nothing", "src/util/needle.go": "x"})
 	fd := x.a.files
@@ -413,11 +474,12 @@ func TestFilesFindByNameAndText(t *testing.T) {
 	x.frame(Input{})
 	x.shot("files-find")
 	x.press(keyEnter, "") // from typing to the results
-	x.press(keyEnter, "") // to the file found
+	x.press(keyEnter, "") // to the file found, opened
 	x.waitFiles()
-	if p.search != nil || p.dir != filepath.Join(root, "src", "util") || p.current().Name != "needle.go" {
-		t.Fatalf("f found and went to %s %v", p.dir, p.current())
+	if p.search != nil || p.dir != filepath.Join(root, "src", "util") || p.current().Name != "needle.go" || !fd.preview {
+		t.Fatalf("f found and went to %s %v, previewed %v", p.dir, p.current(), fd.preview)
 	}
+	x.a.togglePreview(fd)
 	x.a.goTo(p, root, "")
 	x.waitFiles()
 	x.press('G', "")
