@@ -93,7 +93,7 @@ func (t Target) Pairs(staged string) ([]Pair, error) {
 	case "darwin":
 		bundle := filepath.Join(root, macBundle)
 		st, err := os.Stat(filepath.Join(bundle, "Contents", "MacOS", macProgram))
-		if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0o111 == 0 {
+		if err != nil || !st.Mode().IsRegular() || !isExecutable(st) {
 			return nil, ErrNotThisApp
 		}
 		if plist, err := os.Stat(filepath.Join(bundle, "Contents", "Info.plist")); err != nil || !plist.Mode().IsRegular() {
