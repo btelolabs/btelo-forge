@@ -161,22 +161,35 @@ func (c *Canvas) bounds() Rect {
 	return Rect{float32(c.clip.Min.X), float32(c.clip.Min.Y), float32(c.clip.Dx()), float32(c.clip.Dy())}
 }
 
+// mul255 computes round(a*b / 255) exactly for a, b in [0, 255].
+func mul255(a, b uint32) uint32 {
+	v := a*b + 128
+	return (v + v>>8) >> 8
+}
+
 // blend mixes col into pixel offset i with coverage cov in [0, 1].
 func (c *Canvas) blend(i int, col color.RGBA, cov float32) {
-	a := float32(col.A) / 255 * cov
-	if a <= 0 {
+	if cov <= 0 || col.A == 0 {
+		return
+	}
+	a := uint32(float32(col.A)*cov + 0.5)
+	if a == 0 {
 		return
 	}
 	p := c.Img.Pix[i : i+4 : i+4]
-	if a >= 1 {
+	if a >= 255 {
 		p[0], p[1], p[2], p[3] = col.R, col.G, col.B, 255
 		return
 	}
-	inv := 1 - a
-	p[0] = uint8(float32(col.R)*a + float32(p[0])*inv + 0.5)
-	p[1] = uint8(float32(col.G)*a + float32(p[1])*inv + 0.5)
-	p[2] = uint8(float32(col.B)*a + float32(p[2])*inv + 0.5)
-	p[3] = uint8(min(255, float32(p[3])+a*float32(255-p[3])+0.5))
+	inv := 255 - a
+	r := uint32(col.R)*a + uint32(p[0])*inv + 128
+	g := uint32(col.G)*a + uint32(p[1])*inv + 128
+	b := uint32(col.B)*a + uint32(p[2])*inv + 128
+	al := 255*a + uint32(p[3])*inv + 128
+	p[0] = uint8((r + r>>8) >> 8)
+	p[1] = uint8((g + g>>8) >> 8)
+	p[2] = uint8((b + b>>8) >> 8)
+	p[3] = uint8((al + al>>8) >> 8)
 }
 
 // Fill blends col over r.
@@ -261,19 +274,34 @@ func (c *Canvas) roundShape(r Rect, radius, width float32, col color.RGBA) {
 		x1 = min(max(x0, int(math.Floor(float64(cx+spanHalf-0.5)))+1), b.Max.X)
 	}
 	for y := b.Min.Y; y < b.Max.Y; y++ {
-		qy := float32(math.Abs(float64(float32(y)+0.5-cy))) - hy
-		edges := func(from, to int) {
-			i := c.Img.PixOffset(from, y)
-			for x := from; x < to; x, i = x+1, i+4 {
-				qx := float32(math.Abs(float64(float32(x)+0.5-cx))) - hx
-				ox, oy := max(qx, 0), max(qy, 0)
-				d := float32(math.Sqrt(float64(ox*ox+oy*oy))) + min(max(qx, qy), 0) - radius
+		dy := float32(y) + 0.5 - cy
+		if dy < 0 {
+			dy = -dy
+		}
+		qy := dy - hy
+		oy := max(qy, 0)
+		oy2 := oy * oy
+		if b.Min.X < x0 {
+			i := c.Img.PixOffset(b.Min.X, y)
+			for x := b.Min.X; x < x0; x, i = x+1, i+4 {
+				dx := float32(x) + 0.5 - cx
+				if dx < 0 {
+					dx = -dx
+				}
+				qx := dx - hx
+				ox := max(qx, 0)
+				var out float32
+				if ox > 0 && oy > 0 {
+					out = float32(math.Sqrt(float64(ox*ox + oy2)))
+				} else {
+					out = ox + oy
+				}
+				d := out + min(max(qx, qy), 0) - radius
 				if cov := coverage(d); cov > 0 {
 					c.blend(i, col, cov)
 				}
 			}
 		}
-		edges(b.Min.X, x0)
 		if x0 < x1 {
 			cov := deep
 			if qy > -(radius + margin) {
@@ -281,26 +309,63 @@ func (c *Canvas) roundShape(r Rect, radius, width float32, col color.RGBA) {
 			}
 			c.span(c.Img.PixOffset(x0, y), x1-x0, col, cov)
 		}
-		edges(max(x1, x0), b.Max.X)
+		start := max(x1, x0)
+		if start < b.Max.X {
+			i := c.Img.PixOffset(start, y)
+			for x := start; x < b.Max.X; x, i = x+1, i+4 {
+				dx := float32(x) + 0.5 - cx
+				if dx < 0 {
+					dx = -dx
+				}
+				qx := dx - hx
+				ox := max(qx, 0)
+				var out float32
+				if ox > 0 && oy > 0 {
+					out = float32(math.Sqrt(float64(ox*ox + oy2)))
+				} else {
+					out = ox + oy
+				}
+				d := out + min(max(qx, qy), 0) - radius
+				if cov := coverage(d); cov > 0 {
+					c.blend(i, col, cov)
+				}
+			}
+		}
 	}
 }
 
 // span blends col with coverage cov over n pixels starting at offset i.
 func (c *Canvas) span(i, n int, col color.RGBA, cov float32) {
-	a := float32(col.A) / 255 * cov
-	if a <= 0 || n <= 0 {
+	if cov <= 0 || col.A == 0 || n <= 0 {
+		return
+	}
+	a := uint32(float32(col.A)*cov + 0.5)
+	if a == 0 {
 		return
 	}
 	p := c.Img.Pix[i : i+n*4]
-	if a >= 1 {
+	if a >= 255 {
 		p[0], p[1], p[2], p[3] = col.R, col.G, col.B, 255
 		for k := 4; k < len(p); k *= 2 {
 			copy(p[k:], p[:k])
 		}
 		return
 	}
-	for k := 0; k < n; k++ {
-		c.blend(i+k*4, col, cov)
+	inv := 255 - a
+	sr := uint32(col.R)*a + 128
+	sg := uint32(col.G)*a + 128
+	sb := uint32(col.B)*a + 128
+	sa := 255*a + 128
+	for k := 0; k < len(p); k += 4 {
+		q := p[k : k+4 : k+4]
+		r := sr + uint32(q[0])*inv
+		g := sg + uint32(q[1])*inv
+		b := sb + uint32(q[2])*inv
+		al := sa + uint32(q[3])*inv
+		q[0] = uint8((r + r>>8) >> 8)
+		q[1] = uint8((g + g>>8) >> 8)
+		q[2] = uint8((b + b>>8) >> 8)
+		q[3] = uint8((al + al>>8) >> 8)
 	}
 }
 
@@ -621,9 +686,15 @@ func Fade(img *image.RGBA, a float64) *image.RGBA {
 		return img
 	}
 	out := image.NewRGBA(img.Rect)
-	k := float32(max(a, 0))
-	for i, v := range img.Pix {
-		out.Pix[i] = uint8(float32(v)*k + 0.5)
+	k := uint32(max(a, 0)*255 + 0.5)
+	if k == 0 {
+		return out
+	}
+	src, dst := img.Pix, out.Pix
+	if len(dst) == len(src) {
+		for i, v := range src {
+			dst[i] = uint8(mul255(uint32(v), k))
+		}
 	}
 	return out
 }

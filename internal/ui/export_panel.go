@@ -275,8 +275,16 @@ func (a *App) drawExportDetails(r gfx.Rect, y float32, e project.Export, set fun
 		set(n)
 	}
 	hw := a.encoders != nil && hardwareAvailable(a.encoders, e.Codec)
-	label := u.t("Encode on the NVIDIA graphics card (much faster, slightly larger files)")
-	if !hw {
+	label := u.t("Encode on the graphics card (much faster, slightly larger files)")
+	if hw {
+		enc := render.Encoder(e.Codec, true, a.encoders)
+		switch {
+		case strings.HasSuffix(enc, "_videotoolbox"):
+			label = u.t("Encode with Apple VideoToolbox (much faster, slightly larger files)")
+		case strings.HasSuffix(enc, "_nvenc"):
+			label = u.t("Encode on the NVIDIA graphics card (much faster, slightly larger files)")
+		}
+	} else {
 		label = u.tf("Graphics card encoding is not available for %s on this computer", codecShortNames[e.Codec])
 	}
 	cb := gfx.Rect{X: r.X, Y: y, W: r.W, H: u.px(26)}

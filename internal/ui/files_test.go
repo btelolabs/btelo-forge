@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/btelolabs/btelo-forge/internal/files"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 )
 
@@ -569,21 +569,30 @@ func TestFilesCloseTabWithItsButton(t *testing.T) {
 }
 
 func TestFilesUpFromADriveListsTheDrives(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("only Windows has drive letters")
+	drives := files.Drives()
+	if len(drives) == 0 {
+		t.Skip("this system has no separate drives list")
 	}
 	x, root := filesHarness(t, map[string]string{"a.txt": ""})
 	p := x.a.files.pane()
-	vol := filepath.VolumeName(root)
-	x.a.goTo(p, vol+`\`, "")
+	var top files.Drive
+	for _, d := range drives {
+		if files.Within(root, d.Path) && len(d.Path) >= len(top.Path) {
+			top = d
+		}
+	}
+	if top.Path == "" {
+		top = drives[0]
+	}
+	x.a.goTo(p, top.Path, "")
 	x.waitFiles()
 	x.press('H', "")
 	x.waitFiles()
-	if !p.atDrives() || p.current() == nil || p.current().Name != vol {
-		t.Fatalf("h above %s shows %q with the cursor on %v", vol, p.dir, p.current())
+	if !p.atDrives() || p.current() == nil || p.current().Name != top.Name {
+		t.Fatalf("h above %s shows %q with the cursor on %v", top.Name, p.dir, p.current())
 	}
-	if d := p.drives[vol]; d.Total <= 0 {
-		t.Errorf("%s has no size: %+v", vol, d)
+	if d := p.drives[top.Name]; d.Total <= 0 {
+		t.Errorf("%s has no size: %+v", top.Name, d)
 	}
 	x.frame(Input{})
 	x.shot("files-drives")
@@ -598,8 +607,8 @@ func TestFilesUpFromADriveListsTheDrives(t *testing.T) {
 	}
 	x.press('L', "")
 	x.waitFiles()
-	if p.dir != vol+`\` {
-		t.Errorf("l on %s went to %q", vol, p.dir)
+	if !files.SamePath(p.dir, top.Path) {
+		t.Errorf("l on %s went to %q, want %q", top.Name, p.dir, top.Path)
 	}
 }
 
@@ -773,7 +782,7 @@ func TestFilesTypeOrPasteAPath(t *testing.T) {
 	if fd.prompt != nil {
 		t.Error("Esc left the box open")
 	}
-	x.click(rectAt(float32(x.c.Img.Rect.Dx())/2, x.a.u.px(40)+x.a.u.px(10), x.a.u.px(20), x.a.u.px(18)))
+	x.click(rectAt(float32(x.c.Img.Rect.Dx())-x.a.u.px(240), x.a.u.px(40)+x.a.u.px(10), x.a.u.px(20), x.a.u.px(18)))
 	if fd.prompt == nil || fd.prompt.kind != promptPath {
 		t.Error("a click on the bar did not open the box")
 	}

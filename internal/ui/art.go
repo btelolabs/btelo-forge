@@ -68,6 +68,7 @@ type artDoc struct {
 	panX      float64  // the canvas point shown at the middle of the viewport
 	panY      float64
 	view      *image.RGBA     // the viewport's pixels: the picture over a checkerboard
+	scratch   []uint8         // reusable backing pixels for renderView's temporary composite
 	viewFor   viewKey         // the viewport, zoom and pan the view was made for
 	stale     image.Rectangle // canvas area to bring into the view
 	stroke    *paint.Stroke
@@ -134,6 +135,7 @@ type artDoc struct {
 type viewKey struct {
 	vp         image.Rectangle
 	zoom, x, y float64
+	dark       bool
 }
 
 func (a *App) artTitle(ad *artDoc) string {
@@ -412,11 +414,28 @@ func (ad *artDoc) look(x, y int) color.RGBA {
 }
 
 var (
-	checkLight = color.RGBA{0x2c, 0x2e, 0x34, 0xff}
-	checkDark  = color.RGBA{0x22, 0x24, 0x29, 0xff}
-	// pasteboard darkens the canvas beyond a frame, as Photoshop's and Affinity's do.
-	pasteboard = color.RGBA{0x0c, 0x0d, 0x10, 0x9c}
+	checkLightDark  = color.RGBA{0x2c, 0x2e, 0x34, 0xff}
+	checkDarkDark   = color.RGBA{0x22, 0x24, 0x29, 0xff}
+	checkLightLight = color.RGBA{0xe6, 0xe8, 0xed, 0xff}
+	checkDarkLight  = color.RGBA{0xd7, 0xdb, 0xe2, 0xff}
+	// pasteboard veils the canvas beyond a frame, as Photoshop's and Affinity's do; premultiplied RGBA.
+	pasteboardDark  = color.RGBA{0x0c, 0x0d, 0x10, 0x9c}
+	pasteboardLight = color.RGBA{0xa3, 0xa5, 0xaa, 0xb8}
 )
+
+func artCheckColors() (light, dark color.RGBA) {
+	if isDarkTheme() {
+		return checkLightDark, checkDarkDark
+	}
+	return checkLightLight, checkDarkLight
+}
+
+func artPasteboard() color.RGBA {
+	if isDarkTheme() {
+		return pasteboardDark
+	}
+	return pasteboardLight
+}
 
 // drawView brings the viewport's pixels up to date and shows them: all of them when the viewport, zoom or pan
 // changed, otherwise only what painting changed. Only what the viewport shows is rendered, from the level of
@@ -430,7 +449,7 @@ func (a *App) drawView(ad *artDoc, vp gfx.Rect) {
 		ad.fitFor = vp
 	}
 	ad.d.View = ad.visible(vp)
-	key := viewKey{vp: rp, zoom: ad.zoom, x: ad.panX, y: ad.panY}
+	key := viewKey{vp: rp, zoom: ad.zoom, x: ad.panX, y: ad.panY, dark: isDarkTheme()}
 	ox, oy := ad.origin(vp)
 	ox, oy = ox-float64(rp.Min.X), oy-float64(rp.Min.Y) // canvas origin in the view's pixels
 	var area image.Rectangle                            // in view pixels
@@ -440,7 +459,7 @@ func (a *App) drawView(ad *artDoc, vp gfx.Rect) {
 		ad.viewFor, area = key, ad.view.Rect
 	case key != ad.viewFor:
 		area = ad.view.Rect
-		if key.zoom == ad.viewFor.zoom && key.vp == ad.viewFor.vp {
+		if key.zoom == ad.viewFor.zoom && key.vp == ad.viewFor.vp && key.dark == ad.viewFor.dark {
 			// A pan by whole pixels moves what is already drawn and draws only what came into view.
 			dx := (ad.viewFor.x - key.x) * key.zoom
 			dy := (ad.viewFor.y - key.y) * key.zoom
@@ -463,15 +482,30 @@ func (a *App) drawView(ad *artDoc, vp gfx.Rect) {
 	u.c.Blit(ad.view, rp.Min.X, rp.Min.Y, true)
 }
 
-// scrollView moves a view's pixels by (dx, dy) and returns the band that came into view, to be drawn.
+// scrollView moves a view's pixels by (dx, dy) in place and returns the band that came into view, to be drawn.
 func scrollView(view *image.RGBA, dx, dy int) image.Rectangle {
 	r := view.Rect
 	if abs(dx) >= r.Dx() || abs(dy) >= r.Dy() {
 		return r
 	}
-	moved := image.NewRGBA(r)
-	draw.Draw(moved, r.Add(image.Pt(dx, dy)), view, r.Min, draw.Src)
-	copy(view.Pix, moved.Pix)
+	copyW := (r.Dx() - abs(dx)) * 4
+	srcX, dstX := r.Min.X, r.Min.X+dx
+	if dx < 0 {
+		srcX, dstX = r.Min.X-dx, r.Min.X
+	}
+	if dy > 0 {
+		for y := r.Max.Y - 1; y >= r.Min.Y+dy; y-- {
+			src := view.PixOffset(srcX, y-dy)
+			dst := view.PixOffset(dstX, y)
+			copy(view.Pix[dst:dst+copyW], view.Pix[src:src+copyW])
+		}
+	} else {
+		for y := r.Min.Y; y < r.Max.Y+dy; y++ {
+			src := view.PixOffset(srcX, y-dy)
+			dst := view.PixOffset(dstX, y)
+			copy(view.Pix[dst:dst+copyW], view.Pix[src:src+copyW])
+		}
+	}
 	var band image.Rectangle
 	switch {
 	case dx > 0:
@@ -498,13 +532,14 @@ func (a *App) renderView(ad *artDoc, area image.Rectangle, ox, oy float64) {
 	// The checkerboard is fixed to the window, in squares of 8 logical pixels: two rows of it are made, and each row
 	// of the area is a copy of one of them.
 	cell := max(int(u.px(8)), 4)
+	cl, cd := artCheckColors()
 	var rows [2][]uint8
 	for i := range rows {
 		rows[i] = make([]uint8, area.Dx()*4)
 		for x := area.Min.X; x < area.Max.X; x++ {
-			c := checkLight
+			c := cl
 			if (x/cell+i)%2 == 1 {
-				c = checkDark
+				c = cd
 			}
 			copy(rows[i][(x-area.Min.X)*4:], []uint8{c.R, c.G, c.B, c.A})
 		}
@@ -525,7 +560,16 @@ func (a *App) renderView(ad *artDoc, area image.Rectangle, ox, oy float64) {
 	scale := z * float64(int(1)<<l)
 	lr := image.Rect(int(math.Floor((float64(area.Min.X)-ox)/scale))-1, int(math.Floor((float64(area.Min.Y)-oy)/scale))-1,
 		int(math.Ceil((float64(area.Max.X)-ox)/scale))+1, int(math.Ceil((float64(area.Max.Y)-oy)/scale))+1)
-	img := image.NewRGBA(lr)
+	need := lr.Dx() * lr.Dy() * 4
+	if cap(ad.scratch) < need {
+		ad.scratch = make([]uint8, need)
+	} else {
+		ad.scratch = ad.scratch[:need]
+		if !ad.d.Paper {
+			clear(ad.scratch)
+		}
+	}
+	img := &image.RGBA{Pix: ad.scratch, Stride: lr.Dx() * 4, Rect: lr}
 	ad.d.Render(img, lr, l)
 	scaleOver(ad.view, area, img, scale, ox, oy, z >= 1)
 	// The frame and the artboards are the pages; beyond them is the pasteboard.

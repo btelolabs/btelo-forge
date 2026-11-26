@@ -17,6 +17,20 @@
       "arguments": ["-matting-server", "{port}", "-matting-engine", "{engine}", "-matting-model", "{model}"]
     },
     {
+      "id": "onnx-coreml",
+      "api": "matting-server",
+      "backend": "metal",
+      "name": {"en": "ONNX Runtime (CoreML)", "zh": "ONNX Runtime（CoreML）"},
+      "note": {"en": "Apple silicon acceleration with automatic CPU fallback (17 MB download)", "zh": "Apple 芯片加速，不支持的算子自动回退处理器（下载 17 MB）"},
+      "os": ["darwin"],
+      "arch": ["arm64"],
+      "url": "https://files.pythonhosted.org/packages/e9/f0/8a21ec0a97e40abb7d8da1e8b20fb9e1af509cc6d191f6faa75f73622fb2/onnxruntime-1.24.4-cp313-cp313-macosx_14_0_arm64.whl",
+      "size": 17341922,
+      "sha256": "e99a48078baaefa2b50fe5836c319499f71f13f76ed32d0211f39109147a49e0",
+      "executable": "onnxruntime/capi/libonnxruntime.1.24.4.dylib",
+      "arguments": ["-matting-server", "{port}", "-matting-engine", "{engine}", "-matting-model", "{model}"]
+    },
+    {
       "id": "vulkan",
       "api": "llama-server",
       "backend": "vulkan",
@@ -56,16 +70,57 @@
       "arguments": ["-m", "{model}", "--host", "127.0.0.1", "--port", "{port}", "-c", "{context}", "-np", "1", "-ngl", "0", "--no-webui"]
     },
     {
+      "id": "metal-arm64",
+      "api": "llama-server",
+      "backend": "metal",
+      "name": {"en": "Apple Silicon (Metal)", "zh": "Apple 芯片（Metal）"},
+      "note": {"en": "Metal GPU acceleration on Apple silicon (17 MB download)", "zh": "Apple 芯片 Metal 加速（下载 17 MB）"},
+      "os": ["darwin"],
+      "arch": ["arm64"],
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12012/llama-b12012-bin-macos-arm64.tar.gz",
+      "size": 16508932,
+      "sha256": "3df4e85be6d3a26ffa870c517c1b34cda3f290dbabcef656ae7a910ea0b54d82",
+      "executable": "llama-server",
+      "arguments": ["-m", "{model}", "--host", "127.0.0.1", "--port", "{port}", "-c", "{context}", "-np", "1", "-ngl", "999", "--no-webui"]
+    },
+    {
+      "id": "metal-x64",
+      "api": "llama-server",
+      "backend": "metal",
+      "name": {"en": "macOS Intel (Metal)", "zh": "Intel Mac（Metal）"},
+      "note": {"en": "llama.cpp for Intel macOS (12 MB download)", "zh": "Intel Mac 版 llama.cpp（下载 12 MB）"},
+      "os": ["darwin"],
+      "arch": ["amd64"],
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12012/llama-b12012-bin-macos-x64.tar.gz",
+      "size": 12248658,
+      "sha256": "fd0cca7bc86f335f500784e7ddfbca7c5b886eda404eb587dc1a3e7eeb393449",
+      "executable": "llama-server",
+      "arguments": ["-m", "{model}", "--host", "127.0.0.1", "--port", "{port}", "-c", "{context}", "-np", "1", "-ngl", "999", "--no-webui"]
+    },
+    {
       "id": "homebrew",
       "api": "llama-server",
       "backend": "metal",
-      "name": "llama.cpp",
+      "name": {"en": "llama.cpp (Homebrew)", "zh": "llama.cpp（Homebrew）"},
       "note": {"en": "Uses llama-server from Homebrew (Metal on Apple silicon)", "zh": "使用 Homebrew 安装的 llama-server（Apple 芯片用 Metal 加速）"},
       "os": ["darwin"],
       "commands": ["llama-server"],
       "paths": ["/opt/homebrew/bin/llama-server", "/usr/local/bin/llama-server"],
       "install": "brew install llama.cpp",
       "arguments": ["-m", "{model}", "--host", "127.0.0.1", "--port", "{port}", "-c", "{context}", "-np", "1", "-ngl", "999", "--no-webui"]
+    },
+    {
+      "id": "sd-metal",
+      "api": "sd-server",
+      "backend": "metal",
+      "name": {"en": "Apple Graphics (Metal)", "zh": "Apple 显卡（Metal）"},
+      "note": {"en": "Metal GPU acceleration on macOS (38 MB download)", "zh": "macOS Metal 加速（下载 38 MB）"},
+      "os": ["darwin"],
+      "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1028-37bc88b/sd-master-37bc88b-bin-Darwin-macOS-26.6.2-arm64.zip",
+      "size": 37596065,
+      "sha256": "d79e0771c724c265ca11ca313fa87008b1977aa11ea84940e47925f16f64c9c9",
+      "executable": "sd-server",
+      "arguments": ["--listen-ip", "127.0.0.1", "--listen-port", "{port}"]
     },
     {
       "id": "sd-vulkan",

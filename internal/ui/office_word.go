@@ -350,7 +350,11 @@ func (e *wordEditor) drawPages(view gfx.Rect) {
 	u := &a.u
 	d := e.d
 	e.frame++
-	u.c.Fill(view, colPanel)
+	bg := colPanel
+	if !isDarkTheme() {
+		bg = colWell
+	}
+	u.c.Fill(view, bg)
 	e.pageRects(view)
 	e.keys()
 	d.Layout(wordLayoutBudget) // what was just typed shows in this frame
@@ -375,9 +379,12 @@ func (e *wordEditor) drawPages(view gfx.Rect) {
 			continue
 		}
 		box := gfx.Rect{X: x, Y: y, W: w, H: h}
-		u.c.Fill(gfx.Rect{X: box.X + u.px(1), Y: box.Y + u.px(2), W: w + u.px(2), H: h + u.px(2)}, gfx.Alpha(colBlack, 0.35))
+		u.c.Fill(gfx.Rect{X: box.X + u.px(1), Y: box.Y + u.px(2), W: w + u.px(2), H: h + u.px(2)}, colShadow)
 		t := e.tile(pg)
 		u.c.Blit(t.img, int(x+0.5), int(y+0.5), true)
+		if !isDarkTheme() {
+			u.c.Outline(box, max(1, u.px(1)), colBorder)
+		}
 		e.drawFound(pg, x, y)
 		e.drawSelection(pg, x, y)
 		e.drawEditing(pg, i, x, y)

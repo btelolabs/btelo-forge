@@ -16,8 +16,7 @@ func BenchmarkFrame(b *testing.B) {
 	x.c.Resize(1800, 1125)
 	x.scale = 1.25
 	src := x.fixture()
-	x.frame(Input{Dropped: []string{src}})
-	x.settle(30 * time.Second)
+	x.open(src)
 	x.a.seek(1)
 	x.key('T', false)
 	x.frame(Input{Keys: []Key{{Code: keyEscape}}})

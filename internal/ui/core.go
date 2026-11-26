@@ -102,6 +102,12 @@ type Host interface {
 	Languages() []string // the system's preferred languages as BCP 47 tags, most preferred first
 }
 
+// themeHost is a window that can report the system's dark-mode setting and match its native frame to it.
+type themeHost interface {
+	SystemDark() bool
+	SetDark(dark bool)
+}
+
 // ctx is the per-frame immediate-mode state.
 type ctx struct {
 	c          *gfx.Canvas

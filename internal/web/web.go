@@ -38,6 +38,7 @@ type Text struct {
 type Site struct {
 	Files     func() []File
 	Text      func() Text
+	Theme     func() string // optional: "light", "dark", or "system"/"" (follows browser)
 	UploadDir func() (string, error)
 	Received  func(paths []string)
 	Logo      []byte // a JPEG of the app's mark, shown in the page header and as its icon
@@ -74,8 +75,14 @@ func Handler(key string, site Site) http.Handler {
 		if !allowed(w, r) {
 			return
 		}
+		theme := "system"
+		if site.Theme != nil {
+			if t := site.Theme(); t == "light" || t == "dark" {
+				theme = t
+			}
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		page.Execute(w, text())
+		page.Execute(w, pageView{Text: text(), Theme: theme})
 	})
 	mux.HandleFunc("GET /list", func(w http.ResponseWriter, r *http.Request) {
 		if !allowed(w, r) {
@@ -184,27 +191,34 @@ func size(n int64) string {
 	return fmt.Sprintf("%d KB", n>>10)
 }
 
+type pageView struct {
+	Text
+	Theme string
+}
+
 var page = template.Must(template.New("page").Parse(`<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="icon" href="/logo.jpg"><link rel="apple-touch-icon" href="/logo.jpg">
+<html data-theme="{{.Theme}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="icon" href="/logo.jpg"><link rel="apple-touch-icon" href="/logo.jpg">
 <title>{{.Title}}</title><script src="/htmx.min.js"></script>
 <style>
-:root{color-scheme:dark;--bg:#0f1112;--panel:#171a1c;--line:#2b3034;--text:#eceff0;--dim:#9ba3a8;--accent:#1fbf75}
+:root,html[data-theme="dark"]{color-scheme:dark;--bg:#0c0d10;--panel:#131418;--surface:#1b1c21;--line:#25272d;--text:#e6e7ea;--dim:#9a9ca5;--accent:#e6e7ea;--on-accent:#0c0d10;--ok:#3ecf8e;--bad:#ffb4b2}
+html[data-theme="light"]{color-scheme:light;--bg:#eeeff3;--panel:#f8f9fb;--surface:#ffffff;--line:#e0e3e9;--text:#16181d;--dim:#5a5e6b;--accent:#181a20;--on-accent:#ffffff;--ok:#15803d;--bad:#b91c1c}
+@media (prefers-color-scheme:light){html:not([data-theme="dark"]){color-scheme:light;--bg:#eeeff3;--panel:#f8f9fb;--surface:#ffffff;--line:#e0e3e9;--text:#16181d;--dim:#5a5e6b;--accent:#181a20;--on-accent:#ffffff;--ok:#15803d;--bad:#b91c1c}}
 *{box-sizing:border-box}html,button,input,a{touch-action:manipulation}body{-webkit-text-size-adjust:100%;margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
-header{display:flex;align-items:center;justify-content:space-between;padding:18px 16px;border-bottom:1px solid var(--line)}
-h1{font-size:18px;margin:0}.brand{display:flex;align-items:center;gap:10px;min-width:0}.brand img{width:32px;height:32px;flex:none}
-button{background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
-.refresh.flash{animation:flash .6s}@keyframes flash{from{background:var(--accent);border-color:var(--accent)}to{background:none}}
-main{padding:12px 16px;max-width:720px;margin:0 auto}.item{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}
+header{display:flex;align-items:center;justify-content:space-between;padding:18px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0}.brand{display:flex;align-items:center;gap:10px;min-width:0}.brand img{width:32px;height:32px;flex:none;border-radius:6px;border:1px solid var(--line)}
+button{background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
+.refresh.flash{animation:flash .6s}@keyframes flash{from{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}to{background:var(--surface);color:var(--text)}}
+main{padding:12px 16px;max-width:720px;margin:0 auto}.item{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}
 .name{font-weight:600;word-break:break-all}.meta{color:var(--dim);font-size:13px;margin:2px 0 10px}video{width:100%;border-radius:8px;background:#000;margin-bottom:10px}
-a.dl{display:block;text-align:center;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;border-radius:8px;padding:10px}
+a.dl{display:block;text-align:center;background:var(--accent);color:var(--on-accent);text-decoration:none;font-weight:600;border-radius:8px;padding:10px}
 .empty{color:var(--dim);text-align:center;padding:40px 0}
 h2{font-size:15px;color:var(--dim);margin:22px 0 4px;font-weight:600}
-.upload{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
+.upload{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
 .upload p{color:var(--dim);font-size:13px;margin:0 0 10px}
 input[type=file]{width:100%;color:var(--dim);margin-bottom:10px}
-.send{width:100%;background:var(--accent);border:0;color:#fff;font-weight:600;padding:10px}
+.send{width:100%;background:var(--accent);border:0;color:var(--on-accent);font-weight:600;padding:10px}
 progress{width:100%;height:6px;margin-top:10px;accent-color:var(--accent)}progress[hidden]{display:none}
-.ok{color:var(--accent);margin-top:10px}.bad{color:#ffb4b2;margin-top:10px}
+.ok{color:var(--ok);margin-top:10px}.bad{color:var(--bad);margin-top:10px}
 </style></head>
 <body><header><div class="brand"><img src="/logo.jpg" alt=""><h1>{{.Title}}</h1></div><button class="refresh" type="button" hx-get="/list" hx-target="#list" hx-on::after-request="this.classList.remove('flash');void this.offsetWidth;this.classList.add('flash')">{{.Refresh}}</button></header>
 <main>

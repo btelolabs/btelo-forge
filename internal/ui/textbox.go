@@ -428,7 +428,7 @@ func (u *ctx) editBox(id string, r gfx.Rect, value *string, placeholder string, 
 		}
 	}
 	bg := colSurface
-	if focused {
+	if focused && isDarkTheme() {
 		bg = colPanel
 	}
 	u.c.Fill(r, bg)
@@ -439,7 +439,11 @@ func (u *ctx) editBox(id string, r gfx.Rect, value *string, placeholder string, 
 		border = colBorderHi
 	}
 	if focused {
-		u.c.Outline(r.Inset(-u.px(2)), u.px(2), gfx.Alpha(colAccent, 0.25))
+		ring := float32(0.25)
+		if !isDarkTheme() {
+			ring = 0.2
+		}
+		u.c.Outline(r.Inset(-u.px(2)), u.px(2), gfx.Alpha(colAccent, ring))
 	}
 	u.c.Outline(r, max(1, u.px(1)), border)
 	u.c.Push(r.Inset(u.px(2)))
@@ -480,7 +484,11 @@ func (u *ctx) editBox(id string, r gfx.Rect, value *string, placeholder string, 
 		if sa, sb := min(max(a-offset, 0), len(rs)), min(max(b-offset, 0), len(rs)); sa < sb {
 			x1 := x0 + f.Measure(string(rs[:sa]))
 			x2 := x0 + f.Measure(string(rs[:sb]))
-			u.c.Fill(gfx.Rect{X: x1, Y: y, W: max(x2-x1, u.px(4)), H: f.Height()}, gfx.Alpha(colAccent, 0.45))
+			selAlpha := float32(0.45)
+			if !isDarkTheme() {
+				selAlpha = 0.24
+			}
+			u.c.Fill(gfx.Rect{X: x1, Y: y, W: max(x2-x1, u.px(4)), H: f.Height()}, gfx.Alpha(colAccent, selAlpha))
 		}
 		u.c.Text(f, x0, y, line, colText)
 		offset += len(rs) + 1

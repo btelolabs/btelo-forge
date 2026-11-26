@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,9 @@ func TestBuiltInConfigIsValid(t *testing.T) {
 	m, _ := c.Model("qwen3-4b")
 	if _, ok := c.Engine(m, ""); !ok {
 		t.Fatal("no engine runs on this computer")
+	}
+	if _, ok := c.MattingModel(); !ok && ((runtime.GOOS == "windows" && runtime.GOARCH == "amd64") || (runtime.GOOS == "darwin" && runtime.GOARCH == "arm64")) {
+		t.Fatal("no matting model runs on this computer")
 	}
 }
 

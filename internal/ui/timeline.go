@@ -294,6 +294,9 @@ func (a *App) drawLaneHeader(l lane) {
 		bg = colSurfaceHi
 	}
 	u.c.Fill(r, bg)
+	if !isDarkTheme() {
+		u.c.Outline(r, max(1, u.px(1)), colBorder)
+	}
 	glyph := map[group]string{groupVideo: icVideo, groupOverlay: icFont, groupMusic: icMusic}[l.group]
 	top := gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: min(r.H, u.px(26))}
 	u.icon(glyph, gfx.Rect{X: r.X + u.px(6), Y: top.Y, W: u.px(16), H: top.H}, 11, colDim)
@@ -385,7 +388,11 @@ func (a *App) drawRuler(t tracks) {
 			h = u.px(8)
 			u.c.Text(f, x+u.px(4), t.ruler.Y+u.px(1), rulerLabel(math.Round(at/minor)*minor, step), colFaint)
 		}
-		u.c.Fill(gfx.Rect{X: x, Y: t.ruler.Bottom() - h, W: max(1, u.px(1)), H: h}, colBorder)
+		tickCol := colBorder
+		if !isDarkTheme() {
+			tickCol = colBorderHi
+		}
+		u.c.Fill(gfx.Rect{X: x, Y: t.ruler.Bottom() - h, W: max(1, u.px(1)), H: h}, tickCol)
 	}
 	if end := t.x(a.p.Duration()); end < t.area.Right() {
 		u.c.Fill(gfx.Rect{X: end, Y: t.ruler.Y, W: max(1, u.px(1)), H: t.ruler.H}, gfx.Alpha(colAccent, 0.6))
@@ -472,8 +479,14 @@ func (a *App) drawScrollbars(t tracks) {
 		x := t.bar.X + (t.bar.W-w)*float32(t.x0/(total-t.seconds()))
 		thumb := gfx.Rect{X: x, Y: t.bar.Y, W: w, H: t.bar.H}
 		col := colSurfaceHi
+		if !isDarkTheme() {
+			col = colBorderHi
+		}
 		if u.hover("tl/bar", thumb) || u.active == "tl/bar" {
 			col = colFaint
+			if !isDarkTheme() {
+				col = colDim
+			}
 		}
 		u.c.Fill(thumb, col)
 		if u.press("tl/bar", thumb.Inset(-u.px(4))) {
@@ -493,8 +506,14 @@ func (a *App) drawScrollbars(t tracks) {
 		y := bar.Y + (bar.H-h)*a.view.vscroll/(t.contentH-t.view.H)
 		thumb := gfx.Rect{X: bar.X, Y: y, W: bar.W, H: h}
 		col := colSurfaceHi
+		if !isDarkTheme() {
+			col = colBorderHi
+		}
 		if u.hover("tl/vbar", thumb.Inset(-u.px(3))) || u.active == "tl/vbar" {
 			col = colFaint
+			if !isDarkTheme() {
+				col = colDim
+			}
 		}
 		u.c.Fill(thumb, col)
 		if u.press("tl/vbar", thumb.Inset(-u.px(4))) {

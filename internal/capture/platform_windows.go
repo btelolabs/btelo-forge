@@ -1,6 +1,8 @@
 package capture
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"syscall"
 	"unsafe"
@@ -24,4 +26,44 @@ func CheckSystem() error {
 		return &OldWindowsError{v.Major, v.Minor, v.Build}
 	}
 	return nil
+}
+
+func platformEncoders() []Encoder {
+	return []Encoder{{"h264_nvenc"}, {"h264_amf"}, {"h264_mf"}, {"libx264"}}
+}
+
+func probeEncoder(ctx context.Context, d Display, fps int) (Encoder, error) {
+	if err := hasGrabber(ctx); err != nil {
+		return Encoder{}, err
+	}
+	var errs []error
+	for _, e := range encoders {
+		err := tryEncoder(ctx, Options{Display: d, FPS: fps, Encoder: e})
+		if err == nil {
+			return e, nil
+		}
+		if ctx.Err() != nil {
+			return Encoder{}, ctx.Err()
+		}
+		errs = append(errs, fmt.Errorf("%s: %w", e.Codec, err))
+	}
+	return Encoder{}, fmt.Errorf("%w: %w", ErrNoEncoder, errors.Join(errs...))
+}
+
+func startRecordSegment(o Options, part string, hooks segmentHooks) (*segment, error) {
+	return startSegment(o, func(t0 int64, audio string) []string { return recordArgs(o, t0, audio, part) }, nil, hooks)
+}
+
+func startScreenFeed(o Options, so StreamOptions, gpuScale bool, frames *frameStore, ended func(f *screenFeed, err error, delivered bool)) (*screenFeed, error) {
+	return startFFmpegFeed(o, so, gpuScale, frames, ended)
+}
+
+func canFFmpegScreenshot() bool { return true }
+
+func listCameras(ctx context.Context) ([]Camera, error) {
+	return listCamerasDShow(ctx)
+}
+
+func startCameraPlatform(o CameraOptions, frame func(rgba []byte)) (*CameraFeed, error) {
+	return startCameraDShow(o, frame)
 }

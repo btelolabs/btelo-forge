@@ -99,42 +99,61 @@ func dilate(src *image.Alpha, radius int) *image.Alpha {
 	sum := make([]float32, w*h)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	next := make(chan int)
+	next := make(chan int, levels)
+	for k := range levels {
+		next <- k
+	}
+	close(next)
+	maxD := float32(radius + 1)
+	maxD2 := maxD * maxD
 	for range min(levels, runtime.GOMAXPROCS(0)) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			dist := make([]float32, w*h)
-			part := make([]float32, w*h)
+			acc := make([]float32, w*h)
 			line := newDistanceLine(max(w, h))
+			used := false
 			for k := range next {
+				used = true
 				cut := uint8((float64(k) + 0.5) * 255 / float64(levels))
 				for i := range h {
 					row := src.Pix[i*src.Stride:][:w]
+					drow := dist[i*w : i*w+w]
 					for j, v := range row {
 						if v >= cut {
-							dist[i*w+j] = 0
+							drow[j] = 0
 						} else {
-							dist[i*w+j] = farAway
+							drow[j] = farAway
 						}
 					}
 				}
 				line.transform(dist, w, h)
 				for i, d := range dist {
-					part[i] = min(max(float32(radius)+1-float32(math.Sqrt(float64(d))), 0), 1)
+					if d >= maxD2 {
+						continue
+					}
+					if d <= 0 {
+						acc[i] += 1
+						continue
+					}
+					v := maxD - float32(math.Sqrt(float64(d)))
+					if v >= 1 {
+						acc[i] += 1
+					} else if v > 0 {
+						acc[i] += v
+					}
 				}
+			}
+			if used {
 				mu.Lock()
-				for i, v := range part {
+				for i, v := range acc {
 					sum[i] += v
 				}
 				mu.Unlock()
 			}
 		}()
 	}
-	for k := range levels {
-		next <- k
-	}
-	close(next)
 	wg.Wait()
 	out := image.NewAlpha(src.Rect)
 	for i, v := range sum {
@@ -166,62 +185,77 @@ const farAway = 1e12
 // distanceLine is the working space of the Euclidean distance transform of Felzenszwalb and Huttenlocher, which
 // costs the same at any radius.
 type distanceLine struct {
-	v    []int
-	z, d []float32
+	v       []int
+	z, d, s []float32
 }
 
 func newDistanceLine(n int) *distanceLine {
-	return &distanceLine{v: make([]int, n), z: make([]float32, n+1), d: make([]float32, n)}
+	return &distanceLine{v: make([]int, n), z: make([]float32, n+1), d: make([]float32, n), s: make([]float32, n)}
 }
 
 // transform turns dist, 0 at the pixels to measure from, into each pixel's squared distance to the nearest of them.
 func (l *distanceLine) transform(dist []float32, w, h int) {
-	for x := range w {
-		l.pass(dist[x:], w, h)
-	}
+	// Run horizontal (contiguous) pass first, then vertical using a contiguous column buffer to avoid strided
+	// cache misses in the inner envelope loop.
 	for y := range h {
-		l.pass(dist[y*w:], 1, w)
+		l.passContiguous(dist[y*w : y*w+w])
+	}
+	col := l.s[:h]
+	for x := range w {
+		for y := range h {
+			col[y] = dist[y*w+x]
+		}
+		if l.passContiguous(col) {
+			for y := range h {
+				dist[y*w+x] = col[y]
+			}
+		}
 	}
 }
 
-// pass is the transform along n values stride apart: the lower envelope of the parabolas rooted at each.
-func (l *distanceLine) pass(f []float32, stride, n int) {
+// passContiguous is the transform along contiguous slice f; it reports whether f changed.
+func (l *distanceLine) passContiguous(f []float32) bool {
+	n := len(f)
+	v, z, d := l.v[:n], l.z[:n+1], l.d[:n]
 	k := -1
-	for q := range n {
-		fq := f[q*stride]
+	for q, fq := range f {
 		if fq >= farAway {
 			continue
 		}
+		qf := float32(q)
+		q2 := fq + qf*qf
 		var s float32
 		for k >= 0 {
-			p := l.v[k]
-			s = (fq + float32(q*q) - f[p*stride] - float32(p*p)) / float32(2*(q-p))
-			if s > l.z[k] {
+			p := v[k]
+			pf := float32(p)
+			s = (q2 - f[p] - pf*pf) / (2 * (qf - pf))
+			if s > z[k] {
 				break
 			}
 			k--
 		}
 		k++
-		l.v[k] = q
+		v[k] = q
 		if k == 0 {
-			l.z[0] = float32(math.Inf(-1))
+			z[0] = float32(math.Inf(-1))
 		} else {
-			l.z[k] = s
+			z[k] = s
 		}
-		l.z[k+1] = float32(math.Inf(1))
+		z[k+1] = float32(math.Inf(1))
 	}
 	if k < 0 {
-		return // nothing to measure from on this line
+		return false // nothing to measure from on this line
 	}
 	k = 0
 	for q := range n {
-		for l.z[k+1] < float32(q) {
+		qf := float32(q)
+		for z[k+1] < qf {
 			k++
 		}
-		p := l.v[k]
-		l.d[q] = float32((q-p)*(q-p)) + f[p*stride]
+		p := v[k]
+		dq := qf - float32(p)
+		d[q] = dq*dq + f[p]
 	}
-	for q := range n {
-		f[q*stride] = l.d[q]
-	}
+	copy(f, d)
+	return true
 }

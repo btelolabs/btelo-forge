@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
 
 	"golang.org/x/image/font"
@@ -43,13 +44,15 @@ type Outline struct {
 
 // Face is one size of a font.
 type Face struct {
-	font    *Font
-	face    font.Face
-	Size    float32
-	Ascent  float32
-	Descent float32
-	glyphs  map[rune]*glyph
-	widths  map[rune]float32 // advances asked for of glyphs not drawn at this size
+	font        *Font
+	face        font.Face
+	Size        float32
+	Ascent      float32
+	Descent     float32
+	glyphs      map[rune]*glyph
+	widths      map[rune]float32 // advances asked for of glyphs not drawn at this size
+	asciiGlyphs [128]atomic.Pointer[glyph]
+	asciiWidths [128]atomic.Uint32 // math.Float32bits(advance) + 1; 0 means uncached
 }
 
 type glyph struct {
@@ -167,6 +170,11 @@ func (f *Font) WithFallbacks(paths ...string) *Font {
 }
 
 func (fc *Face) glyph(r rune) *glyph {
+	if uint32(r) < 128 {
+		if g := fc.asciiGlyphs[r].Load(); g != nil {
+			return g
+		}
+	}
 	f := fc.font
 	f.mu.Lock()
 	if g, ok := fc.glyphs[r]; ok {
@@ -182,6 +190,10 @@ func (fc *Face) glyph(r rune) *glyph {
 			g := face.glyph(r)
 			f.mu.Lock()
 			fc.glyphs[r] = g
+			if uint32(r) < 128 {
+				fc.asciiGlyphs[r].Store(g)
+				fc.asciiWidths[r].Store(math.Float32bits(g.advance) + 1)
+			}
 			f.mu.Unlock()
 			return g
 		}
@@ -204,12 +216,21 @@ func (fc *Face) glyph(r rune) *glyph {
 		g.mask, g.x, g.y = a, dr.Min.X, dr.Min.Y
 	}
 	fc.glyphs[r] = g
+	if uint32(r) < 128 {
+		fc.asciiGlyphs[r].Store(g)
+		fc.asciiWidths[r].Store(math.Float32bits(g.advance) + 1)
+	}
 	return g
 }
 
 // advance is how far r moves the pen. Only a glyph that is drawn is rasterised: text measured for the page at a
 // printer's size never makes a picture of itself.
 func (fc *Face) advance(r rune) float32 {
+	if uint32(r) < 128 {
+		if v := fc.asciiWidths[r].Load(); v != 0 {
+			return math.Float32frombits(v - 1)
+		}
+	}
 	f := fc.font
 	f.mu.Lock()
 	if g, ok := fc.glyphs[r]; ok {
@@ -229,6 +250,9 @@ func (fc *Face) advance(r rune) float32 {
 			w := face.advance(r)
 			f.mu.Lock()
 			fc.widths[r] = w
+			if uint32(r) < 128 {
+				fc.asciiWidths[r].Store(math.Float32bits(w) + 1)
+			}
 			f.mu.Unlock()
 			return w
 		}
@@ -240,6 +264,9 @@ func (fc *Face) advance(r rune) float32 {
 	}
 	w := fix(adv)
 	fc.widths[r] = w
+	if uint32(r) < 128 {
+		fc.asciiWidths[r].Store(math.Float32bits(w) + 1)
+	}
 	return w
 }
 
@@ -344,14 +371,66 @@ func (c *Canvas) Text(fc *Face, x, y float32, s string, col color.RGBA) float32 
 }
 
 func (c *Canvas) mask(m *image.Alpha, ox, oy int, col color.RGBA) {
+	if col.A == 0 {
+		return
+	}
 	b := image.Rect(ox, oy, ox+m.Rect.Dx(), oy+m.Rect.Dy()).Intersect(c.clip)
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		row := m.Pix[(y-oy)*m.Stride:]
-		i := c.Img.PixOffset(b.Min.X, y)
-		for x := b.Min.X; x < b.Max.X; x, i = x+1, i+4 {
-			if a := row[x-ox]; a != 0 {
-				c.blend(i, col, float32(a)/255)
+	if b.Empty() {
+		return
+	}
+	w := b.Dx()
+	cr, cg, cb, ca := uint32(col.R), uint32(col.G), uint32(col.B), uint32(col.A)
+	sx0 := b.Min.X - ox
+	if ca == 255 {
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			row := m.Pix[(y-oy)*m.Stride+sx0 : (y-oy)*m.Stride+sx0+w]
+			di := c.Img.PixOffset(b.Min.X, y)
+			dst := c.Img.Pix[di : di+w*4]
+			for x, av := range row {
+				if av == 0 {
+					continue
+				}
+				p := dst[x*4 : x*4+4 : x*4+4]
+				if av == 255 {
+					p[0], p[1], p[2], p[3] = col.R, col.G, col.B, 255
+					continue
+				}
+				a := uint32(av)
+				inv := 255 - a
+				r := cr*a + uint32(p[0])*inv + 128
+				g := cg*a + uint32(p[1])*inv + 128
+				bl := cb*a + uint32(p[2])*inv + 128
+				al := 255*a + uint32(p[3])*inv + 128
+				p[0] = uint8((r + r>>8) >> 8)
+				p[1] = uint8((g + g>>8) >> 8)
+				p[2] = uint8((bl + bl>>8) >> 8)
+				p[3] = uint8((al + al>>8) >> 8)
 			}
+		}
+		return
+	}
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		row := m.Pix[(y-oy)*m.Stride+sx0 : (y-oy)*m.Stride+sx0+w]
+		di := c.Img.PixOffset(b.Min.X, y)
+		dst := c.Img.Pix[di : di+w*4]
+		for x, av := range row {
+			if av == 0 {
+				continue
+			}
+			a := mul255(uint32(av), ca)
+			if a == 0 {
+				continue
+			}
+			p := dst[x*4 : x*4+4 : x*4+4]
+			inv := 255 - a
+			r := cr*a + uint32(p[0])*inv + 128
+			g := cg*a + uint32(p[1])*inv + 128
+			bl := cb*a + uint32(p[2])*inv + 128
+			al := 255*a + uint32(p[3])*inv + 128
+			p[0] = uint8((r + r>>8) >> 8)
+			p[1] = uint8((g + g>>8) >> 8)
+			p[2] = uint8((bl + bl>>8) >> 8)
+			p[3] = uint8((al + al>>8) >> 8)
 		}
 	}
 }

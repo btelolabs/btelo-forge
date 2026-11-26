@@ -519,15 +519,32 @@ type officeCard struct {
 
 // officeCardText is the card of a format.
 func officeCardText(id string) officeCard {
+	dark := isDarkTheme()
 	switch id {
 	case "word":
-		return officeCard{msgs("Write documents", "Pages with styles, tables and pictures, as .docx.", "New document"), gfx.Hex(0x4d8bf0)}
+		hue := gfx.Hex(0x4d8bf0)
+		if !dark {
+			hue = gfx.Hex(0x2563eb)
+		}
+		return officeCard{msgs("Write documents", "Pages with styles, tables and pictures, as .docx.", "New document"), hue}
 	case "sheet":
-		return officeCard{msgs("Work in spreadsheets", "Formulas, formats and merged cells, as .xlsx.", "New spreadsheet"), gfx.Hex(0x3fb27f)}
+		hue := gfx.Hex(0x3fb27f)
+		if !dark {
+			hue = gfx.Hex(0x188856)
+		}
+		return officeCard{msgs("Work in spreadsheets", "Formulas, formats and merged cells, as .xlsx.", "New spreadsheet"), hue}
 	case "slides":
-		return officeCard{msgs("Make presentations", "Slides shown full screen, saved as .pptx.", "New presentation"), gfx.Hex(0xe0764c)}
+		hue := gfx.Hex(0xe0764c)
+		if !dark {
+			hue = gfx.Hex(0xc25227)
+		}
+		return officeCard{msgs("Make presentations", "Slides shown full screen, saved as .pptx.", "New presentation"), hue}
 	}
-	return officeCard{msgs("Edit PDFs", "Mark up, fill in, sign, and rearrange pages.", "Open a PDF…"), gfx.Hex(0xd9534f)}
+	hue := gfx.Hex(0xd9534f)
+	if !dark {
+		hue = gfx.Hex(0xc53030)
+	}
+	return officeCard{msgs("Edit PDFs", "Mark up, fill in, sign, and rearrange pages.", "Open a PDF…"), hue}
 }
 
 // officeGlyph is a file's symbol in the file manager: its format's, in its colour.

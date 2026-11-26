@@ -58,7 +58,11 @@ func (a *App) outline(r gfx.Rect, selected, hot bool) {
 	u := &a.u
 	switch {
 	case selected:
-		u.c.Outline(r, u.px(2), colWhite)
+		col := colWhite
+		if !isDarkTheme() {
+			col = colAccent
+		}
+		u.c.Outline(r, u.px(2), col)
 	case hot:
 		u.c.Outline(r, u.px(1), gfx.Alpha(colText, 0.5))
 	}
@@ -219,11 +223,11 @@ func (a *App) drawClip(t tracks, track int, c project.Clip, r gfx.Rect) {
 		}
 	}
 	wave := gfx.Rect{X: r.X, Y: r.Bottom() - waveH, W: r.W, H: waveH}
-	u.c.Fill(wave, gfx.Hex(0x15171b))
+	u.c.Fill(wave, themeHex(0x15171b, 0xe6eaf2))
 	tr := a.p.Video[track]
 	if sm != nil && len(sm.peaks) > 0 {
 		gain := float32(c.Volume * tr.Volume)
-		col := gfx.Hex(0x8c96a8)
+		col := themeHex(0x8c96a8, 0x738099)
 		if tr.Muted {
 			col, gain = colFaint, 0.25
 		}
@@ -249,14 +253,17 @@ func (a *App) drawClip(t tracks, track int, c project.Clip, r gfx.Rect) {
 		bw := f.Measure(label) + u.px(26)
 		badge := gfx.Rect{X: max(r.X, t.area.X) + u.px(5), Y: r.Y + u.px(4), W: bw, H: u.px(17)}
 		u.c.Fill(badge, gfx.Alpha(colBlack, 0.7))
-		u.icon(icSpeed, gfx.Rect{X: badge.X + u.px(4), Y: badge.Y, W: u.px(14), H: badge.H}, 9, colPlayhead)
-		u.label(f, gfx.Rect{X: badge.X + u.px(18), Y: badge.Y, W: bw - u.px(20), H: badge.H}, label, colPlayhead, 0)
+		u.icon(icSpeed, gfx.Rect{X: badge.X + u.px(4), Y: badge.Y, W: u.px(14), H: badge.H}, 9, colWhite)
+		u.label(f, gfx.Rect{X: badge.X + u.px(18), Y: badge.Y, W: bw - u.px(20), H: badge.H}, label, colWhite, 0)
 	}
 	u.c.Pop()
 	a.outline(r, selected, u.hover(fmt.Sprintf("clip/%d", c.ID), r))
 	handle := colFaint
 	if selected {
 		handle = colWhite
+		if !isDarkTheme() {
+			handle = colAccent
+		}
 	}
 	left, right := a.edgeRects(r)
 	for _, e := range []gfx.Rect{left, right} {
@@ -311,6 +318,10 @@ func (a *App) drawMusicClips(t tracks) {
 				mid, half := r.Y+r.H*0.62, r.H*0.3
 				gain := float32(m.Volume * a.p.Music[k].Volume)
 				x0, x1 := max(int(r.X), int(t.area.X)), min(int(r.Right()), int(t.area.Right()))
+				waveCol := gfx.Alpha(gfx.Hex(0xc8d0dc), 0.55)
+				if !isDarkTheme() {
+					waveCol = gfx.Alpha(gfx.Hex(0x1f6e56), 0.42)
+				}
 				for x := x0; x < x1; x++ {
 					f0 := (m.Offset + float64(float32(x)-r.X)/t.pps) * peaksPerSecond
 					f1 := f0 + peaksPerSecond/t.pps
@@ -320,7 +331,7 @@ func (a *App) drawMusicClips(t tracks) {
 							peak = max(peak, peaks[i])
 						}
 					}
-					waveColumn(u.c, float32(x), mid, half, min(peak*gain, 1), gfx.Alpha(gfx.Hex(0xc8d0dc), 0.55))
+					waveColumn(u.c, float32(x), mid, half, min(peak*gain, 1), waveCol)
 				}
 			}
 			title := m.Title

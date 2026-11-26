@@ -402,7 +402,7 @@ func (a *App) drawPromptBox(fd *filesDoc, lists gfx.Rect) {
 	}
 	box := gfx.Rect{X: lists.X + (lists.W-w)/2, Y: lists.Y + u.px(56), W: w, H: h}
 	pr.box = box
-	u.c.Outline(box.Inset(-u.px(2)), u.px(6), gfx.Alpha(colBlack, 0.4))
+	u.c.Outline(box.Inset(-u.px(2)), u.px(6), colShadow)
 	panel(u, box)
 	in := box.Inset(u.px(12))
 	u.label(u.bold(13), rectAt(in.X, in.Y, in.W, u.px(22)), title, colText, 0)
@@ -456,7 +456,7 @@ func (a *App) drawPromptBox(fd *filesDoc, lists gfx.Rect) {
 		if i == pr.pick {
 			u.c.Fill(row, colSelected)
 		}
-		u.icon(icFmFolder, rectAt(row.X+u.px(4), row.Y, u.px(22), row.H), 15, gfx.Hex(0xe8b75b))
+		u.icon(icFmFolder, rectAt(row.X+u.px(4), row.Y, u.px(22), row.H), 15, folderRowHue())
 		f := u.face(12.5)
 		base := filepath.Base(dir)
 		parent := filepath.Dir(dir)
@@ -1009,7 +1009,7 @@ func (a *App) confirmKeys(fd *filesDoc) {
 func (a *App) drawConfirm(fd *filesDoc, r gfx.Rect) {
 	u := &a.u
 	c := fd.confirm
-	u.c.Fill(r, gfx.Alpha(colBlack, 0.45))
+	u.c.Fill(r, gfxShade)
 	if c.again {
 		a.drawConfirmAgain(fd, r)
 		return

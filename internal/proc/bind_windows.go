@@ -43,3 +43,5 @@ func Bind(p *os.Process) error {
 	defer windows.CloseHandle(h)
 	return windows.AssignProcessToJobObject(bound.job, h)
 }
+
+func unbind(int) {}

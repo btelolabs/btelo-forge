@@ -122,10 +122,17 @@ func (a *App) drawTasks(live bool) {
 		if u.letGo(openID) && r.Contains(u.mx, u.my) && t.open != nil {
 			t.open()
 		}
-		u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, gfx.Alpha(colBlack, 0.45))
+		u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, colShadow)
 		bg := colSurfaceHi
+		if !isDarkTheme() {
+			bg = colSurface
+		}
 		if hot {
-			bg = gfx.Mix(colSurfaceHi, colText, 0.05)
+			if isDarkTheme() {
+				bg = gfx.Mix(colSurfaceHi, colText, 0.05)
+			} else {
+				bg = colSurfaceHi
+			}
 			u.cursor = CursorHand
 		}
 		u.c.Fill(r, bg)
@@ -175,7 +182,11 @@ func (a *App) drawTasks(live bool) {
 
 // progressBar draws how far work has got, from 0 to 1; below 0, when that cannot be told, a block sweeps along it.
 func (u *ctx) progressBar(r gfx.Rect, fraction float64) {
-	u.c.Fill(r, colSurface)
+	track := colSurface
+	if !isDarkTheme() {
+		track = colBorder
+	}
+	u.c.Fill(r, track)
 	if fraction >= 0 {
 		u.c.Fill(gfx.Rect{X: r.X, Y: r.Y, W: max(r.W*float32(min(fraction, 1)), r.H), H: r.H}, colAccent)
 		return

@@ -408,7 +408,11 @@ func (a *App) drawTrackList(r gfx.Rect) {
 	if content > r.H {
 		h := max(r.H*r.H/content, u.px(24))
 		y := r.Y + (r.H-h)*m.scroll/(content-r.H)
-		u.c.Fill(gfx.Rect{X: r.Right() - u.px(4), Y: y, W: u.px(3), H: h}, colSurfaceHi)
+		thumb := colSurfaceHi
+		if !isDarkTheme() {
+			thumb = colBorderHi
+		}
+		u.c.Fill(gfx.Rect{X: r.Right() - u.px(4), Y: y, W: u.px(3), H: h}, thumb)
 	}
 }
 
@@ -421,6 +425,9 @@ func (a *App) drawTrackRow(r gfx.Rect, t library.Track) {
 		bg = colSurfaceHi
 	}
 	u.c.Fill(r, bg)
+	if !isDarkTheme() {
+		u.c.Outline(r, max(1, u.px(1)), colBorder)
+	}
 	playing, heard := a.audition.Playing()
 	pb := gfx.Rect{X: r.X + u.px(8), Y: r.Y + (r.H-u.px(34))/2, W: u.px(34), H: u.px(34)}
 	glyph := icPlay
@@ -547,6 +554,9 @@ func (a *App) drawSelectedMusic(r gfx.Rect, m project.Music) float32 {
 	u := &a.u
 	card := gfx.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H - u.px(12)}
 	u.c.Fill(card, gfx.Mix(colSurface, colMusic, 0.35))
+	if !isDarkTheme() {
+		u.c.Outline(card, max(1, u.px(1)), gfx.Mix(colBorder, colMusicHi, 0.6))
+	}
 	in := card.Inset(u.px(12))
 	u.label(u.bold(13.5), gfx.Rect{X: in.X, Y: in.Y, W: in.W - u.px(40), H: u.px(20)}, m.Title, colText, 0)
 	if u.iconButton("music/del", gfx.Rect{X: in.Right() - u.px(30), Y: in.Y - u.px(5), W: u.px(30), H: u.px(30)}, icDelete, u.t("Remove from the timeline"), false, true) {

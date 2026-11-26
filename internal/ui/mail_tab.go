@@ -62,6 +62,9 @@ func (a *App) mailOpenOrSay() {
 // mailHue is the colour that tells an account's mail apart in the common inbox.
 func mailHue(id string) color.RGBA {
 	palette := []uint32{0x6aa9ff, 0x5fd0a5, 0xf2b35e, 0xe58ab8, 0xb48cff, 0x7fd4e6, 0xe8836b}
+	if !isDarkTheme() {
+		palette = []uint32{0x2563eb, 0x047857, 0xb45309, 0xbe185d, 0x7c3aed, 0x0e7490, 0xc2410c}
+	}
 	h := fnv.New32a()
 	h.Write([]byte(id))
 	return gfx.Hex(palette[h.Sum32()%uint32(len(palette))])

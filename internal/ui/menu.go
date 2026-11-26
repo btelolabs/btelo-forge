@@ -122,9 +122,13 @@ func (a *App) drawMenuList(id string, items []menuItem, box gfx.Rect, open int) 
 	u := &a.u
 	f := u.face(13)
 	u.covers = append(u.covers, box)
-	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, gfx.Alpha(colBlack, 0.35))
+	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, colShadow)
 	u.c.Fill(box, colSurface)
-	u.c.Outline(box, max(1, u.px(1)), colBorder)
+	edge := colBorder
+	if !isDarkTheme() {
+		edge = colBorderHi
+	}
+	u.c.Outline(box, max(1, u.px(1)), edge)
 	rows = u.menuRows(items, box)
 	clicked, pointed = -1, -1
 	for i, it := range items {
@@ -227,6 +231,13 @@ func (a *App) dropdown(id string, r gfx.Rect, options []string, selected int, se
 		u.cursor = CursorHand
 	}
 	u.c.Fill(r, bg)
+	if !isDarkTheme() {
+		edge := colBorder
+		if hot || a.menuOpen(id) {
+			edge = colBorderHi
+		}
+		u.c.Outline(r, max(1, u.px(1)), edge)
+	}
 	label := ""
 	if selected >= 0 && selected < len(options) {
 		label = options[selected]

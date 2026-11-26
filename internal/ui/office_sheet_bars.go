@@ -898,7 +898,7 @@ func (ed *sheetEd) drawPop() {
 	u := &a.u
 	p := ed.pop
 	box := ed.popRect()
-	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, gfx.Alpha(colBlack, 0.35))
+	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, colShadow)
 	u.c.Fill(box, colSurface)
 	u.c.Outline(box, max(1, u.px(1)), colBorder)
 	switch p.kind {

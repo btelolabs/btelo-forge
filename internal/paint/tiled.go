@@ -5,6 +5,9 @@ import (
 	"image/color"
 	"image/draw"
 	"math"
+	"runtime"
+	"sync"
+	"sync/atomic"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/math/f64"
@@ -58,15 +61,51 @@ func keysUnder(n *Node, into map[image.Point]bool) {
 	}
 }
 
+// forTiles runs fn on each key in keys, parallelizing across cores when there is more than one tile.
+func forTiles(keys map[image.Point]bool, fn func(k image.Point) *image.RGBA) []*image.RGBA {
+	if len(keys) == 0 {
+		return nil
+	}
+	list := make([]image.Point, 0, len(keys))
+	for k := range keys {
+		list = append(list, k)
+	}
+	imgs := make([]*image.RGBA, len(list))
+	workers := min(runtime.GOMAXPROCS(0), len(list))
+	if workers <= 1 {
+		for i, k := range list {
+			imgs[i] = fn(k)
+		}
+		return imgs
+	}
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= len(list) {
+					return
+				}
+				imgs[i] = fn(list[i])
+			}
+		})
+	}
+	wg.Wait()
+	return imgs
+}
+
 // compositeOf makes a raster of how the layers of group g look together, tile by tile.
 func (d *Doc) compositeOf(g *Node) *Raster {
 	keys := map[image.Point]bool{}
 	keysUnder(g, keys)
 	out := NewRaster()
-	for k := range keys {
+	for _, img := range forTiles(keys, func(k image.Point) *image.RGBA {
 		r := tileRect(k)
 		img := image.NewRGBA(r)
 		d.compositeInto(img, g, r, 0)
+		return img
+	}) {
 		out.Write(img)
 	}
 	return out
@@ -78,7 +117,7 @@ func blendOnto(dst, src *Raster, opacity float64, mode Blend, mask *Mask) *Raste
 	keysOf(&dst.p, keys)
 	keysOf(&src.p, keys)
 	out := NewRaster()
-	for k := range keys {
+	for _, img := range forTiles(keys, func(k image.Point) *image.RGBA {
 		r := tileRect(k)
 		img := dst.Read(r)
 		var m *image.Alpha
@@ -86,7 +125,9 @@ func blendOnto(dst, src *Raster, opacity float64, mode Blend, mask *Mask) *Raste
 		if mask != nil {
 			m, fill = mask.Read(r), mask.Fill()
 		}
-		blendPixels(img, src.Read(r), r, opacity, mode, m, fill)
+		blendRaster(img, src, 0, r, opacity, mode, m, fill)
+		return img
+	}) {
 		out.Write(img)
 	}
 	return out
@@ -100,11 +141,14 @@ func resampleRaster(src *Raster, m Affine, k xdraw.Interpolator) *Raster {
 	if !ok {
 		return out
 	}
-	for key := range destKeys(&src.p, m) {
+	aff := m.aff3()
+	for _, img := range forTiles(destKeys(&src.p, m), func(key image.Point) *image.RGBA {
 		dst := tileRect(key)
 		from := inv.bounds(dst).Inset(-3) // the kernel's reach
 		img := image.NewRGBA(dst)
-		Resample(k, img, m.aff3(), src.Read(from), from, xdraw.Src)
+		Resample(k, img, aff, src.Read(from), from, xdraw.Src)
+		return img
+	}) {
 		out.Write(img)
 	}
 	return out

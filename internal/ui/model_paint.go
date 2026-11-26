@@ -420,7 +420,8 @@ func (a *App) assignToAll(md *modelDoc) {
 
 // uvThumb draws the layout over the picture, kept until either changes.
 func (a *App) uvThumb(md *modelDoc, p *modelPicture, side int) *image.RGBA {
-	if md.thumb != nil && md.thumbGeometry == md.geometry && md.thumb.Rect.Dx() == side {
+	dark := isDarkTheme()
+	if md.thumb != nil && md.thumbGeometry == md.geometry && md.thumbDark == dark && md.thumb.Rect.Dx() == side {
 		return md.thumb
 	}
 	c := gfx.NewCanvas(side, side)
@@ -435,6 +436,9 @@ func (a *App) uvThumb(md *modelDoc, p *modelPicture, side int) *image.RGBA {
 		}
 	}
 	line := color.RGBA{R: 86, G: 199, B: 184, A: 60}
+	if !dark && p == nil {
+		line = color.RGBA{R: 13, G: 148, B: 136, A: 110}
+	}
 	scale := float32(side)
 	const most = 60000 // of edges, past which the layout is a solid mass anyway
 	drawn := 0
@@ -451,7 +455,7 @@ func (a *App) uvThumb(md *modelDoc, p *modelPicture, side int) *image.RGBA {
 			}
 		}
 	}
-	md.thumb, md.thumbGeometry = c.Img, md.geometry
+	md.thumb, md.thumbGeometry, md.thumbDark = c.Img, md.geometry, dark
 	return c.Img
 }
 

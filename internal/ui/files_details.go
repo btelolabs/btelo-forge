@@ -62,7 +62,7 @@ func (a *App) drawTagMatches(fd *filesDoc, pr *filesPrompt, r gfx.Rect, rowH flo
 		if i == pr.pick {
 			u.c.Fill(row, colSelected)
 		}
-		u.icon(icLabel, rectAt(row.X+u.px(4), row.Y, u.px(22), row.H), 13, gfx.Hex(0x7f8cff))
+		u.icon(icLabel, rectAt(row.X+u.px(4), row.Y, u.px(22), row.H), 13, tagHue())
 		u.label(f, rectAt(row.X+u.px(32), row.Y, row.W-u.px(36), row.H), pr.matches[i], colText, 0)
 		if u.clicked(id, row) {
 			pr.pick = i
@@ -226,7 +226,11 @@ func (a *App) drawTagEditor(fd *filesDoc, x, y, w float32, paths []string) float
 			cx, y = x, y+chipH+u.px(6)
 		}
 		chip := gfx.Rect{X: cx, Y: y, W: cw, H: chipH}
-		bg, fg := gfx.Mix(colSurface, gfx.Hex(0x7f8cff), 0.22), colText
+		mix := float32(0.22)
+		if !isDarkTheme() {
+			mix = 0.14
+		}
+		bg, fg := gfx.Mix(colSurface, tagHue(), mix), colText
 		if counts[strings.ToLower(t)] != len(paths) {
 			bg, fg = colSurface, colDim
 		}

@@ -22,6 +22,7 @@ const Repository = "https://github.com/btelolabs/btelo-forge"
 // settings are the preferences kept between runs.
 type settings struct {
 	Language     Language            `json:"language"`
+	Theme        Theme               `json:"theme,omitempty"` // light, dark or system (default)
 	Export       project.Export      `json:"export"`
 	ExportDir    string              `json:"exportDir"`              // where videos are exported, when not to the resource folder
 	ExportBeside bool                `json:"exportBeside,omitempty"` // videos are exported beside their originals
@@ -72,7 +73,7 @@ const maxExportRecords = 200
 func (a *App) settingsPath() string { return filepath.Join(a.stateDir, "settings.json") }
 
 func defaultSettings() settings {
-	return settings{Language: English, Export: project.Export{Quality: project.Balanced}, MCP: true, Record: defaultRecordSettings(), Live: defaultLiveSettings(), Camera: defaultCameraSettings(), Hotkeys: defaultHotkeys(), Paint: defaultPaintSettings(), Updates: updateSettings{Daily: true}, Player: playerSettings{Volume: 1}}
+	return settings{Language: English, Theme: ThemeSystem, Export: project.Export{Quality: project.Balanced}, MCP: true, Record: defaultRecordSettings(), Live: defaultLiveSettings(), Camera: defaultCameraSettings(), Hotkeys: defaultHotkeys(), Paint: defaultPaintSettings(), Updates: updateSettings{Daily: true}, Player: playerSettings{Volume: 1}}
 }
 
 func (a *App) loadSettings() {
@@ -92,6 +93,9 @@ func (a *App) loadSettings() {
 	}
 	if !slices.Contains(languages, s.Language) {
 		s.Language = English
+	}
+	if !slices.Contains(themes, s.Theme) {
+		s.Theme = ThemeSystem
 	}
 	a.settings = s
 }
@@ -138,6 +142,51 @@ func (a *App) setLanguage(l Language) {
 	a.u.lang = l
 	a.host.SetTitle(a.Title())
 	a.saveSettings()
+}
+
+// setTheme switches the interface colour scheme and remembers the choice.
+func (a *App) setTheme(t Theme) {
+	if !slices.Contains(themes, t) {
+		t = ThemeSystem
+	}
+	a.settings.Theme = t
+	a.syncTheme()
+	a.saveSettings()
+}
+
+// systemDark reports whether the OS is currently in dark mode; hosts without theme support default to dark.
+func (a *App) systemDark() bool {
+	if th, ok := a.host.(themeHost); ok {
+		return th.SystemDark()
+	}
+	return true
+}
+
+// effectiveDark reports whether the interface should currently render in dark mode.
+func (a *App) effectiveDark() bool {
+	switch a.settings.Theme {
+	case ThemeLight:
+		return false
+	case ThemeDark:
+		return true
+	default:
+		return a.systemDark()
+	}
+}
+
+// syncTheme aligns the active palette and native window appearance with the current setting and OS preference.
+func (a *App) syncTheme() {
+	dark := a.effectiveDark()
+	if isDarkTheme() != dark {
+		applyTheme(dark)
+	}
+	if !a.themeSynced || a.themeDark != dark {
+		a.themeSynced, a.themeDark = true, dark
+		applyTheme(dark)
+		if th, ok := a.host.(themeHost); ok {
+			th.SetDark(dark)
+		}
+	}
 }
 
 // showPanel opens the side panel on a page, for actions whose result is edited there.

@@ -230,7 +230,7 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 	v.scrollY = min(max(v.scrollY, 0), max(content-area.H, 0))
 	v.scrollX = max(v.scrollX, 0)
 
-	u.c.Fill(r, gfx.Mix(colSurface, colBlack, 0.3))
+	u.c.Fill(r, colWell)
 	border := colBorder
 	if focused {
 		border = colAccent
@@ -262,10 +262,14 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 		ty := y + (lineH-f.Height())/2
 		numCol := colFaint
 		if i+1 == errLine {
-			u.c.Fill(gfx.Rect{X: r.X, Y: y, W: r.W, H: lineH}, gfx.Alpha(gfx.Hex(0xff6b68), 0.16))
+			u.c.Fill(gfx.Rect{X: r.X, Y: y, W: r.W, H: lineH}, gfx.Alpha(colDanger, 0.14))
 			numCol = colDangerText
 		} else if focused && i == caretLine {
-			u.c.Fill(gfx.Rect{X: area.X, Y: y, W: area.W + u.px(10), H: lineH}, gfx.Alpha(colSurfaceHi, 0.45))
+			lineHi := gfx.Alpha(colSurfaceHi, 0.45)
+			if !isDarkTheme() {
+				lineHi = gfx.Alpha(colSelected, 0.8)
+			}
+			u.c.Fill(gfx.Rect{X: area.X, Y: y, W: area.W + u.px(10), H: lineH}, lineHi)
 		}
 		num := strconv.Itoa(i + 1)
 		u.c.Text(f, r.X+gutter-pad-f.Measure(num), ty, num, numCol)
@@ -279,7 +283,11 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 				if sb > len(rs) {
 					x1 += f.Measure(" ")
 				}
-				u.c.Fill(gfx.Rect{X: x0, Y: y, W: max(x1-x0, u.px(2)), H: lineH}, gfx.Alpha(colAccent, 0.4))
+				selAlpha := float32(0.4)
+				if !isDarkTheme() {
+					selAlpha = 0.24
+				}
+				u.c.Fill(gfx.Rect{X: x0, Y: y, W: max(x1-x0, u.px(2)), H: lineH}, gfx.Alpha(colAccent, selAlpha))
 			}
 		}
 		u.drawCode(f, x, ty, rs)
@@ -292,7 +300,11 @@ func (u *ctx) codeBox(id string, r gfx.Rect, value *string, v *codeView, errLine
 	if content > area.H {
 		h := max(area.H*area.H/content, u.px(24))
 		y := area.Y + (area.H-h)*v.scrollY/(content-area.H)
-		u.c.Fill(gfx.Rect{X: r.Right() - u.px(6), Y: y, W: u.px(3), H: h}, colSurfaceHi)
+		thumb := colSurfaceHi
+		if !isDarkTheme() {
+			thumb = colBorderHi
+		}
+		u.c.Fill(gfx.Rect{X: r.Right() - u.px(6), Y: y, W: u.px(3), H: h}, thumb)
 	}
 	if focused {
 		if _, offers := v.offers(&u.edit); len(offers) > 0 {
@@ -321,7 +333,12 @@ func (u *ctx) drawOffers(f *gfx.Face, box gfx.Rect, x, y, lineH float32, offers 
 		top = max(y-h, box.Y)
 	}
 	panelBox := gfx.Rect{X: min(x, box.Right()-w-u.px(4)), Y: top, W: w, H: h}
-	u.c.Fill(panelBox, colPanel)
+	if !isDarkTheme() {
+		u.c.Fill(gfx.Rect{X: panelBox.X, Y: panelBox.Y + u.px(2), W: panelBox.W, H: panelBox.H}, colShadow)
+		u.c.Fill(panelBox, colSurface)
+	} else {
+		u.c.Fill(panelBox, colPanel)
+	}
 	u.c.Outline(panelBox, max(1, u.px(1)), colBorderHi)
 	for i, o := range shown {
 		row := gfx.Rect{X: panelBox.X, Y: top + float32(i)*rowH, W: w, H: rowH}
@@ -339,6 +356,9 @@ func (u *ctx) drawOffers(f *gfx.Face, box gfx.Rect, x, y, lineH float32, offers 
 // drawCode draws one line of JSON with strings, numbers and keywords coloured.
 func (u *ctx) drawCode(f *gfx.Face, x, y float32, rs []rune) {
 	str, num, word := gfx.Hex(0xb5e2a8), gfx.Hex(0xf2c879), gfx.Hex(0x8fc7ff)
+	if !isDarkTheme() {
+		str, num, word = gfx.Hex(0x15803d), gfx.Hex(0xb45309), gfx.Hex(0x1d4ed8)
+	}
 	i := 0
 	for i < len(rs) {
 		j, col := i+1, colText

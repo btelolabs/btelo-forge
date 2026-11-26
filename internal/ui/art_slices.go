@@ -310,7 +310,7 @@ func (a *App) drawSliceInfo() {
 	box := gfx.Rect{X: m.anchor.Right() - w, Y: m.anchor.Bottom() + u.px(4), W: w, H: h}
 	box.X = max(box.X, u.px(4))
 	box.Y = max(min(box.Y, a.screen.H-h-u.px(4)), u.px(4))
-	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, gfx.Alpha(colBlack, 0.35))
+	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, colShadow)
 	u.c.Fill(box, colSurface)
 	u.c.Outline(box, max(1, u.px(1)), colBorder)
 	x, y := box.X+pad, box.Y+pad

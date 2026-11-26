@@ -202,6 +202,12 @@ func TestUnpack(t *testing.T) {
 			t.Fatalf("%q was written outside the folder", name)
 		}
 	}
+	// Symlink pointing directly to ".." must also be refused.
+	badLink := filepath.Join(dir, "badlink.zip")
+	makeZip(t, badLink, map[string]string{"escape": ".."}, map[string]os.FileMode{"escape": os.ModeSymlink | 0o777})
+	if err := Unpack(badLink, filepath.Join(dir, "badlink-out")); err == nil {
+		t.Error("a symlink to .. was unpacked")
+	}
 }
 
 // write makes the files given by name under root.

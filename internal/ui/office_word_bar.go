@@ -373,7 +373,7 @@ func (e *wordEditor) drawPop() {
 		box = gfx.Rect{X: e.popAt.X, Y: e.popAt.Bottom() + u.px(2), W: cell*5 + pad*2, H: cell*4 + pad*2}
 	}
 	box.X = min(box.X, a.screen.W-box.W-u.px(4))
-	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, gfx.Alpha(colBlack, 0.35))
+	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, colShadow)
 	u.c.Fill(box, colSurface)
 	u.c.Outline(box, max(1, u.px(1)), colBorder)
 	if e.pop == "table" {

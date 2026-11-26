@@ -80,20 +80,20 @@ func (a *App) drawLiveStage(r gfx.Rect) {
 	// The state: live, starting or ending, or not live.
 	title := rectAt(in.X, in.Y, in.W, u.px(30))
 	u.label(u.bold(18), rectAt(title.X, title.Y, in.W/2, title.H), u.t("Live stream"), colText, 0)
-	badgeText, badgeCol := u.t("Not live"), colSurfaceHi
+	badgeText, badgeCol, badgeFg := u.t("Not live"), colSurfaceHi, colText
 	switch {
 	case l.stopping:
 		badgeText, badgeCol = u.t("Ending…"), colSurfaceHi
 	case l.starting:
 		badgeText, badgeCol = u.t("Starting…"), colSurfaceHi
 	case l.stream != nil:
-		badgeText, badgeCol = u.t("LIVE"), colDanger
+		badgeText, badgeCol, badgeFg = u.t("LIVE"), colDanger, colWhite
 	}
 	bf := u.bold(11)
 	bw := bf.Measure(badgeText) + u.px(20)
 	badge := rectAt(in.Right()-bw, title.Y+u.px(4), bw, u.px(22))
 	u.c.Fill(badge, badgeCol)
-	u.label(bf, badge, badgeText, colWhite, 0.5)
+	u.label(bf, badge, badgeText, badgeFg, 0.5)
 	if l.stream != nil {
 		u.label(u.bold(15), rectAt(badge.X-u.px(90), title.Y, u.px(82), title.H), shortClock(st.Elapsed.Seconds()), colText, 1)
 	}
@@ -131,7 +131,7 @@ func (a *App) drawLiveStage(r gfx.Rect) {
 	}
 	if caption != "" {
 		box := rectAt(pic.X+pic.W*0.15, pic.Y+pic.H/2-u.px(40), pic.W*0.7, u.px(80))
-		a.paragraphCentred(box, caption, 13, colDim)
+		a.paragraphCentred(box, caption, 13, darkPalette.dim)
 	}
 
 	// The figures, and the buttons.

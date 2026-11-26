@@ -102,6 +102,18 @@ func TestTheCameraOnTheScreen(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Skip(err) // no camera, or one in use
 	}
+	skipIfClosed := func() {
+		t.Helper()
+		if a.cam.bubble != nil {
+			return
+		}
+		reason := "camera could not be opened"
+		if len(a.toasts) > 0 {
+			reason = a.toasts[len(a.toasts)-1].text
+		}
+		t.Skip(reason)
+	}
+	skipIfClosed()
 	if !a.settings.Camera.On {
 		t.Error("the camera being shown is not remembered")
 	}
@@ -109,13 +121,17 @@ func TestTheCameraOnTheScreen(t *testing.T) {
 		t.Helper()
 		var img *image.RGBA
 		x.pump(20*time.Second, func() bool {
-			_, img, _ = x.bubbleShown()
 			b := a.cam.bubble
+			if b == nil {
+				return true
+			}
+			_, img, _ = x.bubbleShown()
 			b.mu.Lock()
 			fresh := b.lastAt == size
 			b.mu.Unlock()
 			return img != nil && img.Rect.Size() == size && fresh
 		})
+		skipIfClosed()
 		_, img, _ = x.bubbleShown()
 		if img == nil || img.Rect.Size() != size {
 			t.Fatalf("%s: the window shows %v, want %v", what, img.Rect, size)

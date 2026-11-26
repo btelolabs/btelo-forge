@@ -179,8 +179,45 @@ func (l *fillLevel) sourcesOf() int {
 // distance is how unlike the patches at two centres are, giving up past limit. Only every other pixel is compared:
 // it costs half and finds the same patches.
 func (l *fillLevel) distance(ax, ay, bx, by int, limit float32) float32 {
-	var sum float32
 	w := l.w
+	pix := l.pix
+	if ax >= patchRadius && ax < w-patchRadius && ay >= patchRadius && ay < l.h-patchRadius {
+		// Fast interior path for patchRadius == 3: zero bounds checks per pixel.
+		var sum float32
+		offA := ((ay-3)*w + ax) * 4
+		offB := ((by-3)*w + bx) * 4
+		stride := w * 4
+		for j := 0; j < 7; j++ {
+			if j&1 == 0 {
+				pa := pix[offA-12 : offA+15 : offA+15]
+				pb := pix[offB-12 : offB+15 : offB+15]
+				d0, d1, d2 := pa[0]-pb[0], pa[1]-pb[1], pa[2]-pb[2]
+				sum += d0*d0 + d1*d1 + d2*d2
+				d0, d1, d2 = pa[8]-pb[8], pa[9]-pb[9], pa[10]-pb[10]
+				sum += d0*d0 + d1*d1 + d2*d2
+				d0, d1, d2 = pa[16]-pb[16], pa[17]-pb[17], pa[18]-pb[18]
+				sum += d0*d0 + d1*d1 + d2*d2
+				d0, d1, d2 = pa[24]-pb[24], pa[25]-pb[25], pa[26]-pb[26]
+				sum += d0*d0 + d1*d1 + d2*d2
+			} else {
+				pa := pix[offA-8 : offA+11 : offA+11]
+				pb := pix[offB-8 : offB+11 : offB+11]
+				d0, d1, d2 := pa[0]-pb[0], pa[1]-pb[1], pa[2]-pb[2]
+				sum += d0*d0 + d1*d1 + d2*d2
+				d0, d1, d2 = pa[8]-pb[8], pa[9]-pb[9], pa[10]-pb[10]
+				sum += d0*d0 + d1*d1 + d2*d2
+				d0, d1, d2 = pa[16]-pb[16], pa[17]-pb[17], pa[18]-pb[18]
+				sum += d0*d0 + d1*d1 + d2*d2
+			}
+			if sum >= limit {
+				return sum
+			}
+			offA += stride
+			offB += stride
+		}
+		return sum
+	}
+	var sum float32
 	for j := -patchRadius; j <= patchRadius; j++ {
 		y0, y1 := ay+j, by+j
 		if y0 < 0 || y0 >= l.h {
@@ -191,8 +228,8 @@ func (l *fillLevel) distance(ax, ay, bx, by int, limit float32) float32 {
 			if x0 < 0 || x0 >= w {
 				continue
 			}
-			a := l.pix[(y0*w+x0)*4:][:3]
-			b := l.pix[(y1*w+bx+i)*4:][:3]
+			a := pix[(y0*w+x0)*4:][:3]
+			b := pix[(y1*w+bx+i)*4:][:3]
 			d0, d1, d2 := a[0]-b[0], a[1]-b[1], a[2]-b[2]
 			sum += d0*d0 + d1*d1 + d2*d2
 		}

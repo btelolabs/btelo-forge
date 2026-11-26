@@ -65,6 +65,13 @@ type session struct {
 	done     chan struct{}
 	current  Frame
 	pending  *Frame
+
+	// Smooth interpolation between coarse audio-buffer position updates so high-FPS video (e.g. 60 fps)
+	// does not jump by multiple frames per audio quantum.
+	clockMu    sync.Mutex
+	lastPlayed int64
+	lastTick   time.Time
+	lastPos    float64
 }
 
 // source is what a player plays: the edited timeline, or a file as it is.
@@ -225,12 +232,17 @@ func (pl *Player) decode(ctx context.Context, src source, s *session, w, h int) 
 		})
 	}
 	defer start()
+	var reuse *image.RGBA
 	for k := 0; ; k++ {
-		img := image.NewRGBA(image.Rect(0, 0, w, h))
+		img := reuse
+		if img == nil {
+			img = image.NewRGBA(image.Rect(0, 0, w, h))
+		}
 		if _, err := io.ReadFull(r, img.Pix); err != nil {
 			return nil
 		}
 		if k == 0 {
+			reuse = nil
 			select {
 			case s.frames <- Frame{Image: img, T: s.from}:
 			case <-ctx.Done():
@@ -242,8 +254,10 @@ func (pl *Player) decode(ctx context.Context, src source, s *session, w, h int) 
 		}
 		t := s.from + float64(k)/s.rate*s.speed
 		if now, ok := pl.Position(); ok && t < now-2*s.speed/s.rate {
+			reuse = img // dropped before leaving decode: reuse buffer without reallocating
 			continue
 		}
+		reuse = nil
 		select {
 		case s.frames <- Frame{Image: img, T: t}:
 			// The UI is told only when this picture may be the one it waits for; ones decoded ahead it finds by Due.
@@ -298,7 +312,25 @@ func (pl *Player) Position() (float64, bool) {
 		return s.from, true
 	}
 	if s.audio != nil {
-		t = s.from + float64(s.audio.Played())/wave.Rate*s.speed
+		played := s.audio.Played()
+		now := time.Now()
+		s.clockMu.Lock()
+		if played <= 0 {
+			t = s.from
+		} else {
+			if played > s.lastPlayed {
+				s.lastPlayed = played
+				s.lastTick = now
+			}
+			dt := min(max(now.Sub(s.lastTick).Seconds(), 0), 0.06)
+			t = s.from + (float64(s.lastPlayed)/wave.Rate+dt)*s.speed
+			if t < s.lastPos {
+				t = s.lastPos
+			} else {
+				s.lastPos = t
+			}
+		}
+		s.clockMu.Unlock()
 	} else {
 		pl.mu.Lock()
 		started := s.started

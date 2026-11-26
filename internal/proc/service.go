@@ -99,6 +99,7 @@ func StartAs(label, program string, args func(port int) ([]string, error)) (*Ser
 	register(Entry{Pid: pid, Program: program, Label: label, Started: time.Now()})
 	go func() {
 		cmd.Wait()
+		unbind(pid)
 		unregister(pid)
 		close(s.Exited)
 	}()

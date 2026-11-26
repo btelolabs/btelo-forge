@@ -429,22 +429,33 @@ func TestReadHeadAndFindRepo(t *testing.T) {
 
 func TestDrivesHoldTheSystemDrive(t *testing.T) {
 	ds := Drives()
-	if runtime.GOOS != "windows" {
-		if len(ds) != 0 {
-			t.Errorf("drives listed off Windows: %v", ds)
-		}
-		return
-	}
-	sys := filepath.VolumeName(os.Getenv("SystemRoot"))
-	for _, d := range ds {
-		if d.Name == sys {
-			if d.Total <= 0 || d.Free <= 0 || d.Free > d.Total || d.Path != sys+`\` {
-				t.Errorf("the system drive reads as %+v", d)
+	switch runtime.GOOS {
+	case "windows":
+		sys := filepath.VolumeName(os.Getenv("SystemRoot"))
+		for _, d := range ds {
+			if d.Name == sys {
+				if d.Total <= 0 || d.Free <= 0 || d.Free > d.Total || d.Path != sys+`\` {
+					t.Errorf("the system drive reads as %+v", d)
+				}
+				return
 			}
-			return
+		}
+		t.Errorf("%s is not among %v", sys, ds)
+	case "darwin":
+		for _, d := range ds {
+			if d.Path == "/" {
+				if d.Name == "" || d.Total <= 0 || d.Free <= 0 || d.Free > d.Total {
+					t.Errorf("the root volume reads as %+v", d)
+				}
+				return
+			}
+		}
+		t.Errorf("root volume / is not among %v", ds)
+	default:
+		if len(ds) != 0 {
+			t.Errorf("drives listed off Windows/macOS: %v", ds)
 		}
 	}
-	t.Errorf("%s is not among %v", sys, ds)
 }
 
 // A folder of thousands of folders finds each by name at once, as the file system compares names, and keeps finding

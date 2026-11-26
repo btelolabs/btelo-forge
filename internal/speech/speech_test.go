@@ -312,17 +312,24 @@ func TestConfigErrorsArePrecise(t *testing.T) {
 			t.Errorf("want an error about %q, got %v", want, err)
 		}
 	}
-	if runtime.GOOS != "windows" {
-		return
-	}
 	c := DefaultConfig()
 	qwen, _ := c.Model("qwen3-design-q8_0")
 	breeze, _ := c.Model("breeze-q4_k")
-	if e, ok := c.Engine(qwen, "breeze-vulkan"); !ok || e.API != APIAudioCPP {
-		t.Errorf("Qwen3 got engine %+v", e)
-	}
-	if e, ok := c.Engine(breeze, ""); !ok || e.ID != "breeze-vulkan" {
-		t.Errorf("Breeze got engine %+v", e)
+	switch runtime.GOOS {
+	case "windows":
+		if e, ok := c.Engine(qwen, "breeze-vulkan"); !ok || e.API != APIAudioCPP {
+			t.Errorf("Qwen3 got engine %+v", e)
+		}
+		if e, ok := c.Engine(breeze, ""); !ok || e.ID != "breeze-vulkan" {
+			t.Errorf("Breeze got engine %+v", e)
+		}
+	case "darwin":
+		if e, ok := c.Engine(qwen, "breeze-installed"); !ok || e.API != APIAudioCPP || e.URL == "" {
+			t.Errorf("Qwen3 on macOS got engine %+v", e)
+		}
+		if e, ok := c.Engine(breeze, ""); !ok || e.ID != "breeze-installed" {
+			t.Errorf("Breeze on macOS got engine %+v", e)
+		}
 	}
 }
 

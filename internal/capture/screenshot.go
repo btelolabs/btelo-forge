@@ -23,8 +23,12 @@ func GrabScreenshot(ctx context.Context, d Display, region image.Rectangle, curs
 		return nil, ErrUnsupported
 	}
 	area := evenArea(d, region)
-	if img, err := grabScreen(d, area, cursor, flush); err == nil {
+	img, err := grabScreen(d, area, cursor, flush)
+	if err == nil {
 		return img, nil
+	}
+	if !canFFmpegScreenshot() {
+		return nil, err
 	}
 	tmp, err := os.CreateTemp("", "forge-screenshot-*.png")
 	if err != nil {
@@ -63,8 +67,12 @@ func Screenshot(ctx context.Context, d Display, region image.Rectangle, cursor b
 		return err
 	}
 	area := evenArea(d, region)
-	if img, err := grabScreen(d, area, cursor, false); err == nil {
+	img, err := grabScreen(d, area, cursor, false)
+	if err == nil {
 		return WritePNG(path, img, false)
+	}
+	if !canFFmpegScreenshot() {
+		return err
 	}
 	return ffmpegScreenshot(ctx, d, region, cursor, path)
 }

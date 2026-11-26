@@ -845,7 +845,7 @@ func (e *pdfEditor) drawSaveAs() {
 	s := e.saveAs
 	w := min(u.px(440), e.area.W-u.px(20))
 	r := gfx.Rect{X: e.area.X + (e.area.W-w)/2, Y: e.area.Y + u.px(40), W: w, H: u.px(172)}
-	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, gfx.Alpha(colBlack, 0.4))
+	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, colShadow)
 	u.c.Fill(r, colPanel)
 	u.c.Outline(r, max(1, u.px(1)), colBorderHi)
 	in := r.Inset(u.px(14))

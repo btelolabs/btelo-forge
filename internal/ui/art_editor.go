@@ -836,7 +836,7 @@ func (a *App) drawTipShape() {
 	u := &a.u
 	b := &a.brush
 	box := gfx.Rect{X: m.anchor.X, Y: m.anchor.Bottom() + u.px(4), W: u.px(300), H: u.px(376)}
-	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, gfx.Alpha(colBlack, 0.35))
+	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, colShadow)
 	u.c.Fill(box, colSurface)
 	u.c.Outline(box, max(1, u.px(1)), colBorder)
 	in := box.Inset(u.px(14))
@@ -911,9 +911,16 @@ func (a *App) drawTipPreview(r gfx.Rect) {
 			if c <= 0 || !(image.Point{x, y}).In(img.Rect) {
 				continue
 			}
-			v := uint8(c * 230)
-			if old := img.RGBAAt(x, y); v > old.R {
-				img.SetRGBA(x, y, color.RGBA{v, v, v, 255})
+			if isDarkTheme() {
+				v := uint8(c * 230)
+				if old := img.RGBAAt(x, y); v > old.R {
+					img.SetRGBA(x, y, color.RGBA{v, v, v, 255})
+				}
+			} else {
+				old := img.RGBAAt(x, y)
+				k := float32(c)
+				mix := func(o, t uint8) uint8 { return uint8(float32(o)*(1-k) + float32(t)*k) }
+				img.SetRGBA(x, y, color.RGBA{mix(old.R, colText.R), mix(old.G, colText.G), mix(old.B, colText.B), 255})
 			}
 		}
 	}

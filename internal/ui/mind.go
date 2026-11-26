@@ -103,6 +103,9 @@ func (a *App) newMindMap() error {
 		return err
 	}
 	m := mind.New(strings.TrimSuffix(filepath.Base(path), mind.Ext), a.mindMeasure())
+	if !isDarkTheme() {
+		m.SetTheme("paper")
+	}
 	id, err := m.Add(mind.Node{Text: a.u.t("Central topic")}, 0, -1)
 	if err != nil {
 		return err

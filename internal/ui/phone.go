@@ -9,7 +9,14 @@ import (
 
 // phoneSite is what the phone page shows and where its uploads go.
 func (a *App) phoneSite() web.Site {
-	return web.Site{Files: a.phoneFiles, Text: a.phoneText, UploadDir: a.phoneUploadDir, Received: a.phoneReceived, Logo: logoJPEG}
+	return web.Site{Files: a.phoneFiles, Text: a.phoneText, Theme: a.phoneTheme, UploadDir: a.phoneUploadDir, Received: a.phoneReceived, Logo: logoJPEG}
+}
+
+func (a *App) phoneTheme() string {
+	theme, _ := call(a, func() (string, error) {
+		return string(a.settings.Theme), nil
+	})
+	return theme
 }
 
 // phoneFiles runs on a server goroutine, so it asks the UI goroutine for the list.

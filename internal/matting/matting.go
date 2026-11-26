@@ -30,15 +30,27 @@ type network interface {
 var (
 	mean = [3]float32{0.485, 0.456, 0.406}
 	std  = [3]float32{0.229, 0.224, 0.225}
+	norm = func() (t [3][256]float32) {
+		for c := range 3 {
+			for v := range 256 {
+				t[c][v] = (float32(v)/255 - mean[c]) / std[c]
+			}
+		}
+		return
+	}()
 )
 
 // tensor is rgb as the model takes it: three planes.
 func tensor(rgb []byte) []float32 {
-	out := make([]float32, 3*Side*Side)
-	for i := range Side * Side {
-		for c := range 3 {
-			out[c*Side*Side+i] = (float32(rgb[3*i+c])/255 - mean[c]) / std[c]
-		}
+	const plane = Side * Side
+	out := make([]float32, 3*plane)
+	rOut, gOut, bOut := out[:plane], out[plane:2*plane], out[2*plane:]
+	rLut, gLut, bLut := &norm[0], &norm[1], &norm[2]
+	for i := range plane {
+		j := i * 3
+		rOut[i] = rLut[rgb[j]]
+		gOut[i] = gLut[rgb[j+1]]
+		bOut[i] = bLut[rgb[j+2]]
 	}
 	return out
 }

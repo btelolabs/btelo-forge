@@ -54,6 +54,7 @@ const (
 	wmClose         = 0x0010
 	wmQuit          = 0x0012
 	wmEraseBkgnd    = 0x0014
+	wmSettingChange = 0x001a
 	wmSetCursor     = 0x0020
 	wmGetMinMaxInfo = 0x0024
 	styleWindow     = 0x00CF0000 // WS_OVERLAPPEDWINDOW
@@ -97,6 +98,8 @@ type Window struct {
 	imeFace  string
 	imeShown logFont // the font the input method has
 	cursor   Cursor
+	dark     bool
+	darkSet  bool
 	minSize  [2]int32
 	bgra     []byte
 	hotkeys  []Hotkey      // registered with SetHotkeys, by id less one
@@ -222,6 +225,9 @@ func windowProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		case wmApp:
 			w.input.Woken = true
 			return 0
+		case wmSettingChange:
+			w.input.Woken = true
+			w.Wake()
 		case wmCopyData:
 			if w.takeForwarded(lp) {
 				return 1

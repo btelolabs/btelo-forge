@@ -195,28 +195,56 @@ func (d *Doc) MaskGradient(g Gradient) error {
 
 // source is the gradient as paintArea's colour at each pixel.
 func (g Gradient) source() func(x, y int) ([4]uint32, uint32) {
-	op := min(max(g.Opacity, 0), 1)
+	op := uint32(math.Round(min(max(g.Opacity, 0), 1) * 255))
+	fx, fy := g.From[0], g.From[1]
+	dx, dy := g.To[0]-fx, g.To[1]-fy
+	length2 := dx*dx + dy*dy
+	invLen2 := 1 / length2
+	l := math.Sqrt(length2)
+	invL := 1 / l
+	ux, uy := dx*invL, dy*invL
+	baseAngle := math.Atan2(dy, dx)
+	const invTwoPi = 1 / (2 * math.Pi)
+
 	s, e := g.Start, g.End
+	sr, sg, sb, sa := float64(s.R), float64(s.G), float64(s.B), float64(s.A)
+	dr, dg, db, da := float64(e.R)-sr, float64(e.G)-sg, float64(e.B)-sb, float64(e.A)-sa
+	kind, rev, dither := g.Kind, g.Reverse, g.Dither
+
 	return func(x, y int) ([4]uint32, uint32) {
-		t := g.At(float64(x)+0.5, float64(y)+0.5)
-		mix := func(a, b uint8) float64 { return float64(a) + (float64(b)-float64(a))*t }
-		alpha := mix(s.A, e.A)
-		var c [4]float64
-		// Colours blend unpremultiplied, so a fade to transparency keeps its colour.
-		c[0], c[1], c[2], c[3] = mix(s.R, e.R), mix(s.G, e.G), mix(s.B, e.B), alpha
+		px, py := float64(x)+0.5-fx, float64(y)+0.5-fy
+		var t float64
+		switch kind {
+		case GradientRadial:
+			t = math.Sqrt((px*px + py*py) * invLen2)
+		case GradientAngle:
+			a := math.Atan2(py, px) - baseAngle
+			t = math.Mod(a*invTwoPi+1, 1)
+		case GradientReflected:
+			t = math.Abs((px*dx + py*dy) * invLen2)
+		case GradientDiamond:
+			t = (math.Abs(px*ux+py*uy) + math.Abs(-px*uy+py*ux)) * invL
+		default:
+			t = (px*dx + py*dy) * invLen2
+		}
+		if t < 0 {
+			t = 0
+		} else if t > 1 {
+			t = 1
+		}
+		if rev {
+			t = 1 - t
+		}
 		jitter := 0.5
-		if g.Dither {
+		if dither {
 			jitter = (bayer4[y&3][x&3] + 0.5) / 16
 		}
-		var out [4]uint32
-		a := math.Floor(c[3] + jitter)
-		for ch := range 3 {
-			out[ch] = uint32(math.Floor(c[ch]*a/255 + jitter))
-		}
-		out[3] = uint32(a)
-		for ch := range 3 {
-			out[ch] = min(out[ch], out[3])
-		}
-		return out, uint32(math.Round(op * 255))
+		a := math.Floor(sa + da*t + jitter)
+		af := a / 255
+		r0 := uint32(math.Floor((sr+dr*t)*af + jitter))
+		g0 := uint32(math.Floor((sg+dg*t)*af + jitter))
+		b0 := uint32(math.Floor((sb+db*t)*af + jitter))
+		a0 := uint32(a)
+		return [4]uint32{min(r0, a0), min(g0, a0), min(b0, a0), a0}, op
 	}
 }

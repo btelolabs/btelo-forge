@@ -9,7 +9,7 @@ struct Frame {
   sun_color: vec4<f32>,
   sh: array<vec4<f32>, 9>,
   options: vec4<f32>,   // the view mode, the sky's rotation as cos and sin, how far the ground is below
-  wire: vec4<f32>,      // w: how strongly the ground's grid shows
+  wire: vec4<f32>,      // x: 1 for light studio backdrop, w: how strongly the ground's grid shows
   grid: vec4<f32>,      // cell size, the distance it fades at, the shadow map's texel, whether the sky shows
   pixel: vec4<f32>,     // the size of a pixel in clip space, and the pixels of a line's unit of width
 };
@@ -111,12 +111,6 @@ fn in_shadow(world: vec3<f32>, n: vec3<f32>) -> f32 {
   let uv = vec2<f32>(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
   // Ground reached by a long shadow from a low sun can lie past the map's far end, and is behind what the map holds.
   let depth = min(p.z, 0.9999);
-  // Ground reached by a long shadow from a low sun can lie past the map's far end, and is behind what the map holds.
-  let depth = min(p.z, 0.9999);
-  // Ground reached by a long shadow from a low sun can lie past the map's far end, and is behind what the map holds.
-  let depth = min(p.z, 0.9999);
-  // Ground reached by a long shadow from a low sun can lie past the map's far end, and is behind what the map holds.
-  let depth = min(p.z, 0.9999);
   var lit = 0.0;
   for (var y = -1; y <= 1; y = y + 1) {
     for (var x = -1; x <= 1; x = x + 1) {
@@ -147,6 +141,9 @@ fn vs_sky(@builtin(vertex_index) i: u32) -> SkyOut {
 fn fs_sky(i: SkyOut) -> @location(0) vec4<f32> {
   if (frame.grid.w < 0.5) {
     let t = clamp(i.ndc.y * 0.5 + 0.5, 0.0, 1.0);
+    if (frame.wire.x > 0.5) {
+      return vec4<f32>(mix(vec3<f32>(0.76, 0.78, 0.82), vec3<f32>(0.90, 0.91, 0.94), t), 1.0);
+    }
     return vec4<f32>(mix(vec3<f32>(0.075, 0.08, 0.09), vec3<f32>(0.16, 0.17, 0.19), t), 1.0);
   }
   let far = frame.inverse * vec4<f32>(i.ndc, 1.0, 1.0);
@@ -342,7 +339,11 @@ fn fs_ground(i: GroundOut) -> @location(0) vec4<f32> {
   if (alpha <= 0.002) {
     discard;
   }
-  let color = (vec3<f32>(0.75, 0.78, 0.82) * grid) / max(alpha, 0.002);
+  var line_color = vec3<f32>(0.75, 0.78, 0.82);
+  if (frame.grid.w < 0.5 && frame.wire.x > 0.5) {
+    line_color = vec3<f32>(0.28, 0.32, 0.39);
+  }
+  let color = (line_color * grid) / max(alpha, 0.002);
   return vec4<f32>(color, alpha);
 }
 

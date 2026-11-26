@@ -178,8 +178,8 @@ func CheckEngines(engines []Engine) error {
 			return fmt.Errorf("%s: give url or commands / paths, not both", where)
 		case e.URL != "" && e.Executable == "":
 			return fmt.Errorf("%s: executable (the program inside the zip) is missing", where)
-		case e.URL != "" && !strings.HasSuffix(strings.ToLower(urlPath(e.URL)), ".zip") && !strings.HasSuffix(strings.ToLower(urlPath(e.URL)), ".whl"):
-			return fmt.Errorf("%s: url must point to a .zip archive", where)
+		case e.URL != "" && !isSupportedArchive(urlPath(e.URL)):
+			return fmt.Errorf("%s: url must point to a .zip, .whl or .tar.gz archive", where)
 		case e.Executable != "" && !insideArchive(e.Executable):
 			return fmt.Errorf("%s: executable must be a file name, or a path with forward slashes inside the archive", where)
 		case e.Size < 0:
@@ -304,7 +304,7 @@ const FormatGuide = `Subtitle models configuration (JSON)
 
 engines  whisper.cpp command-line programs; only those whose os and arch match this computer are offered
          (os: windows, darwin; arch: amd64, arm64; leave out for any).
-         Downloaded: {"id", "name", "note", "url": a .zip archive (or a Python wheel, which is one), "size": bytes (for progress), "sha256": optional
+         Downloaded: {"id", "name", "note", "url": a .zip, .tar.gz/.tgz or .whl archive, "size": bytes (for progress), "sha256": optional
          checksum of the archive, "executable": the program's file name at the top of the archive, or its path there with forward slashes (a folder holding
          everything is looked inside)}. Each url gets its own folder, so a new version downloads anew.
          Installed: {"id", "name", "note", "commands": names looked up on PATH, "paths": full paths to try,
@@ -320,6 +320,19 @@ arguments the command line of the engine. Placeholders: {model} model file, {aud
 progress  regular expression matched against the engine's error output; its one group is the percentage done.
 
 Names and notes are text or {"en": ..., "zh": ...}.`
+
+// isSupportedArchive reports whether path names an archive format Prepare can unpack.
+func isSupportedArchive(p string) bool {
+	lower := strings.ToLower(p)
+	return strings.HasSuffix(lower, ".zip") || strings.HasSuffix(lower, ".whl") ||
+		strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz")
+}
+
+// isTarGz reports whether path names a gzipped tar archive.
+func isTarGz(p string) bool {
+	lower := strings.ToLower(p)
+	return strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz")
+}
 
 // insideArchive reports whether a path of forward slashes stays within the folder it is taken from.
 func insideArchive(name string) bool {

@@ -46,6 +46,10 @@ func Cameras(ctx context.Context) ([]Camera, error) {
 	if !Supported() {
 		return nil, ErrUnsupported
 	}
+	return listCameras(ctx)
+}
+
+func listCamerasDShow(ctx context.Context) ([]Camera, error) {
 	out, err := dshowList(ctx, "-list_devices", "true", "-f", "dshow", "-i", "dummy")
 	if err != nil {
 		return nil, err
@@ -200,6 +204,10 @@ func StartCamera(o CameraOptions, frame func(rgba []byte)) (*CameraFeed, error) 
 	if o.Size.X <= 0 || o.Size.Y <= 0 {
 		return nil, errors.New("the camera's picture needs a size")
 	}
+	return startCameraPlatform(o, frame)
+}
+
+func startCameraDShow(o CameraOptions, frame func(rgba []byte)) (*CameraFeed, error) {
 	out, _ := dshowList(context.Background(), "-list_options", "true", "-f", "dshow", "-i", "video="+o.Camera.ID)
 	var tries [][]string
 	if mode, ok := chooseMode(parseModes(out), o.Size); ok {

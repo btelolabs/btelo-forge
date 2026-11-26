@@ -76,6 +76,8 @@ func (h winWindow) Reveal(path string) error   { return win.Reveal(path) }
 func (h winWindow) Launch(path string) error   { return win.Launch(path) }
 func (h winWindow) LaunchURL(url string) error { return win.LaunchURL(url) }
 func (h winWindow) Languages() []string        { return win.Languages() }
+func (h winWindow) SystemDark() bool           { return win.SystemDark() }
+func (h winWindow) SetDark(dark bool)          { h.w.SetDark(dark) }
 
 // OpenWebView opens the system's browser engine in the window, for mail.
 func (h winWindow) OpenWebView(dir string, wake func()) (ui.WebView, error) {

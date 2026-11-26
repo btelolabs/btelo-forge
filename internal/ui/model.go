@@ -108,6 +108,7 @@ type modelDoc struct {
 	paintStart    *modelPicture // waits to go to the card
 	thumb         *image.RGBA
 	thumbGeometry int
+	thumbDark     bool
 	material      int  // the material the panel shows, or -1
 	materialFor   int  // the object it was chosen for
 	materials     int  // counts changes to materials' numbers
@@ -219,7 +220,7 @@ func (a *App) openModelTab() {
 
 func (a *App) newModelDoc(path string) *modelDoc {
 	return &modelDoc{path: path, paintValue: .5, bone: -1, lastObject: -1, paintImage: -1, chosen: -1, materialFor: -1, material: 0, clip: -1, speed: 2, bounds: scene3d.EmptyBox(), cam: render3d.NewCamera(scene3d.EmptyBox()), exposure: 1, sky: a.models.skies.Skies[0].ID,
-		options: render3d.Options{Wireframe: true, Shadows: true, Grid: true, ShowSky: true, Exposure: 1}, stepped: time.Now()}
+		options: render3d.Options{Wireframe: true, Shadows: true, Grid: true, ShowSky: true, Light: !isDarkTheme(), Exposure: 1}, stepped: time.Now()}
 }
 
 // openModelFile opens a 3D file in a tab of its own, or brings forward the one that has it.
@@ -622,6 +623,7 @@ func (a *App) askModelFrame(md *modelDoc, w, h int) {
 	md.options.Exposure = float32(md.exposure)
 	md.options.SkyRotation = float32(md.turnSky) * 3.14159265 / 180
 	md.options.LineScale = a.u.px(1)
+	md.options.Light = !isDarkTheme()
 	options := md.options
 	options.Wireframe = md.options.Wireframe && md.edit == nil // while modelling the overlay shows the polygons
 	if options.View == render3d.ViewTraced {
@@ -743,7 +745,11 @@ func (a *App) drawModel(r gfx.Rect) {
 	a.drawModelOverlay(md, view)
 	if e := md.edit; e != nil && e.boxing && u.dragging("model/pick") {
 		box := rectAt(min(e.boxX, u.mx), min(e.boxY, u.my), max(u.mx-e.boxX, e.boxX-u.mx), max(u.my-e.boxY, e.boxY-u.my))
-		u.c.Outline(box, max(1, u.px(1)), colWhite)
+		boxCol := colWhite
+		if !isDarkTheme() {
+			boxCol = colAccent
+		}
+		u.c.Outline(box, max(1, u.px(1)), boxCol)
 	}
 }
 
@@ -794,6 +800,23 @@ func (a *App) drawModelOverlay(md *modelDoc, view gfx.Rect) {
 	if md.clip >= 0 {
 		view.H -= u.px(timelineHigh)
 	}
+	lightHUD := !isDarkTheme()
+	drawHint := func(box gfx.Rect, f *gfx.Face, text string, strong bool) {
+		bg, fg := colHintBack, colWhite
+		if isDarkTheme() && !strong {
+			fg = colText
+		} else if lightHUD {
+			bg, fg = gfx.Alpha(colPanel, 0.92), colDim
+			if strong {
+				fg = colText
+			}
+		}
+		u.c.Fill(box, bg)
+		if lightHUD {
+			u.c.Outline(box, max(1, u.px(1)), colBorder)
+		}
+		u.label(f, box, text, fg, .5)
+	}
 	if md.asset != nil {
 		text := u.t("Click chooses an object · G moves, R turns, T scales · X deletes · Tab edits it")
 		if md.edit != nil {
@@ -805,20 +828,17 @@ func (a *App) drawModelOverlay(md *modelDoc, view gfx.Rect) {
 		f := u.face(11.5)
 		text = f.Ellipsize(text, view.W-u.px(40))
 		hint := rectAt(view.X+u.px(10), view.Bottom()-u.px(58), f.Measure(text)+u.px(16), u.px(22))
-		u.c.Fill(hint, colHintBack)
-		u.label(f, hint, text, colText, .5)
+		drawHint(hint, f, text, false)
 	}
 	if typed := md.typedNow(); typed != "" {
 		f := u.bold(14)
 		box := rectAt(u.mx+u.px(16), u.my+u.px(16), f.Measure(typed)+u.px(16), u.px(26))
-		u.c.Fill(box, colHintBack)
-		u.label(f, box, typed, colWhite, .5)
+		drawHint(box, f, typed, true)
 	}
 	f := u.face(11.5)
 	text := f.Ellipsize(u.t("Right drag or C turns · Middle drag or Space moves · Wheel or Z zooms · WASD moves · F shows everything"), view.W-u.px(40))
 	hint := rectAt(view.X+u.px(10), view.Bottom()-u.px(32), f.Measure(text)+u.px(16), u.px(22))
-	u.c.Fill(hint, colHintBack)
-	u.label(f, hint, text, colText, .5)
+	drawHint(hint, f, text, false)
 }
 
 // drawModelPanel is what the tab offers beside the view: the file's buttons, and the rest behind tabs of its own.

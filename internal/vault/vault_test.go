@@ -12,7 +12,7 @@ func TestSealAndOpen(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if runtime.GOOS == "windows" && (!strings.HasPrefix(sealed, prefix) || len(secret) > 4 && strings.Contains(sealed, secret)) {
+		if (runtime.GOOS == "windows" || runtime.GOOS == "darwin") && (!strings.HasPrefix(sealed, prefix) || len(secret) > 4 && strings.Contains(sealed, secret)) {
 			t.Errorf("%q is written as %q", secret, sealed)
 		}
 		if got, err := Open(sealed); err != nil || got != secret {

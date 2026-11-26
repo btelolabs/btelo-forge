@@ -413,7 +413,7 @@ func (a *App) mindCovered(md *mindDoc, r, sr gfx.Rect) int {
 
 // floatPanel draws the background of a floating bar.
 func floatPanel(u *ctx, r gfx.Rect) {
-	u.c.RoundRect(r.Inset(-u.px(1)), u.px(10), gfx.Alpha(colBlack, 0.35))
+	u.c.RoundRect(r.Inset(-u.px(1)), u.px(10), colShadow)
 	u.c.RoundRect(r, u.px(9), colSurface)
 	u.c.RoundOutline(r, u.px(9), max(1, u.px(1)), colBorderHi)
 }

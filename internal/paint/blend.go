@@ -57,7 +57,56 @@ func blendPixels(dst, src *image.RGBA, r image.Rectangle, opacity float64, mode 
 		return
 	}
 	op := uint32(min(opacity, 1)*255 + 0.5)
+	if op == 0 {
+		return
+	}
 	normal := mode == BlendNormal || mode == BlendPassThrough
+	w := r.Dx()
+	if mask == nil && normal {
+		if op == 255 {
+			for y := r.Min.Y; y < r.Max.Y; y++ {
+				srow := src.Pix[src.PixOffset(r.Min.X, y):][:w*4]
+				drow := dst.Pix[dst.PixOffset(r.Min.X, y):][:w*4]
+				for o := 0; o < len(srow); o += 4 {
+					sa := uint32(srow[o+3])
+					if sa == 0 {
+						continue
+					}
+					if sa == 255 {
+						drow[o], drow[o+1], drow[o+2], drow[o+3] = srow[o], srow[o+1], srow[o+2], 255
+						continue
+					}
+					inv := 255 - sa
+					drow[o] = uint8(uint32(srow[o]) + mul8(uint32(drow[o]), inv))
+					drow[o+1] = uint8(uint32(srow[o+1]) + mul8(uint32(drow[o+1]), inv))
+					drow[o+2] = uint8(uint32(srow[o+2]) + mul8(uint32(drow[o+2]), inv))
+					drow[o+3] = uint8(sa + mul8(uint32(drow[o+3]), inv))
+				}
+			}
+			return
+		}
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			srow := src.Pix[src.PixOffset(r.Min.X, y):][:w*4]
+			drow := dst.Pix[dst.PixOffset(r.Min.X, y):][:w*4]
+			for o := 0; o < len(srow); o += 4 {
+				sa := uint32(srow[o+3])
+				if sa == 0 {
+					continue
+				}
+				s0, s1, s2, sa := mul8(uint32(srow[o]), op), mul8(uint32(srow[o+1]), op), mul8(uint32(srow[o+2]), op), mul8(sa, op)
+				inv := 255 - sa
+				drow[o] = uint8(s0 + mul8(uint32(drow[o]), inv))
+				drow[o+1] = uint8(s1 + mul8(uint32(drow[o+1]), inv))
+				drow[o+2] = uint8(s2 + mul8(uint32(drow[o+2]), inv))
+				drow[o+3] = uint8(sa + mul8(uint32(drow[o+3]), inv))
+			}
+		}
+		return
+	}
+	if mask == nil && (mode == BlendMultiply || mode == BlendScreen || mode == BlendDarken || mode == BlendLighten || mode == BlendDifference || mode == BlendExclusion) {
+		blendFastMode(dst, src, r, op, mode)
+		return
+	}
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		si := src.PixOffset(r.Min.X, y)
 		di := dst.PixOffset(r.Min.X, y)
@@ -87,7 +136,7 @@ func blendPixels(dst, src *image.RGBA, r image.Rectangle, opacity float64, mode 
 				}
 			}
 			if k == 255 && sa == 255 && normal {
-				copy(dst.Pix[di:di+4], src.Pix[si:si+4]) // opaque over anything is itself
+				dst.Pix[di], dst.Pix[di+1], dst.Pix[di+2], dst.Pix[di+3] = src.Pix[si], src.Pix[si+1], src.Pix[si+2], 255
 				continue
 			}
 			s0, s1, s2 := uint32(src.Pix[si]), uint32(src.Pix[si+1]), uint32(src.Pix[si+2])
@@ -103,6 +152,64 @@ func blendPixels(dst, src *image.RGBA, r image.Rectangle, opacity float64, mode 
 				continue
 			}
 			blendOne(dst.Pix[di:di+4], [4]uint32{s0, s1, s2, sa}, mode)
+		}
+	}
+}
+
+// blendFastMode composites premultiplied src onto dst with exact integer W3C math for common blend modes
+// (Multiply, Screen, Darken, Lighten, Difference, Exclusion), avoiding per-pixel float64 unpremultiplication.
+func blendFastMode(dst, src *image.RGBA, r image.Rectangle, op uint32, mode Blend) {
+	w := r.Dx()
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		srow := src.Pix[src.PixOffset(r.Min.X, y):][:w*4]
+		drow := dst.Pix[dst.PixOffset(r.Min.X, y):][:w*4]
+		for o := 0; o < len(srow); o += 4 {
+			sa := uint32(srow[o+3])
+			if sa == 0 {
+				continue
+			}
+			s0, s1, s2 := uint32(srow[o]), uint32(srow[o+1]), uint32(srow[o+2])
+			if op < 255 {
+				s0, s1, s2, sa = mul8(s0, op), mul8(s1, op), mul8(s2, op), mul8(sa, op)
+				if sa == 0 {
+					continue
+				}
+			}
+			da := uint32(drow[o+3])
+			if da == 0 {
+				drow[o], drow[o+1], drow[o+2], drow[o+3] = uint8(s0), uint8(s1), uint8(s2), uint8(sa)
+				continue
+			}
+			d0, d1, d2 := uint32(drow[o]), uint32(drow[o+1]), uint32(drow[o+2])
+			invS := 255 - sa
+			invD := 255 - da
+			switch mode {
+			case BlendMultiply:
+				drow[o] = uint8(min(mul8(s0, invD)+mul8(d0, invS)+mul8(s0, d0), 255))
+				drow[o+1] = uint8(min(mul8(s1, invD)+mul8(d1, invS)+mul8(s1, d1), 255))
+				drow[o+2] = uint8(min(mul8(s2, invD)+mul8(d2, invS)+mul8(s2, d2), 255))
+			case BlendScreen:
+				drow[o] = uint8(s0 + d0 - mul8(s0, d0))
+				drow[o+1] = uint8(s1 + d1 - mul8(s1, d1))
+				drow[o+2] = uint8(s2 + d2 - mul8(s2, d2))
+			case BlendDarken:
+				drow[o] = uint8(s0 + d0 - max(mul8(s0, da), mul8(d0, sa)))
+				drow[o+1] = uint8(s1 + d1 - max(mul8(s1, da), mul8(d1, sa)))
+				drow[o+2] = uint8(s2 + d2 - max(mul8(s2, da), mul8(d2, sa)))
+			case BlendLighten:
+				drow[o] = uint8(s0 + d0 - min(mul8(s0, da), mul8(d0, sa)))
+				drow[o+1] = uint8(s1 + d1 - min(mul8(s1, da), mul8(d1, sa)))
+				drow[o+2] = uint8(s2 + d2 - min(mul8(s2, da), mul8(d2, sa)))
+			case BlendDifference:
+				drow[o] = uint8(s0 + d0 - 2*min(mul8(s0, da), mul8(d0, sa)))
+				drow[o+1] = uint8(s1 + d1 - 2*min(mul8(s1, da), mul8(d1, sa)))
+				drow[o+2] = uint8(s2 + d2 - 2*min(mul8(s2, da), mul8(d2, sa)))
+			case BlendExclusion:
+				drow[o] = uint8(s0 + d0 - 2*mul8(s0, d0))
+				drow[o+1] = uint8(s1 + d1 - 2*mul8(s1, d1))
+				drow[o+2] = uint8(s2 + d2 - 2*mul8(s2, d2))
+			}
+			drow[o+3] = uint8(sa + mul8(da, invS))
 		}
 	}
 }

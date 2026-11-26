@@ -68,6 +68,7 @@ func worst(a, b *image.RGBA) (diff int, at image.Point) {
 
 func TestTheCardAndTheProcessorAgree(t *testing.T) {
 	card := New(gpuwgpu.Shared, &turn)
+	t.Cleanup(card.Close)
 	if _, err := card.with(func(*kit) (*image.RGBA, error) { return nil, nil }); err != nil {
 		t.Skip(err)
 	}
@@ -105,6 +106,7 @@ func TestTheCardAndTheProcessorAgree(t *testing.T) {
 
 func TestALargePictureGoesInPieces(t *testing.T) {
 	card := New(gpuwgpu.Shared, &turn)
+	t.Cleanup(card.Close)
 	if _, err := card.with(func(*kit) (*image.RGBA, error) { return nil, nil }); err != nil {
 		t.Skip(err)
 	}

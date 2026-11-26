@@ -283,20 +283,28 @@ type startExtra struct {
 	run             func()
 }
 
+// themeHex returns dark in Dark Mode and light in Light Mode.
+func themeHex(dark, light uint32) color.RGBA {
+	if isDarkTheme() {
+		return gfx.Hex(dark)
+	}
+	return gfx.Hex(light)
+}
+
 // startCards are the new tab's kinds of work, group by group.
 func (a *App) startCards() []startCard {
 	u := &a.u
 	recordHint := ""
 	if a.recorder() == nil {
-		recordHint = u.t("Screen recording works on Windows")
+		recordHint = u.t("Screen recording is not supported on this system")
 	} else if reason, _ := a.recordBlocker(); reason != "" {
 		recordHint = u.tf("Screen recording is not available: %s", reason)
 	}
 	cards := []startCard{
-		{id: "empty/resources", glyph: icFmFiles, hue: gfx.Hex(0xe8b75b), title: u.t("Manage resources"),
+		{id: "empty/resources", glyph: icFmFiles, hue: themeHex(0xe8b75b, 0xb87d14), title: u.t("Manage resources"),
 			text:   u.t("Browse, tag and sort files, and see what takes the space."),
 			action: u.t("Open the resource manager"), enabled: true, run: func() { a.openResourceManager() }},
-		{id: "empty/record", glyph: icRecord, hue: gfx.Hex(0xf0605d), title: u.t("Record the screen"),
+		{id: "empty/record", glyph: icRecord, hue: themeHex(0xf0605d, 0xd93b38), title: u.t("Record the screen"),
 			text:   u.t("The screen with sound and microphone, or a screenshot."),
 			action: u.t("Record…"), enabled: a.recorder() != nil && !a.recording() && a.export == nil, hint: recordHint,
 			run: a.openRecorder,
@@ -304,18 +312,18 @@ func (a *App) startCards() []startCard {
 				hint:    withKey(u.t("Take a screenshot of any screen"), a.hotkeyLabel(hotkeyScreenshotFile)),
 				enabled: a.recorder() != nil && !a.rec.shooting && a.over.pick == nil, run: func() { a.screenshotRegion(shotFile) }}},
 		a.liveCard(),
-		{id: "empty/keyboard", glyph: icKeyboard, hue: gfx.Hex(0x6fcf97), title: u.t("Remap the keyboard"),
+		{id: "empty/keyboard", glyph: icKeyboard, hue: themeHex(0x6fcf97, 0x1e9654), title: u.t("Remap the keyboard"),
 			text:   u.t("Remap keys, open programs and expand abbreviations."),
 			action: u.t("Open the keyboard tool"), enabled: true, run: a.openKeyboardTab},
 	}
 	for _, c := range []startCard{
-		{id: "empty/video", glyph: icVideo, hue: gfx.Hex(0x5aa9ff), title: u.t("Edit a video"),
+		{id: "empty/video", glyph: icVideo, hue: themeHex(0x5aa9ff, 0x2574db), title: u.t("Edit a video"),
 			text:   u.t("Cut, add music and subtitles, and export at any size."),
 			action: u.t("Start editing"), enabled: a.opening == "", run: a.newEditor},
-		{id: "empty/canvas", glyph: icBrush, hue: gfx.Hex(0xf2994a), title: u.t("Paint and draw"),
+		{id: "empty/canvas", glyph: icBrush, hue: themeHex(0xf2994a, 0xd46b15), title: u.t("Paint and draw"),
 			text:   u.t("Layers, brushes and vectors on an infinite canvas."),
 			action: u.t("New canvas"), enabled: true, run: a.newCanvasNow},
-		{id: "empty/mind", glyph: icMind, hue: gfx.Hex(0x4fb3ff), title: u.t("Think in mind maps"),
+		{id: "empty/mind", glyph: icMind, hue: themeHex(0x4fb3ff, 0x0e82cc), title: u.t("Think in mind maps"),
 			text:   u.t("Mind maps and flowcharts on one infinite board."),
 			action: u.t("New mind map"), enabled: true, run: a.newMindNow},
 		{id: "empty/model", glyph: icModel, hue: modelHue, title: u.t("Make 3D assets"),
@@ -330,10 +338,10 @@ func (a *App) startCards() []startCard {
 		cards = append(cards, c)
 	}
 	for _, c := range []startCard{
-		{id: "empty/ai", glyph: icAI, hue: gfx.Hex(0xb48cff), title: u.t("Local models"),
+		{id: "empty/ai", glyph: icAI, hue: themeHex(0xb48cff, 0x7c4dff), title: u.t("Local models"),
 			text:   u.t("Chat with AI models on this computer, or online."),
 			action: u.t("Open the chat"), enabled: true, run: a.openAITab},
-		{id: "empty/mail", glyph: icMail, hue: gfx.Hex(0x6aa9ff), title: u.t("Mail"),
+		{id: "empty/mail", glyph: icMail, hue: themeHex(0x6aa9ff, 0x3174db), title: u.t("Mail"),
 			text:   u.t("Bind your mailboxes and have a local model sort them."),
 			action: u.t("Open mail"), enabled: true, run: a.openMailTab},
 	} {
@@ -462,7 +470,11 @@ func (a *App) drawStartPage(r gfx.Rect, dy float32) float32 {
 		u.label(u.face(12), line, status, col, 0.5)
 		if a.tools.downloading {
 			bar := gfx.Rect{X: line.X + line.W/4, Y: line.Bottom() + u.px(8), W: line.W / 2, H: u.px(4)}
-			u.c.Fill(bar, colSurface)
+			track := colSurface
+			if !isDarkTheme() {
+				track = colBorder
+			}
+			u.c.Fill(bar, track)
 			u.c.Fill(gfx.Rect{X: bar.X, Y: bar.Y, W: max(bar.W*float32(a.tools.fraction), bar.H), H: bar.H}, colAccent)
 		}
 		bottom = line.Bottom() + u.px(12)
@@ -488,7 +500,11 @@ func (a *App) drawStartCard(c startCard, box gfx.Rect) {
 		u.cursor = CursorHand
 	}
 	if u.active == c.id && c.enabled {
-		bg = gfx.Mix(bg, colBlack, 0.12)
+		mix := float32(0.12)
+		if !isDarkTheme() {
+			mix = 0.06
+		}
+		bg = gfx.Mix(bg, colBlack, mix)
 	}
 	u.c.Fill(box, bg)
 	u.c.Outline(box, max(1, u.px(1)), edge)

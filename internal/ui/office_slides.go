@@ -68,6 +68,7 @@ type slidesBmpKey struct {
 	scale, ox, oy float64
 	w, h          int
 	lang          Language
+	dark          bool
 }
 
 // slideThumb is a slide's small picture.
@@ -501,15 +502,23 @@ func (e *slidesEditor) drawCanvas(r gfx.Rect) {
 	e.view = pptx.View{Scale: k, X: x, Y: y}
 	ax, ay := int(r.X), int(r.Y)
 	w, h := int(r.W), int(r.H)
-	key := slidesBmpKey{s.Part, s.Rev, k, x, y, w, h, u.lang}
+	key := slidesBmpKey{s.Part, s.Rev, k, x, y, w, h, u.lang, isDarkTheme()}
 	if key != e.bmpKey || e.bmp == nil {
 		if e.bmp == nil || e.bmp.Rect.Dx() != w || e.bmp.Rect.Dy() != h {
 			e.bmp = image.NewRGBA(image.Rect(0, 0, w, h))
 		}
 		c := gfx.Wrap(e.bmp)
-		c.Clear(colPanel)
-		c.Fill(gfx.Rect{X: float32(x) - float32(ax) + u.px(3), Y: float32(y) - float32(ay) + u.px(4), W: float32(pw), H: float32(ph)}, gfx.Alpha(colBlack, 0.4))
+		bg := colPanel
+		if !isDarkTheme() {
+			bg = colWell
+		}
+		c.Clear(bg)
+		slideRect := gfx.Rect{X: float32(x) - float32(ax), Y: float32(y) - float32(ay), W: float32(pw), H: float32(ph)}
+		c.Fill(gfx.Rect{X: slideRect.X + u.px(3), Y: slideRect.Y + u.px(4), W: slideRect.W, H: slideRect.H}, colShadow)
 		e.r.Slide(c, s, pptx.View{Scale: k, X: x - float64(ax), Y: y - float64(ay)}, pptx.Options{Prompts: true})
+		if !isDarkTheme() {
+			c.Outline(slideRect, max(1, u.px(1)), colBorder)
+		}
 		e.bmpKey = key
 	}
 	u.c.Blit(e.bmp, ax, ay, true)

@@ -291,29 +291,78 @@ func (f field) blurred(size float64) field {
 	w, h := f.r.Dx(), f.r.Dy()
 	a := append([]float64(nil), f.v...)
 	b := make([]float64, len(a))
-	pass := func(from, to []float64, n, lines, step, stride int) {
-		inv := 1 / float64(2*rad+1)
-		for line := range lines {
-			base := line * stride
-			at := func(i int) float64 {
-				if i < 0 || i >= n {
-					return 0 // beyond the working area nothing is covered
-				}
-				return from[base+i*step]
-			}
+	inv := 1 / float64(2*rad+1)
+	passH := func(from, to []float64) {
+		for y := range h {
+			src := from[y*w : y*w+w]
+			dst := to[y*w : y*w+w]
 			sum := 0.0
-			for i := -rad; i <= rad; i++ {
-				sum += at(i)
+			hi := min(rad, w-1)
+			for i := 0; i <= hi; i++ {
+				sum += src[i]
 			}
-			for i := range n {
-				to[base+i*step] = sum * inv
-				sum += at(i+rad+1) - at(i-rad)
+			midStart := min(rad+1, w)
+			midEnd := max(midStart, w-rad-1)
+			for i := 0; i < midStart; i++ {
+				dst[i] = sum * inv
+				if r := i + rad + 1; r < w {
+					sum += src[r]
+				}
+				if l := i - rad; l >= 0 {
+					sum -= src[l]
+				}
+			}
+			for i := midStart; i < midEnd; i++ {
+				dst[i] = sum * inv
+				sum += src[i+rad+1] - src[i-rad]
+			}
+			for i := midEnd; i < w; i++ {
+				dst[i] = sum * inv
+				if r := i + rad + 1; r < w {
+					sum += src[r]
+				}
+				if l := i - rad; l >= 0 {
+					sum -= src[l]
+				}
+			}
+		}
+	}
+	passV := func(from, to []float64) {
+		for x := range w {
+			sum := 0.0
+			hi := min(rad, h-1)
+			for i := 0; i <= hi; i++ {
+				sum += from[i*w+x]
+			}
+			midStart := min(rad+1, h)
+			midEnd := max(midStart, h-rad-1)
+			for i := 0; i < midStart; i++ {
+				to[i*w+x] = sum * inv
+				if r := i + rad + 1; r < h {
+					sum += from[r*w+x]
+				}
+				if l := i - rad; l >= 0 {
+					sum -= from[l*w+x]
+				}
+			}
+			for i := midStart; i < midEnd; i++ {
+				to[i*w+x] = sum * inv
+				sum += from[(i+rad+1)*w+x] - from[(i-rad)*w+x]
+			}
+			for i := midEnd; i < h; i++ {
+				to[i*w+x] = sum * inv
+				if r := i + rad + 1; r < h {
+					sum += from[r*w+x]
+				}
+				if l := i - rad; l >= 0 {
+					sum -= from[l*w+x]
+				}
 			}
 		}
 	}
 	for range 3 {
-		pass(a, b, w, h, 1, w)
-		pass(b, a, h, w, w, 1)
+		passH(a, b)
+		passV(b, a)
 	}
 	return field{r: f.r, v: a}
 }
@@ -379,18 +428,30 @@ func edt2(d []float64, w, h int) {
 // solidOf is the colour c laid where a covers, over r, premultiplied.
 func solidOf(c color.NRGBA, a field, r image.Rectangle) *image.RGBA {
 	img := image.NewRGBA(r)
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		for x := r.Min.X; x < r.Max.X; x++ {
-			k := min(max(a.at(x, y), 0), 1)
-			if k == 0 {
+	in := r.Intersect(a.r)
+	if in.Empty() || c.A == 0 {
+		return img
+	}
+	aw := a.r.Dx()
+	ca := float64(c.A) / 255
+	cr, cg, cb := float64(c.R)*ca, float64(c.G)*ca, float64(c.B)*ca
+	cal := 255 * ca
+	dx := in.Dx()
+	for y := in.Min.Y; y < in.Max.Y; y++ {
+		arow := a.v[(y-a.r.Min.Y)*aw+(in.Min.X-a.r.Min.X):][:dx]
+		drow := img.Pix[img.PixOffset(in.Min.X, y):][:dx*4]
+		for x, k := range arow {
+			if k <= 0 {
 				continue
 			}
-			i := img.PixOffset(x, y)
-			al := float64(c.A) / 255 * k
-			img.Pix[i] = uint8(math.Round(float64(c.R) * al))
-			img.Pix[i+1] = uint8(math.Round(float64(c.G) * al))
-			img.Pix[i+2] = uint8(math.Round(float64(c.B) * al))
-			img.Pix[i+3] = uint8(math.Round(255 * al))
+			if k > 1 {
+				k = 1
+			}
+			p := drow[x*4 : x*4+4 : x*4+4]
+			p[0] = uint8(cr*k + 0.5)
+			p[1] = uint8(cg*k + 0.5)
+			p[2] = uint8(cb*k + 0.5)
+			p[3] = uint8(cal*k + 0.5)
 		}
 	}
 	return img

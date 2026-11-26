@@ -2,9 +2,20 @@ package matting
 
 import (
 	"os"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestLoadReportsMissingLibrary(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		t.Skip("native ONNX Runtime loader is only implemented on Windows and macOS")
+	}
+	if _, err := load("/nonexistent/libonnxruntime.dylib", "/nonexistent/model.onnx"); err == nil || !strings.Contains(err.Error(), "loading ONNX Runtime") {
+		t.Fatalf("expected loading error, got %v", err)
+	}
+}
 
 func TestTheTensorIsNormalizedInPlanes(t *testing.T) {
 	rgb := make([]byte, 3*Side*Side)

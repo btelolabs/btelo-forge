@@ -263,7 +263,7 @@ func TestTheBuiltInImageModelsRunOnThisComputer(t *testing.T) {
 		if ch.Local.ImageSize == "" || ch.Local.Steps == 0 {
 			t.Errorf("%s has no size or steps of its own", id)
 		}
-		if _, ok := c.Engine(*ch.Local, ""); !ok && runtime.GOOS == "windows" && runtime.GOARCH == "amd64" { // sd-server's only builds in the list
+		if _, ok := c.Engine(*ch.Local, ""); !ok && ((runtime.GOOS == "windows" && runtime.GOARCH == "amd64") || runtime.GOOS == "darwin") {
 			t.Errorf("no engine runs %s here", id)
 		}
 	}

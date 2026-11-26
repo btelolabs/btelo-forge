@@ -27,7 +27,9 @@ func (a *App) survive(where string, onWindow bool) {
 
 // failed reports a failure, saves everything open and tells the user.
 func (a *App) failed(where string, r any, onWindow bool) {
-	path := a.writeCrash(where, r, debug.Stack())
+	stack := debug.Stack()
+	path := a.writeCrash(where, r, stack)
+	a.logError("panic", fmt.Sprintf("%s: %v (crash report: %s)\n%s", where, r, path, stack), nil)
 	tell := func() {
 		a.rescue()
 		a.toast(a.u.tf("Something went wrong (%s); your work was saved, and the details were kept in %s", fmt.Sprint(r), path), true)

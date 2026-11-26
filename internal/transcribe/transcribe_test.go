@@ -1,8 +1,10 @@
 package transcribe
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -205,6 +207,89 @@ func TestUnzipKeepsFoldersUnderOneTopFolder(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(dir, "evil.exe")); err == nil {
 			t.Errorf("%s escaped the folder", evil)
+		}
+	}
+}
+
+func TestUntarStripsTopFolderPreservesSymlinksAndRejectsTraversal(t *testing.T) {
+	type entry struct {
+		name   string
+		kind   byte
+		body   string
+		target string
+		mode   int64
+	}
+	writeTarGz := func(t *testing.T, entries ...entry) string {
+		t.Helper()
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gz)
+		for _, e := range entries {
+			mode := e.mode
+			if mode == 0 {
+				mode = 0o644
+			}
+			hdr := &tar.Header{Name: e.name, Typeflag: e.kind, Mode: mode, Size: int64(len(e.body)), Linkname: e.target}
+			if err := tw.WriteHeader(hdr); err != nil {
+				t.Fatal(err)
+			}
+			if e.kind == tar.TypeReg {
+				if _, err := tw.Write([]byte(e.body)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		tw.Close()
+		gz.Close()
+		p := filepath.Join(t.TempDir(), "engine.tar.gz")
+		if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	// Single top folder with executable + relative dylib symlink (llama.cpp layout)
+	dir1 := t.TempDir()
+	arch1 := writeTarGz(t,
+		entry{name: "llama-b12012/", kind: tar.TypeDir, mode: 0o755},
+		entry{name: "llama-b12012/llama-server", kind: tar.TypeReg, body: "bin", mode: 0o755},
+		entry{name: "llama-b12012/libllama.0.dylib", kind: tar.TypeReg, body: "lib", mode: 0o644},
+		entry{name: "llama-b12012/libllama.dylib", kind: tar.TypeSymlink, target: "libllama.0.dylib", mode: 0o777},
+	)
+	if err := untar(arch1, dir1); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(filepath.Join(dir1, "llama-server")); err != nil || (runtime.GOOS != "windows" && st.Mode()&0o111 == 0) {
+		t.Fatalf("llama-server mode: %v %v", st, err)
+	}
+	if got, err := os.Readlink(filepath.Join(dir1, "libllama.dylib")); err != nil || got != "libllama.0.dylib" {
+		t.Fatalf("symlink: %q %v", got, err)
+	}
+
+	// Leading "./" entries (audio.cpp layout)
+	dir2 := t.TempDir()
+	arch2 := writeTarGz(t,
+		entry{name: "./", kind: tar.TypeDir, mode: 0o755},
+		entry{name: "./audiocpp_server", kind: tar.TypeReg, body: "srv", mode: 0o755},
+		entry{name: "./tools/readme.txt", kind: tar.TypeReg, body: "hi", mode: 0o644},
+	)
+	if err := untar(arch2, dir2); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir2, "audiocpp_server")); err != nil || string(got) != "srv" {
+		t.Fatalf("audiocpp_server: %q %v", got, err)
+	}
+
+	// Path traversal and escaping symlink rejection
+	for _, bad := range []entry{
+		{name: "../escape", kind: tar.TypeReg, body: "x"},
+		{name: "ok/../../escape", kind: tar.TypeReg, body: "x"},
+		{name: "link", kind: tar.TypeSymlink, target: "../outside"},
+		{name: "abslink", kind: tar.TypeSymlink, target: "/etc/passwd"},
+	} {
+		dir := t.TempDir()
+		if err := untar(writeTarGz(t, bad), filepath.Join(dir, "in")); err == nil {
+			t.Errorf("evil entry %+v was accepted", bad)
 		}
 	}
 }

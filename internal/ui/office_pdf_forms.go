@@ -157,7 +157,7 @@ func (e *pdfEditor) drawSignPad() {
 	s := e.sign
 	w := min(u.px(460), e.area.W-u.px(20))
 	r := gfx.Rect{X: e.area.X + (e.area.W-w)/2, Y: e.area.Y + u.px(30), W: w, H: u.px(290)}
-	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, gfx.Alpha(colBlack, 0.4))
+	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, colShadow)
 	u.c.Fill(r, colPanel)
 	u.c.Outline(r, max(1, u.px(1)), colBorderHi)
 	in := r.Inset(u.px(14))
@@ -191,6 +191,9 @@ func (e *pdfEditor) drawSignPad() {
 			}
 		}
 		u.c.Pop()
+		if !isDarkTheme() {
+			u.c.Outline(pad, max(1, u.px(1)), colBorderHi)
+		}
 	} else {
 		u.textBox("office/pdf/sign/name", gfx.Rect{X: pad.X, Y: pad.Y, W: pad.W, H: u.px(34)}, &s.typed, u.t("Type your name"), false)
 	}

@@ -217,7 +217,7 @@ func Scan(ctx context.Context, root string, progress *ScanProgress) (*Node, erro
 		return nil, err
 	}
 	top := &Node{Name: root, Mod: info.ModTime(), At: time.Now()}
-	s := &scanner{ctx: ctx, progress: progress}
+	s := &scanner{ctx: ctx, root: root, progress: progress}
 	s.cond = sync.NewCond(&s.mu)
 	s.push(folder{node: top})
 	workers := 3 * runtime.GOMAXPROCS(0)
@@ -234,6 +234,7 @@ func Scan(ctx context.Context, root string, progress *ScanProgress) (*Node, erro
 // goes deep first and the list of folders waiting stays short.
 type scanner struct {
 	ctx      context.Context
+	root     string
 	progress *ScanProgress
 	mu       sync.Mutex
 	cond     *sync.Cond
@@ -290,30 +291,27 @@ func (s *scanner) read(f folder) {
 	n := f.node
 	path := n.Path()
 	s.progress.current.Store(&path)
-	des, err := os.ReadDir(path)
-	if err != nil {
-		n.Err = true
-	}
 	var subs []*Node
-	for _, de := range des {
-		info, err := de.Info()
-		if err != nil {
-			continue
+	err := readDirForScan(path, func(name string, isDir, link bool, size int64, mod time.Time) {
+		if mod.After(n.Mod) {
+			n.Mod = mod
 		}
-		mode := info.Mode()
-		if info.ModTime().After(n.Mod) {
-			n.Mod = info.ModTime()
-		}
-		if realDir(mode) {
-			subs = append(subs, &Node{Name: de.Name(), Parent: n, Mod: info.ModTime()})
-			continue
+		if isDir {
+			if skipScanDir(s.root, path, name) {
+				return
+			}
+			subs = append(subs, &Node{Name: name, Parent: n, Mod: mod})
+			return
 		}
 		n.ownItems++
 		s.progress.Files.Add(1)
-		if !isLink(mode) {
-			n.own += info.Size()
-			s.progress.Bytes.Add(info.Size())
+		if !link {
+			n.own += size
+			s.progress.Bytes.Add(size)
 		}
+	})
+	if err != nil {
+		n.Err = true
 	}
 	n.Children = subs
 	s.progress.Dirs.Add(1)

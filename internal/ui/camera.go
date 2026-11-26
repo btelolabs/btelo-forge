@@ -139,6 +139,9 @@ func (a *App) listCameras(done func()) {
 			cams, err := capture.Cameras(ctx)
 			a.post(func() {
 				c.listing, c.listed, c.cams, c.listErr = false, err == nil, cams, err
+				if err != nil {
+					a.logError("camera", "listing cameras failed", err)
+				}
 				a.camerasListed()
 			})
 		})

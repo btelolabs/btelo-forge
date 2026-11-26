@@ -433,7 +433,7 @@ func (a *App) pickLayout() (box, head, list, foot gfx.Rect) {
 // drawPickDialog draws the dialog: what it asks for above, the file manager's list, and the row that answers it.
 func (a *App) drawPickDialog(pk *filePick) {
 	u := &a.u
-	u.c.Fill(a.screen, gfx.Alpha(colBlack, 0.5))
+	u.c.Fill(a.screen, gfxShade)
 	box, head, list, foot := a.pickLayout()
 	panel(u, box)
 	u.c.Fill(head, colBackground)
@@ -534,7 +534,7 @@ func (a *App) drawPickFoot(pk *filePick, r gfx.Rect) {
 // drawPickReplace asks whether to replace the file that has the name given.
 func (a *App) drawPickReplace(pk *filePick) {
 	u := &a.u
-	u.c.Fill(a.screen, gfx.Alpha(colBlack, 0.45))
+	u.c.Fill(a.screen, gfxShade)
 	box := rectCentered(a.screen, min(u.px(460), a.screen.W-u.px(32)), u.px(146))
 	panel(u, box)
 	in := box.Inset(u.px(20))

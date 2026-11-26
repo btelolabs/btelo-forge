@@ -482,8 +482,12 @@ func (a *App) drawModelClips(md *modelDoc, x, y, w float32) float32 {
 		}
 		colour := colText
 		if md.clip == i {
-			u.c.Fill(r, modelHue)
-			colour = colBackground
+			if isDarkTheme() {
+				u.c.Fill(r, modelHue)
+				colour = colBackground
+			} else {
+				u.c.Fill(r, colSelected)
+			}
 		}
 		if u.press(id, r) {
 			a.playClip(md, i)
@@ -626,7 +630,11 @@ func (a *App) drawObjectList(md *modelDoc, x, y, w float32) float32 {
 				u.c.Fill(r, colBorder)
 			}
 			if md.chosen == q.node {
-				u.c.Fill(r, modelHue)
+				if isDarkTheme() {
+					u.c.Fill(r, modelHue)
+				} else {
+					u.c.Fill(r, colSelected)
+				}
 			}
 			if u.press(id, r) {
 				a.chooseObject(md, q.node)
@@ -642,7 +650,7 @@ func (a *App) drawObjectList(md *modelDoc, x, y, w float32) float32 {
 			f := u.face(12.5)
 			left := u.px(8) + float32(q.depth)*u.px(12)
 			colour := colText
-			if md.chosen == q.node {
+			if md.chosen == q.node && isDarkTheme() {
 				colour = colBackground
 			}
 			u.label(f, rectAt(x+left, r.Y, w-left-u.px(8), high), f.Ellipsize(name, w-left-u.px(8)), colour, 0)

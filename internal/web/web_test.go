@@ -149,3 +149,47 @@ func TestCleanNameKeepsOnlyASafeBaseName(t *testing.T) {
 		}
 	}
 }
+
+func TestPageThemes(t *testing.T) {
+	dir := t.TempDir()
+	cases := []struct {
+		name  string
+		theme func() string
+		want  string
+	}{
+		{"nil", nil, `data-theme="system"`},
+		{"empty", func() string { return "" }, `data-theme="system"`},
+		{"system", func() string { return "system" }, `data-theme="system"`},
+		{"light", func() string { return "light" }, `data-theme="light"`},
+		{"dark", func() string { return "dark" }, `data-theme="dark"`},
+		{"unknown", func() string { return "sepia" }, `data-theme="system"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			site := Site{
+				Files:     func() []File { return nil },
+				Text:      testText,
+				Theme:     tc.theme,
+				UploadDir: func() (string, error) { return dir, nil },
+				Received:  func([]string) {},
+			}
+			s := httptest.NewServer(Handler("secret", site))
+			defer s.Close()
+			resp, err := http.Get(s.URL + "/?k=secret")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			html := string(body)
+			if resp.StatusCode != 200 || !strings.Contains(html, "<html "+tc.want+">") {
+				t.Fatalf("status=%d, missing %s in %s", resp.StatusCode, tc.want, html)
+			}
+			for _, token := range []string{`html[data-theme="light"]`, `html[data-theme="dark"]`, `@media (prefers-color-scheme:light)`, `color-scheme:light`, `color-scheme:dark`, `--bg:#eeeff3`, `--bg:#0c0d10`, `border-radius:6px;border:1px solid var(--line)`} {
+				if !strings.Contains(html, token) {
+					t.Fatalf("page missing %q", token)
+				}
+			}
+		})
+	}
+}

@@ -579,9 +579,22 @@ func (p *filesPane) current() *files.Entry {
 // path is where an entry is.
 func (p *filesPane) path(e *files.Entry) string {
 	if p.atDrives() {
+		if d, ok := p.drives[e.Name]; ok && d.Path != "" {
+			return d.Path
+		}
 		return e.Name + string(filepath.Separator)
 	}
 	return filepath.Join(p.dir, e.Name)
+}
+
+// driveNameFor returns the drive entry name in drives whose root path matches dir, falling back to filepath.VolumeName.
+func driveNameFor(drives []files.Drive, dir string) string {
+	for _, d := range drives {
+		if files.SamePath(d.Path, dir) {
+			return d.Name
+		}
+	}
+	return filepath.VolumeName(dir)
 }
 
 // cursorTo puts the cursor on the entry with that name, or keeps it where it was when there is none.

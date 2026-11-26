@@ -73,6 +73,7 @@ type ctx struct {
 	res     pdf.Dict
 	base    pdf.Matrix // the page's matrix, or the form's for patterns inside it
 	depth   int
+	inForm  map[*pdf.Stream]bool // Form XObjects currently being drawn, to stop cycles at once
 	inGlyph map[*pdf.Stream]bool // Type 3 glyphs being drawn
 	hidden  int
 	mc      []bool
@@ -719,9 +720,14 @@ func (r *ctx) doXObject(o pdf.Object) {
 
 // drawForm runs a form XObject in the current graphics state.
 func (r *ctx) drawForm(s *pdf.Stream) {
-	if r.depth >= maxFormDepth || !r.op() {
+	if r.inForm[s] || r.depth >= maxFormDepth || !r.op() {
 		return
 	}
+	if r.inForm == nil {
+		r.inForm = map[*pdf.Stream]bool{}
+	}
+	r.inForm[s] = true
+	defer delete(r.inForm, s)
 	d := r.doc
 	body, err := d.Decode(s)
 	if err != nil && len(body) == 0 {

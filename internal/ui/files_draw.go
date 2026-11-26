@@ -32,37 +32,83 @@ const (
 func pictured(name string) bool { return assets.KindOf(name).Visual() }
 
 func fileGlyph(e *files.Entry) (string, color.RGBA) {
+	dark := isDarkTheme()
 	if e.Dir {
 		if e.Link {
-			return icFmLink, gfx.Hex(0x8fb8ff)
+			if dark {
+				return icFmLink, gfx.Hex(0x8fb8ff)
+			}
+			return icFmLink, gfx.Hex(0x2563eb)
 		}
-		return icFmFolder, gfx.Hex(0xe8b75b)
+		return icFmFolder, folderRowHue()
 	}
 	if files.IsArchive(e.Name) {
-		return icFmArchive, gfx.Hex(0xd99a6c)
+		if dark {
+			return icFmArchive, gfx.Hex(0xd99a6c)
+		}
+		return icFmArchive, gfx.Hex(0xb8662e)
 	}
 	switch assets.KindOf(e.Name) {
 	case assets.MindMap:
-		return icMind, gfx.Hex(0x4fb3ff)
+		if dark {
+			return icMind, gfx.Hex(0x4fb3ff)
+		}
+		return icMind, gfx.Hex(0x0284c7)
 	case assets.Office:
 		return officeGlyph(e.Name)
 	case assets.Model:
-		return icModel, modelHue
+		if dark {
+			return icModel, modelHue
+		}
+		return icModel, gfx.Hex(0x0d9488)
 	case assets.Image, assets.Animation, assets.Canvas:
-		return icFmImage, gfx.Hex(0x6fcf97)
+		if dark {
+			return icFmImage, gfx.Hex(0x6fcf97)
+		}
+		return icFmImage, gfx.Hex(0x1e9e5a)
 	case assets.Video, assets.Edit:
-		return icFmMovie, gfx.Hex(0x5aa9ff)
+		if dark {
+			return icFmMovie, gfx.Hex(0x5aa9ff)
+		}
+		return icFmMovie, gfx.Hex(0x2563eb)
 	case assets.Audio:
-		return icFmAudio, gfx.Hex(0xbb8cff)
+		if dark {
+			return icFmAudio, gfx.Hex(0xbb8cff)
+		}
+		return icFmAudio, gfx.Hex(0x7c3aed)
 	case assets.Markdown, assets.Text:
 		return icFmText, colDim
 	case assets.Code:
-		return icFmCode, gfx.Hex(0x56c7c2)
+		if dark {
+			return icFmCode, gfx.Hex(0x56c7c2)
+		}
+		return icFmCode, gfx.Hex(0x0d9488)
 	}
 	if e.Link {
 		return icFmLink, colDim
 	}
 	return icFmFile, colDim
+}
+
+func folderRowHue() color.RGBA {
+	if isDarkTheme() {
+		return gfx.Hex(0xe8b75b)
+	}
+	return gfx.Hex(0xc4821a)
+}
+
+func categoryHue() color.RGBA {
+	if isDarkTheme() {
+		return gfx.Hex(0xe8b04b)
+	}
+	return gfx.Hex(0xc4821a)
+}
+
+func tagHue() color.RGBA {
+	if isDarkTheme() {
+		return gfx.Hex(0x7f8cff)
+	}
+	return gfx.Hex(0x5b67e8)
 }
 
 // sizeText writes a number of bytes as gdu does, in powers of 1024.
@@ -386,7 +432,7 @@ func (a *App) drawPathBar(p *filesPane, id string, r gfx.Rect, manager bool) boo
 	}
 	room := r.W - iw - u.px(12)
 	var parts []pathPart
-	if p.atDrives() || filepath.VolumeName(p.dir) != "" && len(a.knownDrives()) > 0 {
+	if p.atDrives() || len(a.knownDrives()) > 0 {
 		parts = append(parts, pathPart{u.t("This PC"), thisPC})
 	}
 	if !p.atDrives() {
@@ -444,7 +490,7 @@ func (a *App) drawPathBar(p *filesPane, id string, r gfx.Rect, manager bool) boo
 		if !last && u.clicked(sid, seg) {
 			land := filepath.Base(parts[j+1].path)
 			if part.path == thisPC {
-				land = filepath.VolumeName(parts[j+1].path)
+				land = driveNameFor(a.knownDrives(), parts[j+1].path)
 			}
 			a.goTo(p, part.path, land)
 		}
@@ -765,7 +811,11 @@ func (a *App) drawFileRow(fd *filesDoc, p *filesPane, row int, e *files.Entry, r
 		u.label(small, c.percent, fmt.Sprintf("%.1f%%", pct), colFaint, 1)
 		if c.bar.W > 0 && largest > 0 {
 			bar := gfx.Rect{X: c.bar.X, Y: r.Y + r.H/2 - u.px(4), W: c.bar.W, H: u.px(8)}
-			u.c.Fill(bar, colSurface)
+			barBg := colSurface
+			if !isDarkTheme() {
+				barBg = gfx.Alpha(colText, 0.08)
+			}
+			u.c.Fill(bar, barBg)
 			fill := bar
 			fill.W = float32(math.Max(float64(bar.W)*float64(size)/float64(largest), 0))
 			col := gfx.Mix(colAccent, colWarning, float32(size)/float32(largest)*0.6)
@@ -944,7 +994,11 @@ func (a *App) drawDriveColumns(d files.Drive, r gfx.Rect, c fileColumns) {
 	used := float32(d.Total-d.Free) / float32(d.Total)
 	bw := min(u.px(160), r.W*0.25)
 	bar := gfx.Rect{X: c.size.X - u.px(16) - bw, Y: r.Y + r.H/2 - u.px(4), W: bw, H: u.px(8)}
-	u.c.Fill(bar, colSurface)
+	barBg := colSurface
+	if !isDarkTheme() {
+		barBg = gfx.Alpha(colText, 0.08)
+	}
+	u.c.Fill(bar, barBg)
 	col := colAccent
 	if used > 0.9 {
 		col = colDanger // as Explorer warns of a drive nearly full

@@ -132,6 +132,9 @@ func (a *App) checkUpdate(asked bool) {
 			a.upd.checking = false
 			a.upd.err = err
 			if err != nil {
+				a.logError("update", "checking for updates failed", err)
+			}
+			if err != nil {
 				if asked {
 					a.toast(a.u.tf("Checking for a new version failed: %s", a.describe(err)), true)
 				}

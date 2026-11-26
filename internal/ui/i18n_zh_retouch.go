@@ -88,7 +88,7 @@ var zhRetouch = map[string]string{
 	"Remove background":         "去背景",
 	"history|Remove background": "去背景",
 	"Finding the subject… The first time, the model is downloaded (250 MB).": "正在查找主体……首次使用会下载模型（250 MB）。",
-	"Finding a subject works on Windows for now":                             "选择主体目前只支持 Windows",
+	"Finding a subject is not supported on this computer":                    "这台电脑不支持选择主体",
 	"Find the subject":           "找主体",
 	"history|Border":             "边界",
 	"history|Content-aware fill": "内容识别填充",

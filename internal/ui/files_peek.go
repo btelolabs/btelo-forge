@@ -102,7 +102,7 @@ func (a *App) drawFilePeek(fd *filesDoc, r gfx.Rect, above float32) {
 	if box.Contains(u.mx, u.my) {
 		box.X = r.X + margin
 	}
-	u.c.Outline(box.Inset(-u.px(1)), u.px(4), gfx.Alpha(colBlack, 0.35))
+	u.c.Outline(box.Inset(-u.px(1)), u.px(4), colShadow)
 	u.c.Outline(box, line, colBorderHi)
 	pic := box.Inset(line)
 	if img != nil {

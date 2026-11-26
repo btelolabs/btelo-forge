@@ -848,7 +848,11 @@ func (ed *sheetEd) drawHeadings(v *sheetView) {
 		if sel {
 			fill := colSelected
 			if full {
-				fill = gfx.Mix(colSurface, colAccent, 0.45)
+				k := float32(0.45)
+				if !isDarkTheme() {
+					k = 0.22
+				}
+				fill = gfx.Mix(colSurface, colAccent, k)
 			}
 			u.c.Fill(r, fill)
 			col = colText
@@ -888,7 +892,11 @@ func (ed *sheetEd) drawHeadings(v *sheetView) {
 		if sel {
 			fill := colSelected
 			if full {
-				fill = gfx.Mix(colSurface, colAccent, 0.45)
+				k := float32(0.45)
+				if !isDarkTheme() {
+					k = 0.22
+				}
+				fill = gfx.Mix(colSurface, colAccent, k)
 			}
 			u.c.Fill(box, fill)
 			col = colText

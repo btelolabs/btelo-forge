@@ -248,6 +248,8 @@ func (a *App) settingsRecordingHotkeys(r gfx.Rect) {
 		u.c.Fill(box, bg)
 		if capturing {
 			u.c.Outline(box, u.px(1.5), colAccent)
+		} else if !isDarkTheme() {
+			u.c.Outline(box, max(1, u.px(1)), colBorder)
 		}
 		u.label(u.bold(12.5), box.Inset(u.px(12)), text, fg, 0.5)
 		if u.clicked(id, box) && !capturing {

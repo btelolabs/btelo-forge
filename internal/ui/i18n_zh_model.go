@@ -171,7 +171,7 @@ var zhModel = map[string]string{
 	"Studio":       "摄影棚",
 	"Skies":        "天光",
 	"The skies the 3D tool offers: their colours and the sun that casts shadows; see the format guide.": "3D 工具提供的天光：天空颜色和投射阴影的太阳；参见格式说明。",
-	"%s is not shown.":                                              "不显示 %s。",
-	"Points and lines are not shown.":                               "点和线不会显示。",
+	"%s is not shown.":                "不显示 %s。",
+	"Points and lines are not shown.": "点和线不会显示。",
 	"Videos, pictures, canvases, mind maps, documents and 3D files": "视频、图片、画布、思维导图、文档和 3D 文件",
 }

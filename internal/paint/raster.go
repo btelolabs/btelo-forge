@@ -332,6 +332,43 @@ func (p *plane) readLevel(l int, dst []uint8, stride int, r image.Rectangle) {
 	tmp.read(dst, stride, r)
 }
 
+// blendRaster composites r's tiles at detail level l directly onto dst within area without allocating a temporary
+// full-area copy of the layer.
+func blendRaster(dst *image.RGBA, r *Raster, l int, area image.Rectangle, opacity float64, mode Blend, mask *image.Alpha, maskFill uint8) {
+	area = area.Intersect(dst.Rect)
+	if area.Empty() || opacity <= 0 {
+		return
+	}
+	p := &r.p
+	tiles := p.tiles
+	off := p.off
+	if l > 0 {
+		tiles = p.level(l)
+		off = image.Pt(off.X>>l, off.Y>>l)
+	}
+	if len(tiles) == 0 {
+		return
+	}
+	local := area.Sub(off)
+	k0, k1 := keysOver(local)
+	for ky := k0.Y; ky <= k1.Y; ky++ {
+		for kx := k0.X; kx <= k1.X; kx++ {
+			k := image.Pt(kx, ky)
+			t := tiles[k]
+			if t == nil {
+				continue
+			}
+			tr := tileRect(k).Add(off)
+			part := tr.Intersect(area)
+			if part.Empty() {
+				continue
+			}
+			src := image.RGBA{Pix: t.pix, Stride: TileSize * 4, Rect: tr}
+			blendPixels(dst, &src, part, opacity, mode, mask, maskFill)
+		}
+	}
+}
+
 // ---- Raster: a pixel layer's colour.
 
 // Raster is premultiplied RGBA on an unbounded canvas, transparent where nothing was painted.

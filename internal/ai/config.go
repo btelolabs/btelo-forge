@@ -511,7 +511,7 @@ engines    model server programs; only those whose os and arch match this comput
            "arguments" is its command line. Placeholders: {model} the model file (required for llama-server, whose
            engine says it; an sd-server model says it in its own arguments), {port} the port it listens on (required),
            {context} the tokens the model remembers.
-           Downloaded: {"id", "api", "backend", "name", "note", "url": a .zip archive, "size": bytes (for
+           Downloaded: {"id", "api", "backend", "name", "note", "url": a .zip, .tar.gz/.tgz or .whl archive, "size": bytes (for
            progress), "sha256": optional checksum, "executable": the program at the top of the archive,
            "arguments"}. Each url gets its own folder, so a new version downloads anew.
            Installed: {"id", "api", "backend", "name", "note", "commands": names looked up on PATH, "paths":

@@ -96,6 +96,9 @@ func (a *App) drawMindThemes(md *mindDoc, r gfx.Rect) {
 		hot := u.hover(id, gfx.Rect{X: card.X, Y: card.Y, W: card.W, H: card.H + u.px(26)})
 		img := a.mindThemePreview(th, int(card.W), int(card.H))
 		u.c.Blit(img, int(card.X), int(card.Y), false)
+		if !isDarkTheme() {
+			u.c.RoundOutline(card, card.H/12, max(1, u.px(1)), colBorder)
+		}
 		switch {
 		case th.ID == cur:
 			u.c.RoundOutline(card.Inset(-u.px(3)), u.px(12), max(1, u.px(2.5)), colAccent)

@@ -376,7 +376,11 @@ func (a *App) drawColorPicker(r gfx.Rect) {
 	}
 	u.c.Blit(p.strip, strip.Pixels().Min.X, strip.Pixels().Min.Y, true)
 	hx := strip.X + float32(p.h)*strip.W
-	u.c.Fill(gfx.Rect{X: hx - u.px(2), Y: strip.Y - u.px(2), W: u.px(4), H: strip.H + u.px(4)}, colWhite)
+	htick := gfx.Rect{X: hx - u.px(2), Y: strip.Y - u.px(2), W: u.px(4), H: strip.H + u.px(4)}
+	u.c.Fill(htick, colWhite)
+	if !isDarkTheme() {
+		u.c.Outline(htick.Inset(-max(1, u.px(1))), max(1, u.px(1)), gfx.Alpha(colBlack, 0.45))
+	}
 	u.press("art/hue", strip)
 	if u.dragging("art/hue") || u.active == "art/hue" && u.down {
 		p.h = min(max(float64((u.mx-strip.X)/strip.W), 0), 0.9999)
@@ -394,7 +398,11 @@ func (a *App) drawColorPicker(r gfx.Rect) {
 			gfx.Alpha(color.RGBA{solid.R, solid.G, solid.B, 255}, k))
 	}
 	ax := alpha.X + float32(p.a)*alpha.W
-	u.c.Fill(gfx.Rect{X: ax - u.px(2), Y: alpha.Y - u.px(2), W: u.px(4), H: alpha.H + u.px(4)}, colWhite)
+	atick := gfx.Rect{X: ax - u.px(2), Y: alpha.Y - u.px(2), W: u.px(4), H: alpha.H + u.px(4)}
+	u.c.Fill(atick, colWhite)
+	if !isDarkTheme() {
+		u.c.Outline(atick.Inset(-max(1, u.px(1))), max(1, u.px(1)), gfx.Alpha(colBlack, 0.45))
+	}
 	u.hint("art/alpha", u.t("Opacity of the colour"), alpha)
 	u.press("art/alpha", alpha)
 	if u.dragging("art/alpha") || u.active == "art/alpha" && u.down {
@@ -601,6 +609,10 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 	x = eye.Right() + u.px(2)
 	thumbW, thumbH := u.px(34), rr.H-u.px(10)
 	editing := chosen && d.EditMask && n.Mask != nil
+	thumbRing := colWhite
+	if !isDarkTheme() {
+		thumbRing = colPrimary
+	}
 	if n.IsGroup() {
 		fold := gfx.Rect{X: x, Y: rr.Y, W: u.px(18), H: rr.H}
 		g := icClosed
@@ -629,7 +641,7 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 		thumb := gfx.Rect{X: x, Y: rr.Y + u.px(5), W: thumbW, H: thumbH}
 		a.drawLayerThumb(ad, n, thumb)
 		if chosen && !editing {
-			u.c.Outline(thumb.Inset(-u.px(2)), max(1, u.px(1.5)), colWhite)
+			u.c.Outline(thumb.Inset(-u.px(2)), max(1, u.px(1.5)), thumbRing)
 		}
 		if n.Adjust != nil {
 			u.hint(id+"/pixels", u.t("Adjustment layer: double-click to change its settings"), thumb)
@@ -651,7 +663,7 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 		mt := gfx.Rect{X: x, Y: rr.Y + u.px(5), W: thumbW, H: thumbH}
 		a.drawMaskThumb(ad, n, mt)
 		if editing {
-			u.c.Outline(mt.Inset(-u.px(2)), max(1, u.px(1.5)), colWhite)
+			u.c.Outline(mt.Inset(-u.px(2)), max(1, u.px(1.5)), thumbRing)
 		}
 		if n.MaskOff {
 			u.c.Line(mt.X, mt.Y, mt.Right(), mt.Bottom(), u.px(2), colDanger)
@@ -675,7 +687,7 @@ func (a *App) drawLayerRow(ad *artDoc, n *paint.Node, depth int, rr gfx.Rect) {
 		ct := gfx.Rect{X: x, Y: rr.Y + u.px(5), W: thumbW, H: thumbH}
 		a.drawClipThumb(ad, n, ct)
 		if chosen && a.artTool == toolNode && !d.EditMask {
-			u.c.RoundOutline(ct.Inset(-u.px(2)), u.px(4), max(1, u.px(1.5)), colWhite)
+			u.c.RoundOutline(ct.Inset(-u.px(2)), u.px(4), max(1, u.px(1.5)), thumbRing)
 		}
 		u.hint(id+"/clip", u.t("Vector mask: the layer shows inside its outline; click to edit it with the node tool, Ctrl+click to select inside it"), ct)
 		a.ctrlSelect(ad, id+"/clip", ct, func(mode paint.SelectMode) error { return d.SelectVectorMask(n.ID, mode) })
@@ -869,9 +881,10 @@ func thumbLevel(e image.Rectangle, size image.Point) (int, image.Rectangle) {
 // drawLayerThumb is a small picture of a layer's pixels over the picture's area.
 func (a *App) drawLayerThumb(ad *artDoc, n *paint.Node, r gfx.Rect) {
 	u := &a.u
-	u.c.Fill(r, checkLight)
+	cl, cd := artCheckColors()
+	u.c.Fill(r, cl)
 	dst := a.thumbArea(ad, n, r)
-	u.c.Fill(dst, checkDark)
+	u.c.Fill(dst, cd)
 	size := dst.Pixels().Size()
 	if size.X <= 0 || size.Y <= 0 {
 		return

@@ -138,6 +138,9 @@ func (a *App) checkRecording() {
 		a.post(func() {
 			r.listing, r.listed = false, true
 			r.displays, r.mics, r.listErr = displays, mics, err
+			if err != nil {
+				a.logError("record", "checking recording devices failed", err)
+			}
 			a.probeEncoder()
 		})
 	})
@@ -635,7 +638,12 @@ func (a *App) finishRecordingForClose() {
 // encoderName says in words how the recording is encoded.
 func (a *App) encoderName(e capture.Encoder) string {
 	u := &a.u
-	name := map[string]string{"h264_nvenc": "NVIDIA NVENC", "h264_amf": "AMD AMF", "h264_mf": "Media Foundation"}[e.Codec]
+	name := map[string]string{
+		"h264_nvenc":        "NVIDIA NVENC",
+		"h264_amf":          "AMD AMF",
+		"h264_mf":           "Media Foundation",
+		"h264_videotoolbox": "Apple VideoToolbox",
+	}[e.Codec]
 	text := u.tf("The graphics card encodes (%s), so recording costs the processor almost nothing", name)
 	if !e.Hardware() {
 		text = u.t("No graphics-card encoder works here, so the processor encodes, at up to 1080p and 30 frames a second")
@@ -1105,6 +1113,9 @@ func (a *App) recorderBody(in gfx.Rect) float32 {
 	y += u.px(10)
 	line := rectAt(in.X, y, in.W-u.px(158), u.px(32))
 	u.c.Fill(line, colSurface)
+	if !isDarkTheme() {
+		u.c.Outline(line, max(1, u.px(1)), colBorder)
+	}
 	u.label(u.face(12), line.Inset(u.px(10)), u.tf("Saved in %s", dir), colText, 0)
 	u.hint("record/dir/path", u.t("Recordings open here for editing as soon as they stop"), line)
 	if u.button("record/dir", rectAt(in.Right()-u.px(150), y+u.px(1), u.px(150), u.px(30)), icFolder, u.t("Choose folder…"), plain, true) {

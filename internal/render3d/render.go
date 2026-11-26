@@ -50,6 +50,7 @@ type Options struct {
 	Grid        bool
 	Shadows     bool
 	ShowSky     bool
+	Light       bool // use light studio backdrop and grid when ShowSky is false
 	Exposure    float32
 	SkyRotation float32 // radians
 	LineScale   float32 // the pixels of a line's unit of width, 1 when zero
@@ -299,63 +300,60 @@ func (r *Renderer) SetSky(p Panorama, sun Sun) error {
 	return nil
 }
 
-// filter renders the specular levels from the sky. Each is drawn on a texture of its own size and copied in place, as
-// the library's Vulkan side gets the size of a single level wrong when it is drawn on directly.
+// filter renders all specular mip levels from the sky in one submission, waiting once before releasing the temporary
+// levels. Each level is drawn on a texture of its own size and copied in place, as the library's Vulkan side gets the
+// size of a single level wrong when it is drawn on directly.
 func (r *Renderer) filter(sky gpu.View) error {
 	d := r.d
-	buf, err := d.Buffer(gpu.BufferDesc{Label: "prefilter", Size: 16, Usage: gpu.BufferUniform | gpu.BufferCopyDst})
-	if err != nil {
-		return err
-	}
-	defer buf.Release()
-	group, err := d.BindGroup(r.prefilterLayout, []gpu.Binding{{Slot: 0, Buffer: buf, Size: 16}, {Slot: 1, View: sky}, {Slot: 2, Sampler: r.skySampler}})
-	if err != nil {
-		return err
-	}
-	defer group.Release()
-	for m := range specularMips {
-		if err := r.filterLevel(m, buf, group); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *Renderer) filterLevel(m int, buf gpu.Buffer, group gpu.BindGroup) error {
-	d := r.d
-	w, h := uint32(specularW>>m), uint32(specularH>>m)
-	if err := d.WriteBuffer(buf, 0, bytesOf([]float32{float32(m) / (specularMips - 1), 0, 0, 0})); err != nil {
-		return err
-	}
-	level, err := d.Texture(gpu.TextureDesc{Label: "specular level", Width: w, Height: h, Format: gpu.RGBA16Float, Usage: gpu.TextureTarget | gpu.TextureCopySrc})
-	if err != nil {
-		return err
-	}
-	defer level.Release()
-	view, err := level.View(-1)
-	if err != nil {
-		return err
-	}
-	defer view.Release()
+	var clean []releaser
+	defer func() {
+		release(clean...)
+	}()
 	enc, err := d.Encoder()
 	if err != nil {
 		return err
 	}
-	p, err := enc.Pass(gpu.PassDesc{Color: &gpu.ColorTarget{View: view, Clear: &[4]float64{}}})
-	if err != nil {
-		return err
+	for m := range specularMips {
+		w, h := uint32(specularW>>m), uint32(specularH>>m)
+		buf, err := d.Buffer(gpu.BufferDesc{Label: "prefilter", Size: 16, Usage: gpu.BufferUniform | gpu.BufferCopyDst})
+		if err != nil {
+			return err
+		}
+		clean = append(clean, buf)
+		if err := d.WriteBuffer(buf, 0, bytesOf([]float32{float32(m) / (specularMips - 1), 0, 0, 0})); err != nil {
+			return err
+		}
+		group, err := d.BindGroup(r.prefilterLayout, []gpu.Binding{{Slot: 0, Buffer: buf, Size: 16}, {Slot: 1, View: sky}, {Slot: 2, Sampler: r.skySampler}})
+		if err != nil {
+			return err
+		}
+		clean = append(clean, group)
+		level, err := d.Texture(gpu.TextureDesc{Label: "specular level", Width: w, Height: h, Format: gpu.RGBA16Float, Usage: gpu.TextureTarget | gpu.TextureCopySrc})
+		if err != nil {
+			return err
+		}
+		clean = append(clean, level)
+		view, err := level.View(-1)
+		if err != nil {
+			return err
+		}
+		clean = append(clean, view)
+		p, err := enc.Pass(gpu.PassDesc{Color: &gpu.ColorTarget{View: view, Clear: &[4]float64{}}})
+		if err != nil {
+			return err
+		}
+		p.SetPipeline(r.pipes["prefilter"])
+		p.SetBindGroup(0, group)
+		p.Draw(3)
+		if err := p.End(); err != nil {
+			return err
+		}
+		enc.CopyTexture(level, r.specular, m, w, h)
 	}
-	p.SetPipeline(r.pipes["prefilter"])
-	p.SetBindGroup(0, group)
-	p.Draw(3)
-	if err := p.End(); err != nil {
-		return err
-	}
-	enc.CopyTexture(level, r.specular, m, w, h)
 	if err := enc.Submit(); err != nil {
 		return err
 	}
-	return d.Idle() // the uniform changes for the next level, and the level is let go
+	return d.Idle()
 }
 
 type releaser interface{ Release() }
@@ -822,8 +820,12 @@ func (r *Renderer) Draw(cam *Camera, o Options, w, h int, out *image.RGBA) error
 	if err := r.d.ReadBuffer(ctx, r.staging, r.row); err != nil {
 		return err
 	}
-	for y := range h {
-		copy(out.Pix[y*out.Stride:y*out.Stride+w*4], r.row[y*int(pitch):])
+	if int(pitch) == out.Stride && out.Stride == w*4 {
+		copy(out.Pix[:h*out.Stride], r.row[:h*out.Stride])
+	} else {
+		for y := range h {
+			copy(out.Pix[y*out.Stride:y*out.Stride+w*4], r.row[y*int(pitch):])
+		}
 	}
 	return nil
 }
@@ -948,6 +950,10 @@ func (r *Renderer) writeFrame(cam *Camera, o Options, w, h int) error {
 	if o.ShowSky {
 		showSky = 1
 	}
+	lightMode := float32(0)
+	if o.Light {
+		lightMode = 1
+	}
 	s, c := sincos(o.SkyRotation)
 	data := make([]float32, frameSize/4)
 	copy(data[0:], vp[:])
@@ -961,7 +967,7 @@ func (r *Renderer) writeFrame(cam *Camera, o Options, w, h int) error {
 		copy(data[60+i*4:], h[:])
 	}
 	copy(data[96:], []float32{float32(o.View), c, s, bounds.Min[1]})
-	copy(data[100:], []float32{0, 0, 0, opacity})
+	copy(data[100:], []float32{lightMode, 0, 0, opacity})
 	copy(data[104:], []float32{cell, reach, texel, showSky})
 	lineScale := o.LineScale
 	if lineScale <= 0 {

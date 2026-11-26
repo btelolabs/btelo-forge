@@ -21,6 +21,7 @@ import (
 // textPage is a text laid out for one width.
 type textPage struct {
 	width, scale float32
+	dark         bool
 	lines        []pageLine
 	height       float32
 	gutter       float32 // the line numbers' column of code
@@ -58,6 +59,31 @@ var (
 	linkColour  = gfx.Hex(0x6ab0ff)
 )
 
+type textPalette struct {
+	keyword, str, number, comment, band, link color.RGBA
+}
+
+func activeTextPalette() textPalette {
+	if isDarkTheme() {
+		return textPalette{
+			keyword: codeKeyword,
+			str:     codeString,
+			number:  codeNumber,
+			comment: codeComment,
+			band:    codeBand,
+			link:    linkColour,
+		}
+	}
+	return textPalette{
+		keyword: gfx.Hex(0x7c3aed),
+		str:     gfx.Hex(0x15803d),
+		number:  gfx.Hex(0xc2410c),
+		comment: gfx.Hex(0x6b7280),
+		band:    gfx.Hex(0xf1f3f7),
+		link:    gfx.Hex(0x1d4ed8),
+	}
+}
+
 // drawTextPreview draws the previewed text in r, scrolled with the wheel (with Shift, sideways for code).
 func (a *App) drawTextPreview(id string, r gfx.Rect) {
 	u := &a.u
@@ -71,7 +97,7 @@ func (a *App) drawTextPreview(id string, r gfx.Rect) {
 	if inner.W <= 0 || inner.H <= 0 {
 		return
 	}
-	if pg.width != inner.W || pg.scale != u.s {
+	if pg.width != inner.W || pg.scale != u.s || pg.dark != isDarkTheme() {
 		scroll := pg.scrollY
 		*pg = a.layoutText(p.text, p.kind, filepath.Ext(p.path), inner.W)
 		pg.scrollY = scroll
@@ -138,13 +164,17 @@ func (a *App) drawTextPreview(id string, r gfx.Rect) {
 	if view := inner.H + pad; pg.height > view {
 		h := max(r.H*r.H/(pg.height+pad), u.px(24))
 		y := r.Y + (r.H-h)*pg.scrollY/(pg.height-inner.H+pad)
-		u.c.Fill(gfx.Rect{X: r.Right() - u.px(5), Y: y, W: u.px(3), H: h}, colSurfaceHi)
+		scrollCol := colSurfaceHi
+		if !isDarkTheme() {
+			scrollCol = colBorderHi
+		}
+		u.c.Fill(gfx.Rect{X: r.Right() - u.px(5), Y: y, W: u.px(3), H: h}, scrollCol)
 	}
 }
 
 // layoutText lays out text of kind for width.
 func (a *App) layoutText(text string, kind assets.Kind, ext string, width float32) textPage {
-	pg := textPage{width: width, scale: a.u.s}
+	pg := textPage{width: width, scale: a.u.s, dark: isDarkTheme()}
 	switch kind {
 	case assets.Markdown:
 		a.layoutMarkdown(&pg, text, width)
@@ -262,6 +292,7 @@ type codeToken struct {
 
 // highlight splits a line of code into coloured tokens; inBlock carries an open block comment to the next line.
 func highlight(line string, lang language, inBlock *bool) []codeToken {
+	pal := activeTextPalette()
 	var out []codeToken
 	emit := func(s string, col color.RGBA) {
 		if s != "" {
@@ -274,17 +305,17 @@ func highlight(line string, lang language, inBlock *bool) []codeToken {
 		if *inBlock {
 			end := strings.Index(rest, lang.close)
 			if end < 0 {
-				emit(rest, codeComment)
+				emit(rest, pal.comment)
 				return out
 			}
-			emit(rest[:end+len(lang.close)], codeComment)
+			emit(rest[:end+len(lang.close)], pal.comment)
 			i += end + len(lang.close)
 			*inBlock = false
 			continue
 		}
 		if lang.open != "" && strings.HasPrefix(rest, lang.open) {
 			*inBlock = true
-			emit(lang.open, codeComment)
+			emit(lang.open, pal.comment)
 			i += len(lang.open)
 			continue
 		}
@@ -295,7 +326,7 @@ func highlight(line string, lang language, inBlock *bool) []codeToken {
 			}
 		}
 		if comment {
-			emit(rest, codeComment)
+			emit(rest, pal.comment)
 			return out
 		}
 		c := line[i]
@@ -309,14 +340,14 @@ func highlight(line string, lang language, inBlock *bool) []codeToken {
 				j++
 			}
 			j = min(j+1, len(line))
-			emit(line[i:j], codeString)
+			emit(line[i:j], pal.str)
 			i = j
 		case c >= '0' && c <= '9':
 			j := i + 1
 			for j < len(line) && (isWordByte(line[j]) || line[j] == '.') {
 				j++
 			}
-			emit(line[i:j], codeNumber)
+			emit(line[i:j], pal.number)
 			i = j
 		case isWordByte(c) || c >= utf8.RuneSelf:
 			j := i
@@ -334,7 +365,7 @@ func highlight(line string, lang language, inBlock *bool) []codeToken {
 			w := line[i:j]
 			col := colText
 			if lang.keywords[w] || lang.caseInsensed && lang.keywords[strings.ToLower(w)] {
-				col = codeKeyword
+				col = pal.keyword
 			}
 			emit(w, col)
 			i = j
@@ -643,9 +674,10 @@ func (a *App) layoutMarkdown(pg *textPage, text string, width float32) {
 			}
 			y -= gap * 0.65 // list items sit close together
 		case mdCode, mdTable:
+			pal := activeTextPalette()
 			f := u.mono(12.5)
 			lh := float32(int(f.Height()*1.45 + 0.5))
-			pg.lines = append(pg.lines, pageLine{y: y, h: u.px(8), bg: codeBand})
+			pg.lines = append(pg.lines, pageLine{y: y, h: u.px(8), bg: pal.band})
 			y += u.px(8)
 			lang := codeLanguage("." + b.lang)
 			inBlock := false
@@ -667,10 +699,10 @@ func (a *App) layoutMarkdown(pg *textPage, text string, width float32) {
 						x += f.Measure(t.text)
 					}
 				}
-				pg.lines = append(pg.lines, pageLine{y: y, h: lh, bg: codeBand, runs: runs})
+				pg.lines = append(pg.lines, pageLine{y: y, h: lh, bg: pal.band, runs: runs})
 				y += lh
 			}
-			pg.lines = append(pg.lines, pageLine{y: y, h: u.px(8), bg: codeBand})
+			pg.lines = append(pg.lines, pageLine{y: y, h: u.px(8), bg: pal.band})
 			y += u.px(8)
 		case mdRule:
 			pg.lines = append(pg.lines, pageLine{y: y, h: u.px(12), rule: true})
@@ -701,7 +733,7 @@ func (a *App) flow(pg *textPage, spans []span, face *gfx.Face, col color.RGBA, i
 			f = u.fonts.Bold.Face(face.Size) // the same size, in bold
 		}
 		if sp.link {
-			c = linkColour
+			c = activeTextPalette().link
 		}
 		for _, w := range wrapWords(sp.text) {
 			ww := f.Measure(w)

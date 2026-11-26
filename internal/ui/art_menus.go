@@ -393,33 +393,68 @@ func (a *App) antsOf(ad *artDoc, vp gfx.Rect, sel *paint.Mask) selectionAnts {
 		int(math.Ceil((float64(area.Max.X)-sx)/scale))+1, int(math.Ceil((float64(area.Max.Y)-sy)/scale))+1)
 	m := sel.ReadLevel(l, lr)
 	w, h := area.Dx()+2, area.Dy()+2 // a pixel more each side, for the neighbours
-	in := make([]bool, w*h)
+	lrW, lrH := lr.Dx(), lr.Dy()
+	invScale := 1 / scale
+	lxMap := make([]int, w)
+	for i := range w {
+		lx := int(math.Floor((float64(area.Min.X-1+i)+0.5-sx)*invScale)) - lr.Min.X
+		if lx < 0 || lx >= lrW {
+			lx = -1
+		}
+		lxMap[i] = lx
+	}
+	fillIn := sel.Fill() >= 128
+	in := make([]uint8, w*h)
 	for j := range h {
-		ly := int(math.Floor((float64(area.Min.Y-1+j)+0.5-sy)/scale)) - lr.Min.Y
-		for i := range w {
-			lx := int(math.Floor((float64(area.Min.X-1+i)+0.5-sx)/scale)) - lr.Min.X
-			v := sel.Fill()
-			if lx >= 0 && ly >= 0 && lx < lr.Dx() && ly < lr.Dy() {
-				v = m.Pix[ly*m.Stride+lx]
+		ly := int(math.Floor((float64(area.Min.Y-1+j)+0.5-sy)*invScale)) - lr.Min.Y
+		irow := in[j*w : j*w+w]
+		if ly < 0 || ly >= lrH {
+			if fillIn {
+				for i := range irow {
+					irow[i] = 1
+				}
 			}
-			in[j*w+i] = v >= 128
+			continue
+		}
+		mrow := m.Pix[ly*m.Stride : ly*m.Stride+lrW]
+		for i, lx := range lxMap {
+			if lx >= 0 {
+				if mrow[lx] >= 128 {
+					irow[i] = 1
+				}
+			} else if fillIn {
+				irow[i] = 1
+			}
 		}
 	}
-	out.img, out.at = image.NewRGBA(image.Rect(0, 0, area.Dx(), area.Dy())), area.Min
+	if ad.ants.img != nil && ad.ants.img.Rect.Dx() == area.Dx() && ad.ants.img.Rect.Dy() == area.Dy() {
+		clear(ad.ants.img.Pix)
+		out.img = ad.ants.img
+	} else {
+		out.img = image.NewRGBA(image.Rect(0, 0, area.Dx(), area.Dy()))
+	}
+	out.at = area.Min
 	dash := max(int(u.px(4)), 2)
+	dashY := dash + 1
 	for j := 1; j < h-1; j++ {
+		prevRow := in[(j-1)*w : j*w]
+		curRow := in[j*w : (j+1)*w]
+		nextRow := in[(j+1)*w : (j+2)*w]
+		drow := out.img.Pix[(j-1)*out.img.Stride:]
+		yDash := (area.Min.Y + j) / dashY
 		for i := 1; i < w-1; i++ {
-			k := j*w + i
-			if !in[k] || in[k-1] && in[k+1] && in[k-w] && in[k+w] {
+			if curRow[i] == 0 || (curRow[i-1]&curRow[i+1]&prevRow[i]&nextRow[i]) != 0 {
 				continue
 			}
 			// Black and white in tiles a pixel taller than wide, so an edge running any way alternates: in squares, a 45°
 			// edge can cross from tile to tile at corners only, and keep one colour all along.
 			c := colBlack
-			if ((area.Min.X+i)/dash+(area.Min.Y+j)/(dash+1))%2 == 1 {
+			if ((area.Min.X+i)/dash+yDash)&1 == 1 {
 				c = colWhite
 			}
-			out.img.SetRGBA(i-1, j-1, c)
+			o := (i - 1) * 4
+			p := drow[o : o+4 : o+4]
+			p[0], p[1], p[2], p[3] = c.R, c.G, c.B, c.A
 		}
 	}
 	return out

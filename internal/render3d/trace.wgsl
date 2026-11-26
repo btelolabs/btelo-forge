@@ -9,7 +9,7 @@ struct Params {
   ahead: vec4<f32>,     // w: the number of this sample, from 0
   sun_dir: vec4<f32>,   // w: its size, the sine of its half angle
   sun: vec4<f32>,       // its light; w: bounces
-  sky: vec4<f32>,       // cos and sin of the sky's rotation, whether it shows, how high the ground is
+  sky: vec4<f32>,       // cos and sin of the sky's rotation, backdrop mode (1=sky, 0=dark, -1=light), how high the ground is
   band: vec4<f32>,      // the band's first row and its height, whether there is a ground, how far it fades out to
 };
 
@@ -217,6 +217,9 @@ fn tonemap(c: vec3<f32>) -> vec3<f32> {
 }
 
 fn background(d: vec3<f32>, y: f32) -> vec3<f32> {
+  if (params.sky.z < -0.5) {
+    return mix(vec3<f32>(0.68, 0.74, 0.92), vec3<f32>(1.59, 1.74, 2.44), y);
+  }
   if (params.sky.z < 0.5) {
     return mix(vec3<f32>(0.0066, 0.0075, 0.0091), vec3<f32>(0.022, 0.025, 0.03), y);
   }

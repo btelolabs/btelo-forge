@@ -201,7 +201,7 @@ func (a *App) liveBlocker() string {
 	l := &a.onAir
 	switch {
 	case !capture.Supported():
-		return a.u.t("Live streaming works on Windows")
+		return a.u.t("Live streaming is not supported on this system")
 	case a.tools.err != nil:
 		text, _ := a.toolsStatus()
 		return text
@@ -487,7 +487,7 @@ func (a *App) liveCard() startCard {
 	l := &a.onAir
 	hint := ""
 	if !capture.Supported() {
-		hint = u.t("Live streaming works on Windows")
+		hint = u.t("Live streaming is not supported on this system")
 	}
 	action := u.t("Go live…")
 	if l.stream != nil {
@@ -498,7 +498,7 @@ func (a *App) liveCard() startCard {
 	if a.cam.bubble != nil {
 		cameraHint = u.t("The camera is on the screen — open its settings")
 	}
-	return startCard{id: "empty/live", glyph: icLive, hue: gfx.Hex(0xe8618c), title: u.t("Go live"),
+	return startCard{id: "empty/live", glyph: icLive, hue: themeHex(0xe8618c, 0xcf386a), title: u.t("Go live"),
 		text:   u.t("Stream to several platforms at once, with your camera."),
 		action: action, enabled: capture.Supported() && !l.starting && a.export == nil, hint: hint, run: a.openLive,
 		extra: &startExtra{id: "empty/camera", glyph: icVideo, hint: cameraHint, enabled: capture.Supported() && overlays && a.export == nil,
@@ -584,6 +584,9 @@ func (a *App) liveBody(in gfx.Rect) float32 {
 		d := s.Destinations[i]
 		row := rectAt(in.X, y, in.W-u.px(8), u.px(54))
 		u.c.Fill(row, colSurface)
+		if !isDarkTheme() {
+			u.c.Outline(row, max(1, u.px(1)), colBorder)
+		}
 		id := "live/dest/" + d.ID
 		problem := a.destinationProblem(d)
 		if l.stream == nil {

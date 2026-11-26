@@ -280,6 +280,10 @@ func (d *Doc) compositeInto(dst *image.RGBA, g *Node, r image.Rectangle, l int) 
 				d.drawStyled(dst, c, reachAt, l)
 				continue
 			}
+			if c.Pixels != nil {
+				blendRaster(dst, c.Pixels, l, at, c.Opacity, c.Blend, maskPix, maskFill)
+				continue
+			}
 			blendPixels(dst, readLayer(c, at, l), at, c.Opacity, c.Blend, maskPix, maskFill)
 			continue
 		}

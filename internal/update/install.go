@@ -92,7 +92,11 @@ func (t Target) Pairs(staged string) ([]Pair, error) {
 		return pairs, nil
 	case "darwin":
 		bundle := filepath.Join(root, macBundle)
-		if st, err := os.Stat(filepath.Join(bundle, "Contents", "MacOS", macProgram)); err != nil || !st.Mode().IsRegular() {
+		st, err := os.Stat(filepath.Join(bundle, "Contents", "MacOS", macProgram))
+		if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0o111 == 0 {
+			return nil, ErrNotThisApp
+		}
+		if plist, err := os.Stat(filepath.Join(bundle, "Contents", "Info.plist")); err != nil || !plist.Mode().IsRegular() {
 			return nil, ErrNotThisApp
 		}
 		return []Pair{{From: bundle, To: t.Launch}}, nil
@@ -179,7 +183,8 @@ func unpackLink(f *zip.File, name, dest string) error {
 		return err
 	}
 	link := string(target)
-	if path.IsAbs(link) || strings.HasPrefix(path.Clean(path.Join(path.Dir(name), link)), "../") {
+	resolved := path.Clean(path.Join(path.Dir(name), link))
+	if path.IsAbs(link) || resolved == ".." || strings.HasPrefix(resolved, "../") {
 		return fmt.Errorf("the archive's link %q points outside it", f.Name)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -234,6 +239,11 @@ func Replace(pairs []Pair) error {
 			return err
 		}
 		placed[i] = true
+	}
+	// Touch replaced bundles/files so macOS LaunchServices and Finder refresh cached Info.plist and icons.
+	now := time.Now()
+	for _, p := range pairs {
+		_ = os.Chtimes(p.To, now, now)
 	}
 	return nil
 }

@@ -408,7 +408,12 @@ func (a *App) drawAnimPreview(id string, r gfx.Rect) {
 	}
 	a.drawPicturePreview(id, r, p.frame, false)
 	bar := gfx.Rect{X: r.X + u.px(10), Y: r.Bottom() - u.px(30), W: u.px(160), H: u.px(22)}
-	u.c.Fill(bar, gfx.Alpha(colBlack, 0.55))
+	if isDarkTheme() {
+		u.c.Fill(bar, gfx.Alpha(colBlack, 0.55))
+	} else {
+		u.c.Fill(bar, gfx.Alpha(colPanel, 0.92))
+		u.c.Outline(bar, max(1, u.px(1)), colBorder)
+	}
 	u.label(u.face(11.5), bar, u.tf("%d frames · %s", p.anim.Len(), mediaLength(p.anim.Duration().Seconds())), colDim, 0.5)
 }
 
@@ -547,19 +552,20 @@ func (a *App) drawMediaPreview(id string, r gfx.Rect) {
 	}
 	if p.sound {
 		mid := view.Y + view.H/2
+		_, audioHue := kindLook(assets.Audio)
 		if len(p.peaks) > 0 {
 			bw := view.W / float32(len(p.peaks))
 			at := float32(a.previewPosition() / max(p.length, 0.001))
 			for i, v := range p.peaks {
 				h := max(u.px(1), v*view.H*0.4)
-				col := gfx.Alpha(gfx.Hex(0x3fc28a), 0.45)
+				col := gfx.Alpha(audioHue, 0.45)
 				if float32(i)/float32(len(p.peaks)) < at {
-					col = gfx.Hex(0x3fc28a)
+					col = audioHue
 				}
 				u.c.Fill(gfx.Rect{X: view.X + float32(i)*bw + bw*0.2, Y: mid - h, W: max(bw*0.6, 1), H: 2 * h}, col)
 			}
 		} else {
-			u.icon(icMusic, view, 48, gfx.Hex(0x3fc28a))
+			u.icon(icMusic, view, 48, audioHue)
 		}
 	} else {
 		fit := fitRect(view, float32(p.proj.Canvas.Width), float32(p.proj.Canvas.Height))
@@ -600,7 +606,12 @@ func (a *App) drawMediaPreview(id string, r gfx.Rect) {
 		}
 	}
 
-	u.c.Fill(bar, gfx.Alpha(colBlack, 0.35))
+	if isDarkTheme() {
+		u.c.Fill(bar, gfx.Alpha(colBlack, 0.35))
+	} else {
+		u.c.Fill(bar, gfx.Alpha(colPanel, 0.92))
+		u.c.Fill(gfx.Rect{X: bar.X, Y: bar.Y, W: bar.W, H: max(1, u.px(1))}, colBorder)
+	}
 	glyph := icPlay
 	if playing {
 		glyph = icPause
@@ -685,7 +696,11 @@ func (a *App) seekBar(id string, r gfx.Rect, at, length float64) (float64, seekS
 		u.cursor = CursorHand
 	}
 	track := gfx.Rect{X: r.X, Y: r.Y + (r.H-thick)/2, W: r.W, H: thick}
-	u.c.Fill(track, colSurfaceHi)
+	trackCol := colSurfaceHi
+	if !isDarkTheme() {
+		trackCol = colBorder
+	}
+	u.c.Fill(track, trackCol)
 	done := float32(0)
 	if length > 0 {
 		done = float32(min(max(at/length, 0), 1))
@@ -702,7 +717,7 @@ func (a *App) seekBar(id string, r gfx.Rect, at, length float64) (float64, seekS
 			w := f.Measure(text) + u.px(12)
 			tip := gfx.Rect{X: min(max(u.mx-w/2, r.X-u.px(10)), r.Right()-w+u.px(10)), Y: r.Y - u.px(26), W: w, H: u.px(22)}
 			u.c.Fill(tip, gfx.Alpha(colBlack, 0.75))
-			u.label(f, tip, text, colText, 0.5)
+			u.label(f, tip, text, colWhite, 0.5)
 		}
 	}
 	switch {

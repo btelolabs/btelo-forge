@@ -121,6 +121,7 @@ func (a *App) probeMovie(m *movieDoc) {
 			switch {
 			case err != nil:
 				m.problem = a.u.tf("Cannot open %s: %s", filepath.Base(path), a.describe(err))
+				a.logError("movie", m.problem, err)
 			case !info.HasVideo && !info.HasAudio || info.Duration <= 0:
 				m.problem = a.u.tf("%s has neither pictures nor sound to play", filepath.Base(path))
 			default:
@@ -452,6 +453,9 @@ func (a *App) syncMovie(m *movieDoc) {
 func (a *App) drawMovie(r gfx.Rect) {
 	u := &a.u
 	m := a.movie
+	if m == nil {
+		return
+	}
 	a.probeMovie(m)
 	a.syncMovie(m)
 	if u.mx != m.mouse[0] || u.my != m.mouse[1] {
@@ -474,12 +478,12 @@ func (a *App) drawMovie(r gfx.Rect) {
 	}
 	switch {
 	case m.problem != "":
-		u.icon(icVideo, rectAt(view.X, view.Y+view.H/2-u.px(60), view.W, u.px(48)), 40, colFaint)
-		u.label(u.face(13), rectAt(view.X+u.px(16), view.Y+view.H/2, view.W-u.px(32), u.px(24)), m.problem, colDangerText, 0.5)
+		u.icon(icVideo, rectAt(view.X, view.Y+view.H/2-u.px(60), view.W, u.px(48)), 40, darkPalette.faint)
+		u.label(u.face(13), rectAt(view.X+u.px(16), view.Y+view.H/2, view.W-u.px(32), u.px(24)), m.problem, darkPalette.dangerText, 0.5)
 	case !a.tools.ready:
-		u.label(u.face(13), view, u.tf("%s opens as soon as ffmpeg is ready", filepath.Base(m.path)), colFaint, 0.5)
+		u.label(u.face(13), view, u.tf("%s opens as soon as ffmpeg is ready", filepath.Base(m.path)), darkPalette.faint, 0.5)
 	case !m.probed:
-		u.label(u.face(13), view, u.t("Loading the preview…"), colFaint, 0.5)
+		u.label(u.face(13), view, u.t("Loading the preview…"), darkPalette.faint, 0.5)
 	default:
 		a.drawMoviePicture(m, view)
 	}
@@ -498,12 +502,16 @@ func (a *App) drawMovie(r gfx.Rect) {
 			w := f.Measure(m.osd) + u.px(28)
 			box := rectAt(view.Right()-w-u.px(20), view.Y+u.px(20), w, u.px(38))
 			u.c.Fill(box, gfx.Alpha(colBlack, 0.6))
-			u.label(f, box, m.osd, colText, 0.5)
+			u.label(f, box, m.osd, colWhite, 0.5)
 		}
 	}
 	if showBar {
 		if m.full {
-			u.c.Fill(bar, gfx.Alpha(colBlack, 0.6))
+			if isDarkTheme() {
+				u.c.Fill(bar, gfx.Alpha(colBlack, 0.6))
+			} else {
+				u.c.Fill(bar, gfx.Alpha(colPanel, 0.92))
+			}
 		} else {
 			u.c.Fill(bar, colPanel)
 		}
@@ -516,7 +524,7 @@ func (a *App) drawMoviePicture(m *movieDoc, view gfx.Rect) {
 	u := &a.u
 	if !m.info.HasVideo {
 		u.icon(icMusic, view, 64, gfx.Hex(0x3fc28a))
-		u.label(u.bold(14), rectAt(view.X, view.Y+view.H/2+u.px(44), view.W, u.px(24)), filepath.Base(m.path), colDim, 0.5)
+		u.label(u.bold(14), rectAt(view.X, view.Y+view.H/2+u.px(44), view.W, u.px(24)), filepath.Base(m.path), darkPalette.dim, 0.5)
 		a.movieAutoplay(m)
 		return
 	}

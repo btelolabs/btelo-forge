@@ -368,7 +368,7 @@ func (m *pieMotion) arcAt(arcs []pieArc, dist, angle float64) *pieArc {
 func (a *App) drawPie(fd *filesDoc, i int, p *filesPane, id string, r gfx.Rect, node *files.Node, wedges []pieWedge) {
 	u := &a.u
 	// A card like those of the work in the corner, floating over the rows.
-	u.c.Outline(r.Inset(-u.px(1)), u.px(4), gfx.Alpha(colBlack, 0.35))
+	u.c.Outline(r.Inset(-u.px(1)), u.px(4), colShadow)
 	u.c.Fill(r, colSurface)
 	u.c.Outline(r, max(1, u.px(1)), colBorderHi)
 	labelH := u.px(46)
@@ -454,7 +454,11 @@ func (a *App) drawPie(fd *filesDoc, i int, p *filesPane, id string, r gfx.Rect, 
 	// The whole folder in the middle.
 	colTotal := colText
 	if middle {
-		colTotal = colWhite
+		if isDarkTheme() {
+			colTotal = colWhite
+		} else {
+			colTotal = colAccent
+		}
 	}
 	u.label(u.bold(14), gfx.Rect{X: cx - radius*pieEdges[0], Y: cy - u.px(10), W: 2 * radius * pieEdges[0], H: u.px(20)}, sizeText(node.Size), colTotal, 0.5)
 

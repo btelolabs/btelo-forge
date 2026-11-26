@@ -16,34 +16,38 @@ struct Params {
 
 fn at(x: i32, y: i32) -> i32 { return y * i32(p.size.x) + x; }
 
-@compute @workgroup_size(1)
+@compute @workgroup_size(64)
 fn across(@builtin(global_invocation_id) id: vec3u) {
-    let y = i32(id.y);
+    let y = i32(id.x);
+    let h = i32(p.size.y);
+    if (y >= h) { return; }
     let w = i32(p.size.x);
     let r = i32(p.size.z);
     var sum = vec4f(0.0);
     for (var i = -r; i <= r; i++) {
         sum += from[at(clamp(i, 0, w - 1), y)];
     }
-    let k = f32(2 * r + 1);
+    let invK = 1.0 / f32(2 * r + 1);
     for (var x = 0; x < w; x++) {
-        into[at(x, y)] = sum / k;
+        into[at(x, y)] = sum * invK;
         sum += from[at(min(x + r + 1, w - 1), y)] - from[at(max(x - r, 0), y)];
     }
 }
 
-@compute @workgroup_size(1)
+@compute @workgroup_size(64)
 fn down(@builtin(global_invocation_id) id: vec3u) {
-    let x = i32(id.y);
+    let x = i32(id.x);
+    let w = i32(p.size.x);
+    if (x >= w) { return; }
     let h = i32(p.size.y);
     let r = i32(p.size.z);
     var sum = vec4f(0.0);
     for (var i = -r; i <= r; i++) {
         sum += from[at(x, clamp(i, 0, h - 1))];
     }
-    let k = f32(2 * r + 1);
+    let invK = 1.0 / f32(2 * r + 1);
     for (var y = 0; y < h; y++) {
-        into[at(x, y)] = sum / k;
+        into[at(x, y)] = sum * invK;
         sum += from[at(x, min(y + r + 1, h - 1))] - from[at(x, max(y - r, 0))];
     }
 }
@@ -53,7 +57,7 @@ const edge = 0.003; // surroundingsEdge
 fn brightness(c: vec3f) -> f32 { return dot(c, vec3f(0.299, 0.587, 0.114)); }
 
 // The brightness and its square, to box.
-@compute @workgroup_size(64)
+@compute @workgroup_size(256)
 fn light(@builtin(global_invocation_id) id: vec3u) {
     let i = id.x;
     if (i >= arrayLength(&from)) { return; }
@@ -64,7 +68,7 @@ fn light(@builtin(global_invocation_id) id: vec3u) {
 }
 
 // From the boxed brightness and square, the guided filter's gain and base, to box.
-@compute @workgroup_size(64)
+@compute @workgroup_size(256)
 fn guide(@builtin(global_invocation_id) id: vec3u) {
     let i = id.x;
     if (i >= arrayLength(&from)) { return; }
@@ -130,7 +134,7 @@ fn lit(v: f32, wb: f32) -> f32 {
 }
 
 // Each pixel with its surroundings: from is the picture, also the boxed gain and base, into what it becomes.
-@compute @workgroup_size(64)
+@compute @workgroup_size(256)
 fn tones(@builtin(global_invocation_id) id: vec3u) {
     let i = id.x;
     if (i >= arrayLength(&from)) { return; }

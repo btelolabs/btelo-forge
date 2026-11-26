@@ -107,6 +107,7 @@ func (u *ctx) tcs(context string, list []string) []string {
 
 // describe turns an error into a message for the user, translating the ones the app knows.
 func (a *App) describe(err error) string {
+	a.lastErr = err
 	var small *render.TargetTooSmall
 	if errors.As(err, &small) {
 		return a.u.tf("The target size is too small for this video; allow at least %.1f MB", small.MinimumMB)
@@ -143,7 +144,7 @@ var knownErrors = []struct {
 	{render.ErrEncoderMissing, "This ffmpeg cannot encode the chosen format; pick another format or install a full ffmpeg build"},
 	{render.ErrCredits, "The video was exported, but its credits file could not be written"},
 	{paint.ErrHidden, "The chosen layer is hidden; show it to paint on it"},
-	{errNoMatting, "Finding a subject works on Windows for now"},
+	{errNoMatting, "Finding a subject is not supported on this computer"},
 	{psd.ErrNotPSD, "This is not a Photoshop file, or it is damaged"},
 	{psd.ErrUnsupported, "This Photoshop file is CMYK, Lab, 32-bit or a large document, which cannot be opened"},
 	{paint.ErrNothingToSample, "There is too little picture around the area to fill it from"},
@@ -175,13 +176,14 @@ var knownErrors = []struct {
 	{capture.ErrNoDisplay, "No screen that can be recorded is attached to this computer"},
 	{capture.ErrNoGrabber, "This ffmpeg cannot grab the screen (it was built without ddagrab); choose a full ffmpeg build in Settings → Extensions"},
 	{capture.ErrSystemSound, "The computer's sound could not be recorded"},
-	{capture.ErrMicrophone, "The microphone could not be recorded; check that it is plugged in and that Windows lets apps use it (Settings → Privacy → Microphone)"},
+	{capture.ErrMicrophone, "The microphone could not be recorded; check that it is plugged in and that the system lets apps use it (Settings → Privacy → Microphone)"},
+	{capture.ErrScreenPermission, "Screen recording permission is required in System Settings → Privacy & Security → Screen & System Audio Recording"},
+	{capture.ErrCameraPermission, "Camera permission is required in System Settings → Privacy & Security → Camera"},
+	{capture.ErrMicPermission, "Microphone permission is required in System Settings → Privacy & Security → Microphone"},
 	{capture.ErrNothingRecorded, "Nothing was recorded"},
 	{capture.ErrNoTargets, "Choose at least one destination to stream to"},
 	{capture.ErrTargetAddress, "The server address must start with rtmp://, rtmps:// or srt://"},
 }
-
-var gfxShade = gfx.Alpha(colBlack, 0.55)
 
 func rectAt(x, y, w, h float32) gfx.Rect { return gfx.Rect{X: x, Y: y, W: w, H: h} }
 

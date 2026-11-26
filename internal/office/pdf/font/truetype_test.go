@@ -5,7 +5,6 @@ import (
 	"math"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -22,17 +21,8 @@ func pathsEqual(a, b Path) bool {
 	return true
 }
 
-func windowsFont(t *testing.T, name string) []byte {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join(`C:\Windows\Fonts`, name))
-	if err != nil {
-		t.Skip("no ", name)
-	}
-	return b
-}
-
 func TestArial(t *testing.T) {
-	f, err := ParseTrueType(windowsFont(t, "arial.ttf"), 0)
+	f, err := ParseTrueType(arialFont(t), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,8 +98,8 @@ func TestArial(t *testing.T) {
 }
 
 func TestCollections(t *testing.T) {
-	for _, name := range []string{"simsun.ttc", "msyh.ttc"} {
-		data := windowsFont(t, name)
+	for _, col := range cjkCollections(t) {
+		name, data := col.name, col.data
 		for index := 0; index < 2; index++ {
 			f, err := ParseTrueType(data, index)
 			if err != nil {
@@ -136,7 +126,7 @@ func TestCollections(t *testing.T) {
 }
 
 func TestOpenTypeFonts(t *testing.T) {
-	files, _ := filepath.Glob(`C:\Windows\Fonts\*.otf`)
+	files := openTypeFontPaths()
 	found := false
 	for _, path := range files {
 		data, err := os.ReadFile(path)
@@ -366,7 +356,7 @@ func TestSubsetKeepsComponents(t *testing.T) {
 }
 
 func TestSubsetArial(t *testing.T) {
-	f, err := ParseTrueType(windowsFont(t, "arial.ttf"), 0)
+	f, err := ParseTrueType(arialFont(t), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +462,7 @@ func exerciseType1(data []byte) {
 
 func TestTruncation(t *testing.T) {
 	start := time.Now()
-	data := windowsFont(t, "arial.ttf")
+	data := arialFont(t)
 	step := len(data)/300 + 1
 	for n := 0; n < len(data); n += step {
 		exerciseTrueType(data[:n], 16)
@@ -488,7 +478,7 @@ func TestTruncation(t *testing.T) {
 
 func TestByteFlips(t *testing.T) {
 	start := time.Now()
-	data := windowsFont(t, "arial.ttf")
+	data := arialFont(t)
 	rng := rand.New(rand.NewSource(1))
 	buf := make([]byte, len(data))
 	// The directory, the tables near it, then bytes anywhere.

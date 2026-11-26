@@ -85,9 +85,9 @@ func (a *App) goUp(p *filesPane) {
 	}
 	parent := filepath.Dir(p.dir)
 	if parent == p.dir {
-		// Above a drive's own folder are the drives, where there are several.
-		if vol := filepath.VolumeName(p.dir); vol != "" && len(a.knownDrives()) > 0 {
-			a.goTo(p, thisPC, vol)
+		// Above a drive's own folder are the drives, where there are any.
+		if drives := a.knownDrives(); len(drives) > 0 {
+			a.goTo(p, thisPC, driveNameFor(drives, p.dir))
 		}
 		return
 	}
@@ -175,10 +175,10 @@ func (a *App) previewEntry(fd *filesDoc) (string, files.Entry) {
 // window, its details, tags and categories. A click in the preview gives it the keys; a click outside closes it.
 func (a *App) drawPreviewOverlay(fd *filesDoc, r gfx.Rect) {
 	u := &a.u
-	u.c.Fill(r, gfx.Alpha(colBlack, 0.55))
+	u.c.Fill(r, gfxShade)
 	margin := min(u.px(28), r.W/16, r.H/16)
 	card := r.Inset(margin)
-	u.c.Outline(card.Inset(-u.px(2)), u.px(6), gfx.Alpha(colBlack, 0.4))
+	u.c.Outline(card.Inset(-u.px(2)), u.px(6), colShadow)
 	u.c.Fill(card, colBackground)
 	u.c.Outline(card, max(1, u.px(1)), colBorderHi)
 	path, entry := a.previewEntry(fd)
@@ -1395,7 +1395,7 @@ func (a *App) drawFileJobs(r gfx.Rect) float32 {
 		y -= h
 		box := gfx.Rect{X: r.Right() - w - u.px(12), Y: y, W: w, H: h}
 		y -= u.px(8)
-		u.c.Outline(box.Inset(-u.px(1)), u.px(4), gfx.Alpha(colBlack, 0.35))
+		u.c.Outline(box.Inset(-u.px(1)), u.px(4), colShadow)
 		u.c.Fill(box, colSurface)
 		u.c.Outline(box, max(1, u.px(1)), colBorderHi)
 		in := box.Inset(u.px(12))
@@ -1423,7 +1423,11 @@ func (a *App) drawFileJobs(r gfx.Rect) float32 {
 		u.label(f, rectAt(in.X, in.Y+u.px(22), in.W-dw-u.px(12), u.px(18)), cur, colDim, 0)
 		u.label(f, rectAt(in.Right()-dw, in.Y+u.px(22), dw, u.px(18)), detail, colDim, 1)
 		bar := gfx.Rect{X: in.X, Y: in.Bottom() - u.px(5), W: in.W, H: u.px(5)}
-		u.c.Fill(bar, colPanel)
+		barBg := colPanel
+		if !isDarkTheme() {
+			barBg = colSurfaceHi
+		}
+		u.c.Fill(bar, barBg)
 		if frac < 0 {
 			// Not known yet: a piece sweeps across.
 			t := float32(time.Since(j.started).Seconds())

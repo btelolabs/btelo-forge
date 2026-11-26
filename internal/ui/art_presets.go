@@ -125,7 +125,7 @@ func (a *App) drawPresets() {
 	ps := paint.Presets()
 	box, cells := presetsLayout(u, m.anchor, len(ps))
 	pad := u.px(12)
-	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, gfx.Alpha(colBlack, 0.35))
+	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, colShadow)
 	u.c.Fill(box, colSurface)
 	u.c.Outline(box, max(1, u.px(1)), colBorder)
 	u.heading(gfx.Rect{X: box.X + pad, Y: box.Y + pad, W: box.W - 2*pad, H: u.px(20)}, u.t("Brush presets"))
@@ -214,8 +214,13 @@ func drawCoverage(u *ctx, cover *image.Alpha, r gfx.Rect) {
 				continue
 			}
 			old := img.RGBAAt(ox+x, oy+y)
-			mix := func(o uint8) uint8 { return uint8(float32(o)*(1-k) + 235*k) }
-			img.SetRGBA(ox+x, oy+y, color.RGBA{mix(old.R), mix(old.G), mix(old.B), 255})
+			if isDarkTheme() {
+				mix := func(o uint8) uint8 { return uint8(float32(o)*(1-k) + 235*k) }
+				img.SetRGBA(ox+x, oy+y, color.RGBA{mix(old.R), mix(old.G), mix(old.B), 255})
+			} else {
+				mix := func(o, t uint8) uint8 { return uint8(float32(o)*(1-k) + float32(t)*k) }
+				img.SetRGBA(ox+x, oy+y, color.RGBA{mix(old.R, colText.R), mix(old.G, colText.G), mix(old.B, colText.B), 255})
+			}
 		}
 	}
 }

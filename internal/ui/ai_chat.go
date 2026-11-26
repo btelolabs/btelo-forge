@@ -305,7 +305,11 @@ func (a *App) drawAIStatus(r gfx.Rect, ch ai.Choice) {
 	u.c.Text(f, r.X+u.px(16), r.Y+(r.H-f.Height())/2, f.Ellipsize(text, r.W-u.px(16)), col)
 	if fraction != -1 {
 		bar := rectAt(r.X, r.Bottom()-u.px(2), r.W, u.px(2))
-		u.c.Fill(bar, colSurface)
+		barBg := colSurface
+		if !isDarkTheme() {
+			barBg = colBorder
+		}
+		u.c.Fill(bar, barBg)
 		if fraction >= 0 {
 			u.c.Fill(rectAt(bar.X, bar.Y, bar.W*float32(fraction), bar.H), colAccent)
 		} else {
@@ -680,6 +684,9 @@ func (a *App) drawAIReply(col gfx.Rect, y float32, i int, text, thinking string,
 	s := &a.ai
 	icon := rectAt(col.X, y+u.px(2), u.px(28), u.px(28))
 	u.c.Circle(icon.X+icon.W/2, icon.Y+icon.H/2, u.px(13), colSurface)
+	if !isDarkTheme() {
+		u.c.RoundOutline(rectAt(icon.X+u.px(1), icon.Y+u.px(1), u.px(26), u.px(26)), u.px(13), max(1, u.px(1)), colBorder)
+	}
 	u.icon(icAI, icon, 16, colDim)
 	x := col.X + u.px(40)
 	w := col.W - u.px(40)
@@ -788,6 +795,9 @@ func (a *App) drawAIAnswer(col gfx.Rect, y float32, i int, ans *aiAnswer) float3
 		}
 		icon := rectAt(col.X, y+u.px(2), u.px(28), u.px(28))
 		u.c.Circle(icon.X+icon.W/2, icon.Y+icon.H/2, u.px(13), colSurface)
+		if !isDarkTheme() {
+			u.c.RoundOutline(rectAt(icon.X+u.px(1), icon.Y+u.px(1), u.px(26), u.px(26)), u.px(13), max(1, u.px(1)), colBorder)
+		}
 		u.icon(icAI, icon, 16, colDim)
 		dots := strings.Repeat(".", 1+int(time.Now().UnixMilli()/400%3))
 		u.c.Text(u.face(13), col.X+u.px(40), y+u.px(8), strings.TrimSuffix(label, "…")+dots, colDim)
@@ -963,6 +973,9 @@ func (a *App) drawAIPicker(main, pill gfx.Rect, current ai.Choice) {
 	r := rectAt(max(pill.X, main.X+u.px(12)), pill.Bottom()+u.px(6), w, h)
 	if r.Right() > main.Right()-u.px(12) {
 		r.X = main.Right() - u.px(12) - w
+	}
+	if !isDarkTheme() {
+		u.c.Outline(r.Inset(-u.px(1)), u.px(4), colShadow)
 	}
 	u.c.Fill(r, colSurface)
 	u.c.Outline(r, max(1, u.px(1)), colBorderHi)

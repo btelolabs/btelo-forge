@@ -171,8 +171,12 @@ func (a *App) drawModelMaterial(md *modelDoc, x, y, w float32) float32 {
 		}
 		colour := colText
 		if md.material == i {
-			u.c.Fill(r, modelHue)
-			colour = colBackground
+			if isDarkTheme() {
+				u.c.Fill(r, modelHue)
+				colour = colBackground
+			} else {
+				u.c.Fill(r, colSelected)
+			}
 		}
 		if u.press(id, r) {
 			md.material = i

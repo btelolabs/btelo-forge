@@ -148,9 +148,16 @@ func (a *App) drawSwatchPair(pair []colourSwatch) {
 	}
 }
 
+func swatchFrame() color.RGBA {
+	if isDarkTheme() {
+		return colWhite
+	}
+	return colBorderHi
+}
+
 // drawColourSwatch draws a colour as a swatch, over a checkerboard where it is transparent.
 func drawColourSwatch(u *ctx, r gfx.Rect, c color.NRGBA) {
-	u.c.Fill(r.Inset(-max(1, u.px(1))), colWhite)
+	u.c.Fill(r.Inset(-max(1, u.px(1))), swatchFrame())
 	drawTransparency(u, r)
 	u.c.Fill(r, color.RGBA{c.R, c.G, c.B, c.A})
 }
@@ -171,7 +178,7 @@ func drawTransparency(u *ctx, r gfx.Rect) {
 // drawPaintSwatch draws a paint as a swatch: its colour, a gradient's band, or white struck through for none; a
 // stroke's swatch is a frame, its middle the panel's.
 func drawPaintSwatch(u *ctx, r gfx.Rect, p paint.VectorPaint, stroke bool) {
-	u.c.Fill(r.Inset(-max(1, u.px(1))), colWhite)
+	u.c.Fill(r.Inset(-max(1, u.px(1))), swatchFrame())
 	switch {
 	case p.Kind == paint.PaintNone:
 		u.c.Fill(r, colWhite)

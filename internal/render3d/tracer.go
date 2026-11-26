@@ -287,6 +287,8 @@ func (r *Renderer) traceBand(cam *Camera, o Options, w, h int) error {
 	}
 	if o.ShowSky {
 		sky = 1
+	} else if o.Light {
+		sky = -1
 	}
 	size2 := max(bounds.Size().Length(), 1e-4)
 	reach := max(max(cam.Pos[1]-bounds.Min[1], size2*.05)*30, size2*6)
@@ -344,8 +346,12 @@ func (r *Renderer) readTraced(w, h int, out *image.RGBA) error {
 	if err := r.d.ReadBuffer(ctx, r.staging, r.row[:size]); err != nil {
 		return err
 	}
-	for y := range h {
-		copy(out.Pix[y*out.Stride:y*out.Stride+w*4], r.row[y*w*4:(y+1)*w*4])
+	if out.Stride == w*4 {
+		copy(out.Pix[:size], r.row[:size])
+	} else {
+		for y := range h {
+			copy(out.Pix[y*out.Stride:y*out.Stride+w*4], r.row[y*w*4:(y+1)*w*4])
+		}
 	}
 	return nil
 }

@@ -3,8 +3,10 @@
 package transcribe
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -103,14 +105,25 @@ func (m *Manager) Prepare(ctx context.Context, e Engine, model Model, progress P
 		if e.URL == "" {
 			return "", "", &MissingEngine{Engine: e.Name.In("en"), Install: e.Install}
 		}
-		zipPath := filepath.Join(m.dir, "engine", e.ID+"-"+urlKey(e.URL), "engine.zip")
-		if err := m.Download(ctx, e.URL, zipPath, e.Size, e.SHA256, func(f float64) { progress("engine", f) }); err != nil {
+		engineDir := filepath.Join(m.dir, "engine", e.ID+"-"+urlKey(e.URL))
+		archiveName := "engine.zip"
+		if isTarGz(urlPath(e.URL)) {
+			archiveName = "engine.tar.gz"
+		}
+		archivePath := filepath.Join(engineDir, archiveName)
+		if err := m.Download(ctx, e.URL, archivePath, e.Size, e.SHA256, func(f float64) { progress("engine", f) }); err != nil {
 			return "", "", fmt.Errorf("downloading the speech engine: %w", err)
 		}
-		if err := unzip(zipPath, filepath.Join(m.dir, "engine", e.ID+"-"+urlKey(e.URL))); err != nil {
-			return "", "", fmt.Errorf("unpacking the speech engine: %w", err)
+		var unpackErr error
+		if isTarGz(urlPath(e.URL)) {
+			unpackErr = untar(archivePath, engineDir)
+		} else {
+			unpackErr = unzip(archivePath, engineDir)
 		}
-		os.Remove(zipPath)
+		if unpackErr != nil {
+			return "", "", fmt.Errorf("unpacking the speech engine: %w", unpackErr)
+		}
+		os.Remove(archivePath)
 		if _, ok := m.EnginePath(e); !ok {
 			return "", "", fmt.Errorf("the speech engine archive has no %s", e.Executable)
 		}
@@ -275,9 +288,43 @@ func hashFile(h hash.Hash, path string, n int64) error {
 	return err
 }
 
-// unzip extracts an archive into dir, keeping its folders but dropping a top folder that holds everything, so the
-// program it carries lands in dir. Names may use either slash; one that would land outside dir fails the whole
-// archive.
+// cleanArchivePath normalizes an archive member name and rejects paths that escape dir.
+func cleanArchivePath(raw string) (string, error) {
+	name := path.Clean(strings.ReplaceAll(raw, `\`, "/"))
+	name = strings.TrimPrefix(name, "./")
+	if name == "." {
+		return ".", nil
+	}
+	if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, ":") {
+		return "", fmt.Errorf("the archive has a file outside its folder: %s", raw)
+	}
+	return name, nil
+}
+
+// safeSymlink checks that linkTarget, placed at dst inside dir, resolves inside dir.
+func safeSymlink(dir, dst, linkTarget string) error {
+	if linkTarget == "" || strings.HasPrefix(linkTarget, "/") || strings.Contains(linkTarget, `\`) || strings.Contains(linkTarget, ":") {
+		return fmt.Errorf("the archive has a symlink outside its folder: %s", linkTarget)
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(dst), filepath.FromSlash(linkTarget)))
+	rel, err := filepath.Rel(filepath.Clean(dir), resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("the archive has a symlink outside its folder: %s", linkTarget)
+	}
+	return nil
+}
+
+// fileModeFor returns 0o755 when any execute bit is set in mode, otherwise 0o644.
+func fileModeFor(mode os.FileMode) os.FileMode {
+	if mode&0o111 != 0 {
+		return 0o755
+	}
+	return 0o644
+}
+
+// unzip extracts an archive into dir, keeping its folders, symlinks and execute permissions, and dropping a top folder
+// that holds everything, so the program it carries lands in dir. Names may use either slash; one that would land
+// outside dir fails the whole archive.
 func unzip(archive, dir string) error {
 	r, err := zip.OpenReader(archive)
 	if err != nil {
@@ -287,11 +334,14 @@ func unzip(archive, dir string) error {
 	names := make([]string, len(r.File))
 	top, shared := "", true // the folder every entry is in, while there is one
 	for i, f := range r.File {
-		name := path.Clean(strings.ReplaceAll(f.Name, `\`, "/"))
-		if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, ":") {
-			return fmt.Errorf("the archive has a file outside its folder: %s", f.Name)
+		name, err := cleanArchivePath(f.Name)
+		if err != nil {
+			return err
 		}
 		names[i] = name
+		if name == "." {
+			continue
+		}
 		first, _, nested := strings.Cut(name, "/")
 		switch {
 		case !nested && !isDir(f), top != "" && first != top:
@@ -318,6 +368,26 @@ func unzip(archive, dir string) error {
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
 		}
+		if f.Mode()&os.ModeSymlink != 0 {
+			src, err := f.Open()
+			if err != nil {
+				return err
+			}
+			targetBytes, err := io.ReadAll(io.LimitReader(src, 4096))
+			src.Close()
+			if err != nil {
+				return err
+			}
+			target := string(targetBytes)
+			if err := safeSymlink(dir, dst, target); err != nil {
+				return err
+			}
+			os.Remove(dst)
+			if err := os.Symlink(target, dst); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := extract(f, dst); err != nil {
 			return err
 		}
@@ -334,7 +404,7 @@ func extract(f *zip.File, dst string) error {
 		return err
 	}
 	defer src.Close()
-	out, err := os.Create(dst)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileModeFor(f.Mode()))
 	if err != nil {
 		return err
 	}
@@ -343,6 +413,136 @@ func extract(f *zip.File, dst string) error {
 		err = cerr
 	}
 	return err
+}
+
+// untar extracts a .tar.gz / .tgz archive into dir with the same single-top-folder stripping, path validation, symlink
+// handling and execute-bit preservation as unzip.
+func untar(archive, dir string) error {
+	top, err := scanTarTop(archive)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if hdr.Typeflag == tar.TypeXHeader || hdr.Typeflag == tar.TypeXGlobalHeader || hdr.Typeflag == tar.TypeGNULongName || hdr.Typeflag == tar.TypeGNULongLink {
+			continue
+		}
+		name, err := cleanArchivePath(hdr.Name)
+		if err != nil {
+			return err
+		}
+		if top != "" {
+			name = strings.TrimPrefix(strings.TrimPrefix(name, top), "/")
+		}
+		if hdr.Typeflag == tar.TypeDir || name == "" || name == "." {
+			continue
+		}
+		dst := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		switch hdr.Typeflag {
+		case tar.TypeReg, tar.TypeRegA:
+			out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileModeFor(os.FileMode(hdr.Mode)))
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(out, tr)
+			if cerr := out.Close(); err == nil {
+				err = cerr
+			}
+			if err != nil {
+				return err
+			}
+		case tar.TypeSymlink:
+			if err := safeSymlink(dir, dst, hdr.Linkname); err != nil {
+				return err
+			}
+			os.Remove(dst)
+			if err := os.Symlink(hdr.Linkname, dst); err != nil {
+				return err
+			}
+		case tar.TypeLink:
+			target, err := cleanArchivePath(hdr.Linkname)
+			if err != nil {
+				return err
+			}
+			if top != "" {
+				target = strings.TrimPrefix(strings.TrimPrefix(target, top), "/")
+			}
+			linkSrc := filepath.Join(dir, filepath.FromSlash(target))
+			os.Remove(dst)
+			if err := os.Link(linkSrc, dst); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// scanTarTop validates all entry paths in archive and returns the shared top folder when every entry sits inside one.
+func scanTarTop(archive string) (string, error) {
+	f, err := os.Open(archive)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return "", err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	top, shared := "", true
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if hdr.Typeflag == tar.TypeXHeader || hdr.Typeflag == tar.TypeXGlobalHeader || hdr.Typeflag == tar.TypeGNULongName || hdr.Typeflag == tar.TypeGNULongLink {
+			continue
+		}
+		name, err := cleanArchivePath(hdr.Name)
+		if err != nil {
+			return "", err
+		}
+		if name == "." {
+			continue
+		}
+		first, _, nested := strings.Cut(name, "/")
+		switch {
+		case !nested && hdr.Typeflag != tar.TypeDir, top != "" && first != top:
+			shared = false
+		default:
+			top = first
+		}
+	}
+	if !shared {
+		return "", nil
+	}
+	return top, nil
 }
 
 // Line is one recognised caption.

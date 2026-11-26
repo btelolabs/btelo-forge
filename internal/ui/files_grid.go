@@ -283,14 +283,14 @@ func (a *App) filterChips(fd *filesDoc, p *filesPane, id string) []filterChip {
 	}
 	for _, cat := range lib.Categories() {
 		name := cat.Name
-		chips = append(chips, filterChip{id: id + "/chip/category/" + name, glyph: icCategory, name: name, hue: gfx.Hex(0xe8b04b),
+		chips = append(chips, filterChip{id: id + "/chip/category/" + name, glyph: icCategory, name: name, hue: categoryHue(),
 			count: cat.Files, chosen: f.what == showCategory && strings.EqualFold(f.name, name),
 			drop: func(paths []string) { a.setCategory(paths, name, true) }, menu: func() []menuItem { return a.categoryMenu(fd, name) },
 			pick: set(assetFilter{what: showCategory, name: name})})
 	}
 	for _, t := range lib.Tags() {
 		name := t.Name
-		chips = append(chips, filterChip{id: id + "/chip/tag/" + name, glyph: icLabel, name: name, hue: gfx.Hex(0x7f8cff),
+		chips = append(chips, filterChip{id: id + "/chip/tag/" + name, glyph: icLabel, name: name, hue: tagHue(),
 			count: t.Files, chosen: f.what == showTag && strings.EqualFold(f.name, name),
 			drop: func(paths []string) { a.addTag(paths, name) }, menu: func() []menuItem { return a.tagMenu(fd, name) },
 			pick: set(assetFilter{what: showTag, name: name})})
@@ -652,8 +652,8 @@ func (a *App) drawGridDrag(p *filesPane, id string) {
 	w := f.Measure(text) + u.px(36)
 	chip := gfx.Rect{X: u.mx + u.px(14), Y: u.my + u.px(10), W: w, H: u.px(28)}
 	u.c.RoundRect(chip, u.px(6), colAccent)
-	u.icon(icCategory, gfx.Rect{X: chip.X + u.px(4), Y: chip.Y, W: u.px(24), H: chip.H}, 12, colOnPrimary)
-	u.label(f, gfx.Rect{X: chip.X + u.px(26), Y: chip.Y, W: w - u.px(30), H: chip.H}, text, colOnPrimary, 0)
+	u.icon(icCategory, gfx.Rect{X: chip.X + u.px(4), Y: chip.Y, W: u.px(24), H: chip.H}, 12, colOnAccent)
+	u.label(f, gfx.Rect{X: chip.X + u.px(26), Y: chip.Y, W: w - u.px(30), H: chip.H}, text, colOnAccent, 0)
 }
 
 // drawGridCard draws the card of row k: its picture, its name and details under it, the cursor around it and a
@@ -673,7 +673,11 @@ func (a *App) drawGridCard(p *filesPane, k int, card gfx.Rect, active bool) {
 		if d := p.drives[fe.Name]; d.Total > 0 {
 			used := float32(d.Total-d.Free) / float32(d.Total)
 			bar := gfx.Rect{X: pic.X + u.px(12), Y: pic.Bottom() - u.px(16), W: pic.W - u.px(24), H: u.px(6)}
-			u.c.Fill(bar, colPanel)
+			barBg := colPanel
+			if !isDarkTheme() {
+				barBg = colSurfaceHi
+			}
+			u.c.Fill(bar, barBg)
 			col := colAccent
 			if used > 0.9 {
 				col = colDanger
@@ -681,12 +685,13 @@ func (a *App) drawGridCard(p *filesPane, k int, card gfx.Rect, active bool) {
 			u.c.Fill(gfx.Rect{X: bar.X, Y: bar.Y, W: bar.W * used, H: bar.H}, col)
 		}
 	case e.Kind == assets.Folder:
-		u.c.RoundRect(pic, u.px(6), gfx.Mix(colSurface, gfx.Hex(0xe8b04b), 0.06))
+		fh := categoryHue()
+		u.c.RoundRect(pic, u.px(6), gfx.Mix(colSurface, fh, 0.06))
 		glyph := icFolder
 		if fe.Link {
 			glyph = icFmLink
 		}
-		u.icon(glyph, pic, min(pic.W, pic.H)*0.4/u.s, gfx.Hex(0xe8b04b))
+		u.icon(glyph, pic, min(pic.W, pic.H)*0.4/u.s, fh)
 	default:
 		img, inf, ready := a.thumbOf(e)
 		info = inf
@@ -704,7 +709,7 @@ func (a *App) drawGridCard(p *filesPane, k int, card gfx.Rect, active bool) {
 		u.c.RoundRect(pic, u.px(6), gfx.Alpha(colAccent, 0.18))
 		tick := gfx.Rect{X: pic.X + u.px(8), Y: pic.Bottom() - u.px(28), W: u.px(20), H: u.px(20)}
 		u.c.RoundRect(tick, u.px(10), colAccent)
-		u.icon(icCheck, tick, 12, colOnPrimary)
+		u.icon(icCheck, tick, 12, colOnAccent)
 	}
 	cursor := k == p.cursor
 	switch {
@@ -749,14 +754,14 @@ func (a *App) drawBadges(pic gfx.Rect, e assets.Entry, info assets.Info) {
 		w := f.Measure(ext) + u.px(10)
 		br := gfx.Rect{X: pic.Right() - w - pad, Y: pic.Y + pad, W: w, H: u.px(16)}
 		u.c.RoundRect(br, u.px(4), gfx.Alpha(colBlack, 0.6))
-		u.label(f, br, ext, colText, 0.5)
+		u.label(f, br, ext, colWhite, 0.5)
 	}
 	if info.Duration > 0 && (e.Kind == assets.Video || e.Kind == assets.Edit || e.Kind == assets.Audio || info.Animated) {
 		text := mediaLength(info.Duration)
 		w := f.Measure(text) + u.px(10)
 		br := gfx.Rect{X: pic.Right() - w - pad, Y: pic.Bottom() - u.px(16) - pad, W: w, H: u.px(16)}
 		u.c.RoundRect(br, u.px(4), gfx.Alpha(colBlack, 0.6))
-		u.label(f, br, text, colText, 0.5)
+		u.label(f, br, text, colWhite, 0.5)
 	}
 }
 

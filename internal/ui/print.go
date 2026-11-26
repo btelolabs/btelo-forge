@@ -348,10 +348,13 @@ func (p *printDialog) drawPreview(view gfx.Rect, list []int) {
 			})
 		})
 	}
-	u.c.Fill(gfx.Rect{X: r.X + u.px(3), Y: r.Y + u.px(4), W: r.W, H: r.H}, gfx.Alpha(colBlack, 0.4))
+	u.c.Fill(gfx.Rect{X: r.X + u.px(3), Y: r.Y + u.px(4), W: r.W, H: r.H}, colShadow)
 	u.c.Fill(r, colWhite)
 	if p.preview != nil && p.previewFor == want {
 		u.c.Blit(p.preview, int(r.X), int(r.Y), true)
+	}
+	if !isDarkTheme() {
+		u.c.Outline(r, max(1, u.px(1)), colBorder)
 	}
 	y := view.Bottom() - nav + u.px(4)
 	mid := view.X + view.W/2

@@ -30,24 +30,31 @@ func (e *TargetTooSmall) Unwrap() error { return ErrTargetTooSmall }
 // Encoder names the ffmpeg encoder that writes codec, preferring the graphics card when hardware is set and it
 // can; it is "" when no usable encoder exists. Animations are always made by the processor.
 func Encoder(codec project.Codec, hardware bool, enc media.Encoders) string {
-	var choices []string
+	var hw, sw []string
 	switch codec {
 	case project.HEVC:
-		choices = []string{"hevc_nvenc", "libx265"}
+		hw = []string{"hevc_nvenc", "hevc_videotoolbox"}
+		sw = []string{"libx265"}
 	case project.AV1:
-		choices = []string{"av1_nvenc", "libsvtav1", "libaom-av1"}
+		hw = []string{"av1_nvenc"}
+		sw = []string{"libsvtav1", "libaom-av1"}
 	case project.GIF:
-		choices = []string{"gif"}
+		sw = []string{"gif"}
 	case project.WebP:
 		// libwebp_anim stores only the changed part of each frame; plain libwebp keeps whole frames.
-		choices = []string{"libwebp_anim", "libwebp"}
+		sw = []string{"libwebp_anim", "libwebp"}
 	default:
-		choices = []string{"h264_nvenc", "libx264"}
+		hw = []string{"h264_nvenc", "h264_videotoolbox"}
+		sw = []string{"libx264"}
 	}
-	if !hardware && !codec.Animated() {
-		choices = choices[1:]
+	if hardware && !codec.Animated() {
+		for _, name := range hw {
+			if enc[name] {
+				return name
+			}
+		}
 	}
-	for _, name := range choices {
+	for _, name := range sw {
 		if enc[name] {
 			return name
 		}
@@ -56,26 +63,30 @@ func Encoder(codec project.Codec, hardware bool, enc media.Encoders) string {
 }
 
 // qualityScale is the constant-quality value per quality step for each encoder family; each family's numbers give
-// roughly the same picture at the same step.
+// roughly the same picture at the same step. VideoToolbox's -q:v runs 1..100 where higher is better.
 var qualityScale = map[string][5]int{
-	"libx264":    {18, 23, 28, 32, 36},
-	"libx265":    {22, 27, 31, 35, 39},
-	"libsvtav1":  {26, 33, 40, 46, 52},
-	"libaom-av1": {24, 31, 38, 44, 50},
-	"h264_nvenc": {19, 24, 29, 33, 37},
-	"hevc_nvenc": {21, 26, 31, 35, 39},
-	"av1_nvenc":  {26, 33, 40, 46, 52},
+	"libx264":           {18, 23, 28, 32, 36},
+	"libx265":           {22, 27, 31, 35, 39},
+	"libsvtav1":         {26, 33, 40, 46, 52},
+	"libaom-av1":        {24, 31, 38, 44, 50},
+	"h264_nvenc":        {19, 24, 29, 33, 37},
+	"hevc_nvenc":        {21, 26, 31, 35, 39},
+	"av1_nvenc":         {26, 33, 40, 46, 52},
+	"h264_videotoolbox": {75, 65, 55, 45, 35},
+	"hevc_videotoolbox": {75, 65, 55, 45, 35},
 }
 
 // speedScale is the encoder's preset per speed (medium, fast, slow, slowest).
 var speedScale = map[string][4]string{
-	"libx264":    {"medium", "veryfast", "slow", "veryslow"},
-	"libx265":    {"medium", "veryfast", "slow", "veryslow"},
-	"libsvtav1":  {"8", "10", "6", "4"},
-	"libaom-av1": {"6", "8", "4", "3"},
-	"h264_nvenc": {"p5", "p3", "p6", "p7"},
-	"hevc_nvenc": {"p5", "p3", "p6", "p7"},
-	"av1_nvenc":  {"p5", "p3", "p6", "p7"},
+	"libx264":           {"medium", "veryfast", "slow", "veryslow"},
+	"libx265":           {"medium", "veryfast", "slow", "veryslow"},
+	"libsvtav1":         {"8", "10", "6", "4"},
+	"libaom-av1":        {"6", "8", "4", "3"},
+	"h264_nvenc":        {"p5", "p3", "p6", "p7"},
+	"hevc_nvenc":        {"p5", "p3", "p6", "p7"},
+	"av1_nvenc":         {"p5", "p3", "p6", "p7"},
+	"h264_videotoolbox": {"medium", "fast", "slow", "slowest"},
+	"hevc_videotoolbox": {"medium", "fast", "slow", "slowest"},
 }
 
 // containerShare is the part of a target size left for the streams once the MP4 container takes its share.
@@ -226,6 +237,8 @@ func qualityArgs(name string, q int) []string {
 		return []string{"-crf", strconv.Itoa(q), "-b:v", "0"}
 	case "h264_nvenc", "hevc_nvenc", "av1_nvenc":
 		return []string{"-rc", "vbr", "-cq", strconv.Itoa(q), "-b:v", "0"}
+	case "h264_videotoolbox", "hevc_videotoolbox":
+		return []string{"-q:v", strconv.Itoa(q)}
 	}
 	return []string{"-crf", strconv.Itoa(q)}
 }
@@ -235,6 +248,8 @@ func rateArgs(name string, kbps int) []string {
 	switch name {
 	case "h264_nvenc", "hevc_nvenc", "av1_nvenc":
 		return []string{"-rc", "vbr", "-multipass", "fullres", "-b:v", rate, "-maxrate", strconv.Itoa(kbps*3/2) + "k", "-bufsize", strconv.Itoa(kbps*2) + "k"}
+	case "h264_videotoolbox", "hevc_videotoolbox":
+		return []string{"-b:v", rate, "-maxrate", strconv.Itoa(kbps*3/2) + "k", "-bufsize", strconv.Itoa(kbps*2) + "k"}
 	}
 	return []string{"-b:v", rate}
 }
@@ -243,6 +258,16 @@ func speedArgs(name, preset string) []string {
 	switch name {
 	case "libaom-av1":
 		return []string{"-cpu-used", preset, "-row-mt", "1", "-tiles", "2x2"}
+	case "h264_videotoolbox", "hevc_videotoolbox":
+		switch preset {
+		case "fast":
+			return []string{"-prio_speed", "1"}
+		case "slow":
+			return []string{"-spatial_aq", "1"}
+		case "slowest":
+			return []string{"-prio_speed", "0", "-spatial_aq", "1"}
+		}
+		return nil
 	}
 	return []string{"-preset", preset}
 }

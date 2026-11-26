@@ -11,6 +11,7 @@ import (
 	"github.com/btelolabs/btelo-forge/internal/assets"
 	"github.com/btelolabs/btelo-forge/internal/caption"
 	"github.com/btelolabs/btelo-forge/internal/capture"
+	"github.com/btelolabs/btelo-forge/internal/errlog"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/gpufx"
 	"github.com/btelolabs/btelo-forge/internal/library"
@@ -45,6 +46,8 @@ type App struct {
 	captions    *caption.Renderer
 	saveDir     string
 	stateDir    string
+	logs        *errlog.Logger
+	lastErr     error      // raw error last passed through describe(), captured by the next error toast
 	officeFonts *flow.Book // what Office documents are drawn with, once one is open
 	print       *printDialog
 	printTarget *printing.Target // the printer last chosen, with its settings
@@ -58,6 +61,8 @@ type App struct {
 	running  sync.WaitGroup // background work started with background
 
 	settings        settings
+	themeSynced     bool
+	themeDark       bool
 	settingsOpen    bool
 	tab             int
 	media           mediaCache
@@ -121,6 +126,7 @@ type App struct {
 	panelContent    [5]float32          // height of each panel's content at the last frame
 	screen          gfx.Rect
 	services        *services
+	gpuFX           *gpufx.Card
 	fm              fileManager             // what the file manager tabs share
 	fileThumbs      thumbCache              // small pictures of files, for the asset manager and file lists
 	fileFacts       fileFacts               // what the file manager read of paths, folders and drives, off the drawing goroutine
@@ -147,6 +153,7 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 		captions: caption.New(fonts.Bold),
 		saveDir:  filepath.Join(stateDir, "edits"),
 		stateDir: stateDir,
+		logs:     errlog.ForPath(filepath.Join(stateDir, "logs", "error.log")),
 		cacheDir: cacheDir,
 		jobs:     make(chan func(), 1024),
 		media:    newMediaCache(),
@@ -156,6 +163,7 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	a.life, a.stopLife = context.WithCancel(context.Background())
 	a.u.fonts, a.u.host = fonts, host
 	a.loadSettings()
+	a.syncTheme()
 	a.u.lang = a.settings.Language
 	a.brush = a.settings.Paint.brush()
 	if a.brush.Tip == paint.TipShaped {
@@ -174,7 +182,8 @@ func New(host Host, fonts gfx.Fonts, cacheDir, stateDir string) *App {
 	a.subtitles.manager = transcribe.NewManager(filepath.Join(cacheDir, "whisper"))
 	a.speech.init(cacheDir, stateDir)
 	a.ai.init(cacheDir, stateDir, host.Wake)
-	paint.SetAccelerator(gpufx.New(newModelDevice, &modelCardTurn))
+	a.gpuFX = gpufx.New(newModelDevice, &modelCardTurn)
+	paint.SetAccelerator(a.gpuFX)
 	a.mail.init(stateDir, host.Wake)
 	a.ai.rt.Track("speech", a.speechPid)
 	a.tools.config = media.DefaultToolsConfig()
@@ -222,6 +231,7 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 		}
 	}()
 	a.drainJobs()
+	a.syncTheme()
 	a.openFromSystem(in.Opened)
 	a.recordTick(in)
 	a.screenTick()
@@ -258,48 +268,42 @@ func (a *App) Frame(in Input, c *gfx.Canvas, scale float32) (next time.Duration)
 		a.drawMovie(a.screen)
 	case a.slideshowOn():
 		a.drawSlideshow(a.screen)
-	case a.art != nil:
-		a.drawTabs(l.tabs)
-		a.drawArt(l.body)
-	case a.files != nil:
-		a.drawTabs(l.tabs)
-		a.drawFiles(l.body)
-	case a.board != nil:
-		a.drawTabs(l.tabs)
-		a.drawMind(l.body)
-	case a.office != nil:
-		a.drawTabs(l.tabs)
-		a.drawOffice(l.body)
-	case a.liveTab:
-		a.drawTabs(l.tabs)
-		a.drawLiveTab(l.body)
-	case a.keyboardTab:
-		a.drawTabs(l.tabs)
-		a.drawKeyboardTab(l.body)
-	case a.model != nil:
-		a.drawTabs(l.tabs)
-		a.drawModel(l.body)
-	case a.aiTab:
-		a.drawTabs(l.tabs)
-		a.drawAITab(l.body)
-	case a.mailTab:
-		a.drawTabs(l.tabs)
-		a.drawMailTab(l.body)
-	case a.movie != nil:
-		a.drawTabs(l.tabs)
-		a.drawMovie(l.body)
-	case a.p == nil && a.editing:
-		a.drawTabs(l.tabs)
-		a.drawEmptyEditor(l)
-	case a.p == nil:
-		a.drawTabs(l.tabs)
-		a.drawEmpty(l.body)
 	default:
+		// Draw the tab strip before switching on a.doc: clicking a tab or its close button inside drawTabs can
+		// change a.doc mid-frame, so the body must dispatch on the updated active document.
 		a.drawTabs(l.tabs)
-		a.drawPreview(l.preview)
-		a.drawTransport(l.transport)
-		a.drawTimeline(l.timeline)
-		a.drawPanel(l.panel)
+		l = a.layout()
+		switch {
+		case a.art != nil:
+			a.drawArt(l.body)
+		case a.files != nil:
+			a.drawFiles(l.body)
+		case a.board != nil:
+			a.drawMind(l.body)
+		case a.office != nil:
+			a.drawOffice(l.body)
+		case a.liveTab:
+			a.drawLiveTab(l.body)
+		case a.keyboardTab:
+			a.drawKeyboardTab(l.body)
+		case a.model != nil:
+			a.drawModel(l.body)
+		case a.aiTab:
+			a.drawAITab(l.body)
+		case a.mailTab:
+			a.drawMailTab(l.body)
+		case a.movie != nil:
+			a.drawMovie(l.body)
+		case a.p == nil && a.editing:
+			a.drawEmptyEditor(l)
+		case a.p == nil:
+			a.drawEmpty(l.body)
+		default:
+			a.drawPreview(l.preview)
+			a.drawTransport(l.transport)
+			a.drawTimeline(l.timeline)
+			a.drawPanel(l.panel)
+		}
 	}
 	// A dialog or menu that is open takes the keys (Esc, Enter), so the window's shortcuts wait.
 	if u.focus == "" && a.hotkeys.capturing < 0 && a.keyCapture == nil && !u.blocked {
@@ -554,6 +558,14 @@ func (a *App) Close() {
 	select {
 	case <-done:
 	case <-time.After(closeWait):
+	}
+	if a.gpuFX != nil {
+		paint.SetAccelerator(nil)
+		a.gpuFX.Close()
+		a.gpuFX = nil
+	}
+	if a.logs != nil && a.logs != errlog.Default() {
+		_ = a.logs.Close()
 	}
 }
 

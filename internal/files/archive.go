@@ -57,6 +57,7 @@ func Compress(ctx context.Context, srcs []string, dst string, p *Progress) (err 
 		}
 	}()
 	zw := zip.NewWriter(out)
+	copyBuf := make([]byte, 64<<10)
 	for _, src := range srcs {
 		base := filepath.Dir(src)
 		err = filepath.WalkDir(src, func(path string, d fs.DirEntry, werr error) error {
@@ -98,7 +99,7 @@ func Compress(ctx context.Context, srcs []string, dst string, p *Progress) (err 
 				return err
 			}
 			defer in.Close()
-			_, err = io.Copy(w, &progressReader{ctx: ctx, r: in, p: p})
+			_, err = io.CopyBuffer(w, &progressReader{ctx: ctx, r: in, p: p}, copyBuf)
 			return err
 		})
 		if err != nil {
@@ -160,7 +161,7 @@ func Extract(ctx context.Context, archive string, p *Progress) (string, error) {
 	case ".gz", ".bz2":
 		err = extractSingle(ctx, archive, ext, filepath.Join(tmp, stem), p)
 	default:
-		err = extractWithTar(ctx, archive, tmp)
+		err = extractWithTar(ctx, archive, ext, stem, tmp)
 	}
 	if err != nil {
 		return "", err
@@ -330,8 +331,27 @@ func writeFile(ctx context.Context, path string, r io.Reader, mod time.Time, p *
 }
 
 // extractWithTar has the system's tar unpack what is not read here, 7-Zip and RAR among them.
-func extractWithTar(ctx context.Context, archive, root string) error {
-	cmd := exec.CommandContext(ctx, systemTar(), "-xf", archive, "-C", root)
+func extractWithTar(ctx context.Context, archive, ext, stem, root string) error {
+	args := []string{"-xf", archive, "-C", root}
+	if ext == ".tar.zst" {
+		if zstd, err := exec.LookPath("zstd"); err == nil {
+			args = []string{"--use-compress-program", zstd, "-xf", archive, "-C", root}
+		}
+	} else if ext == ".zst" {
+		if zstd, err := exec.LookPath("zstd"); err == nil {
+			outPath := filepath.Join(root, stem)
+			cmd := exec.CommandContext(ctx, zstd, "-d", "-q", "-o", outPath, archive)
+			proc.Hide(cmd)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				if msg := strings.TrimSpace(string(out)); msg != "" {
+					return fmt.Errorf("%s", msg)
+				}
+				return fmt.Errorf("%s cannot be read here: %w", filepath.Base(archive), err)
+			}
+			return nil
+		}
+	}
+	cmd := exec.CommandContext(ctx, systemTar(), args...)
 	proc.Hide(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		if msg := strings.TrimSpace(string(out)); msg != "" {

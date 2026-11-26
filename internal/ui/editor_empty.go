@@ -66,8 +66,13 @@ func (a *App) drawEmptyEditor(l layout) {
 	u.c.RoundRect(e.zone, u.px(14), gfx.Mix(colPanel, colSurface, 0.55))
 	dashedOutline(u, e.zone, u.px(1.5), u.px(10), colBorderHi)
 
-	u.c.RoundRect(e.tile, u.px(12), gfx.Mix(colSurface, gfx.Hex(0x5aa9ff), 0.18))
-	u.icon(icVideo, e.tile, 22, gfx.Hex(0x5aa9ff))
+	hue := themeHex(0x5aa9ff, 0x2574db)
+	tint := float32(0.18)
+	if !isDarkTheme() {
+		tint = 0.14
+	}
+	u.c.RoundRect(e.tile, u.px(12), gfx.Mix(colSurface, hue, tint))
+	u.icon(icVideo, e.tile, 22, hue)
 	opening := a.opening != ""
 	title := u.t("Drop videos here, or pick one")
 	if opening {
@@ -141,7 +146,7 @@ func (a *App) drawVideoList(e emptyEditor, free bool) {
 	if u.iconButton(id+"/up", e.up, icUp, u.t("The folder above"), false, canUp) {
 		land := filepath.Base(p.dir)
 		if up == p.dir {
-			up, land = thisPC, filepath.VolumeName(p.dir) // a drive's top: the drives
+			up, land = thisPC, driveNameFor(a.knownDrives(), p.dir) // a drive's top: the drives
 		}
 		a.videoListGo(p, up, land)
 	}

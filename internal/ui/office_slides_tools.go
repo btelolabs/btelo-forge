@@ -476,7 +476,7 @@ func (e *slidesEditor) drawPopup() {
 
 func (e *slidesEditor) panel(box gfx.Rect) {
 	u := &e.a.u
-	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, gfx.Alpha(colBlack, 0.35))
+	u.c.Fill(gfx.Rect{X: box.X, Y: box.Y + u.px(3), W: box.W, H: box.H}, colShadow)
 	u.c.Fill(box, colSurface)
 	u.c.Outline(box, max(1, u.px(1)), colBorder)
 }

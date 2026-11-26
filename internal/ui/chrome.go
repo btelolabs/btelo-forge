@@ -31,6 +31,11 @@ func (a *App) toastOnly(kind, text string) {
 }
 
 func (a *App) toastActions(text string, err bool, actions []toastAction) {
+	if err {
+		raw := a.lastErr
+		a.lastErr = nil
+		a.logError("ui", text, raw)
+	}
 	life := 4 * time.Second
 	if err || len(actions) > 0 {
 		life = 9 * time.Second
@@ -105,10 +110,17 @@ func (a *App) drawToasts() {
 	for i, r := range boxes {
 		t := a.toasts[i]
 		u.covers = append(u.covers, r)
-		u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, gfx.Alpha(colBlack, 0.45))
+		u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(3), W: r.W, H: r.H}, colShadow)
 		bg, edge := colSurfaceHi, colBorderHi
+		if !isDarkTheme() {
+			bg = colSurface
+		}
 		if t.err {
-			bg, edge = gfx.Mix(colSurfaceHi, colDanger, 0.22), gfx.Mix(colBorderHi, colDanger, 0.4)
+			if isDarkTheme() {
+				bg, edge = gfx.Mix(colSurfaceHi, colDanger, 0.22), gfx.Mix(colBorderHi, colDanger, 0.4)
+			} else {
+				bg, edge = gfx.Mix(colSurface, colDanger, 0.1), gfx.Mix(colBorderHi, colDanger, 0.45)
+			}
 		}
 		u.c.Fill(r, bg)
 		u.c.Outline(r, max(1, u.px(1)), edge)

@@ -117,18 +117,40 @@ func (a *App) paragraph(x, y, w float32, text string, size float32, col color.RG
 // tabPlaces are where the tabs can run, in the order of the choice in Settings.
 var tabPlaces = msgs("Along the top", "Down the left side")
 
+// themeNames are the appearance choices in the order of themes.
+var themeNames = msgsIn("theme", "System", "Light", "Dark")
+
 func (a *App) settingsGeneral(r gfx.Rect) {
 	u := &a.u
 	y := r.Y
-	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Language"))
-	y += u.px(28)
+	langW, themeW, gap := min(r.W, u.px(280)), min(r.W, u.px(300)), u.px(28)
+	sideBySide := r.W >= langW+gap+themeW
+	u.heading(rectAt(r.X, y, langW, u.px(22)), u.t("Language"))
+	if sideBySide {
+		u.heading(rectAt(r.X+langW+gap, y, themeW, u.px(22)), u.t("Appearance"))
+	}
+	y += u.px(26)
 	current := slices.Index(languages, a.settings.Language)
-	if pick := u.chips("settings/lang", rectAt(r.X, y, min(r.W, u.px(280)), u.px(32)), languageNames, current, true); pick != current {
+	if pick := u.chips("settings/lang", rectAt(r.X, y, langW, u.px(32)), languageNames, current, true); pick != current {
 		a.setLanguage(languages[pick])
 	}
-	y += u.px(52)
+	themeIdx := max(slices.Index(themes, a.settings.Theme), 0)
+	if sideBySide {
+		if pick := u.chips("settings/theme", rectAt(r.X+langW+gap, y, themeW, u.px(32)), u.tcs("theme", themeNames), themeIdx, true); pick != themeIdx {
+			a.setTheme(themes[pick])
+		}
+		y += u.px(46)
+	} else {
+		y += u.px(46)
+		u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Appearance"))
+		y += u.px(26)
+		if pick := u.chips("settings/theme", rectAt(r.X, y, themeW, u.px(32)), u.tcs("theme", themeNames), themeIdx, true); pick != themeIdx {
+			a.setTheme(themes[pick])
+		}
+		y += u.px(46)
+	}
 	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Tabs"))
-	y += u.px(28)
+	y += u.px(26)
 	place := 0
 	if a.settings.VerticalTabs {
 		place = 1
@@ -137,36 +159,42 @@ func (a *App) settingsGeneral(r gfx.Rect) {
 		a.settings.VerticalTabs = pick == 1
 		a.saveSettings()
 	}
-	y += u.px(52)
+	y += u.px(46)
 	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Resource folder"))
-	y += u.px(28)
+	y += u.px(26)
 	root, err := a.resourceDir()
 	if err != nil {
 		root = err.Error()
 	}
 	box := rectAt(r.X, y, r.W, u.px(36))
 	u.c.Fill(box, colSurface)
+	if !isDarkTheme() {
+		u.c.Outline(box, max(1, u.px(1)), colBorder)
+	}
 	u.label(u.face(12.5), box.Inset(u.px(10)), root, colText, 0)
-	y += u.px(44)
+	y += u.px(42)
 	if u.button("settings/resources", rectAt(r.X, y, u.px(150), u.px(32)), icFolder, u.t("Choose folder…"), plain, true) {
 		a.chooseResourceDir()
 	}
 	if a.settings.ResourceDir != "" && u.button("settings/resources/reset", rectAt(r.X+u.px(158), y, u.px(200), u.px(32)), "", u.t("Use the default folder"), ghost, true) {
 		a.setResourceDir("")
 	}
-	y += u.px(42)
+	y += u.px(40)
 	y = a.paragraph(r.X, y, r.W, u.t("New work is saved in its folder here: Tools, Creative, Documents or Intelligence. Changing this moves nothing that is already saved."), 12, colFaint)
-	y += u.px(18)
+	y += u.px(14)
 	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Default export folder"))
-	y += u.px(28)
+	y += u.px(26)
 	dir := a.exportDir()
 	if dir == "" {
 		dir = u.t("Next to the original video")
 	}
 	box = rectAt(r.X, y, r.W, u.px(36))
 	u.c.Fill(box, colSurface)
+	if !isDarkTheme() {
+		u.c.Outline(box, max(1, u.px(1)), colBorder)
+	}
 	u.label(u.face(12.5), box.Inset(u.px(10)), dir, colText, 0)
-	y += u.px(44)
+	y += u.px(42)
 	if u.button("settings/dir", rectAt(r.X, y, u.px(150), u.px(32)), icFolder, u.t("Choose folder…"), plain, true) {
 		a.chooseExportDir()
 	}
@@ -178,11 +206,11 @@ func (a *App) settingsGeneral(r gfx.Rect) {
 		a.settings.ExportDir, a.settings.ExportBeside = "", false
 		a.saveSettings()
 	}
-	y += u.px(48)
+	y += u.px(40)
 	y = a.paragraph(r.X, y, r.W, u.t("Export quality, size and codec are remembered from your last export and used for new edits."), 12, colFaint)
-	y += u.px(18)
+	y += u.px(14)
 	u.heading(rectAt(r.X, y, r.W, u.px(22)), "ffmpeg")
-	y += u.px(26)
+	y += u.px(24)
 	info, failed := a.toolsStatus()
 	col := colDim
 	if failed {
@@ -221,6 +249,9 @@ func (a *App) settingsMCP(r gfx.Rect) {
 	u.label(u.face(12), rectAt(r.X, y, u.px(90), u.px(30)), u.t("Address"), colDim, 0)
 	addr := rectAt(r.X+u.px(90), y, r.W-u.px(90), u.px(30))
 	u.c.Fill(addr, colSurface)
+	if !isDarkTheme() {
+		u.c.Outline(addr, max(1, u.px(1)), colBorder)
+	}
 	u.label(u.face(12.5), addr.Inset(u.px(8)), s.mcpURL, colAccentHi, 0)
 	y += u.px(44)
 	// Each kind of work has its own server and setup, so the AI hears only about the tools it needs.
@@ -236,7 +267,10 @@ func (a *App) settingsMCP(r gfx.Rect) {
 	}
 	y += u.px(50)
 	box := rectAt(r.X, y, r.W, r.Bottom()-y)
-	u.c.Fill(box, gfx.Mix(colSurface, colBlack, 0.3))
+	u.c.Fill(box, colWell)
+	if !isDarkTheme() {
+		u.c.Outline(box, max(1, u.px(1)), colBorder)
+	}
 	inner := box.Inset(u.px(10))
 	if u.hover("settings/mcp/text", box) && u.wheel != 0 {
 		a.mcpScroll -= u.wheel * u.px(60)
@@ -250,7 +284,11 @@ func (a *App) settingsMCP(r gfx.Rect) {
 	if content > inner.H {
 		h := max(inner.H*inner.H/content, u.px(24))
 		sy := inner.Y + (inner.H-h)*a.mcpScroll/(content-inner.H)
-		u.c.Fill(rectAt(box.Right()-u.px(7), sy, u.px(3), h), colSurfaceHi)
+		thumb := colSurfaceHi
+		if !isDarkTheme() {
+			thumb = colBorderHi
+		}
+		u.c.Fill(rectAt(box.Right()-u.px(7), sy, u.px(3), h), thumb)
 	}
 }
 
@@ -295,6 +333,9 @@ func (a *App) settingsPhone(r gfx.Rect) {
 		px := float32(cell)
 		q := rectAt(r.X, y, px*float32(code.Size+4), px*float32(code.Size+4))
 		u.c.Fill(q, colWhite)
+		if !isDarkTheme() {
+			u.c.Outline(q, max(1, u.px(1)), colBorder)
+		}
 		for yy := 0; yy < code.Size; yy++ {
 			for xx := 0; xx < code.Size; xx++ {
 				if code.Black(xx, yy) {
@@ -323,6 +364,9 @@ func (a *App) settingsPhone(r gfx.Rect) {
 	}
 	box := rectAt(r.X, y, r.W-u.px(160), u.px(32))
 	u.c.Fill(box, colSurface)
+	if !isDarkTheme() {
+		u.c.Outline(box, max(1, u.px(1)), colBorder)
+	}
 	u.label(u.face(12), box.Inset(u.px(10)), dir, colText, 0)
 	if u.button("settings/phone/dir", rectAt(box.Right()+u.px(8), y, u.px(152), u.px(32)), icFolder, u.t("Choose folder…"), plain, true) {
 		a.chooseResourceDir()
@@ -341,6 +385,24 @@ func (a *App) settingsAbout(r gfx.Rect) {
 	u.label(u.face(12), rectAt(mark.Right()+u.px(14), y+u.px(36), r.W, u.px(20)), u.tf("Version %s", Version), colDim, 0)
 	y += u.px(84)
 	y = a.settingsUpdates(r, y)
+	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Error log"))
+	y += u.px(26)
+	logBox := rectAt(r.X, y, r.W, u.px(32))
+	u.c.Fill(logBox, colSurface)
+	if !isDarkTheme() {
+		u.c.Outline(logBox, max(1, u.px(1)), colBorder)
+	}
+	u.label(u.face(12), logBox.Inset(u.px(8)), a.errorLogPath(), colDim, 0)
+	y += u.px(38)
+	openW := u.buttonWidth(icLaunch, u.t("Open error log"))
+	if u.button("settings/log/open", rectAt(r.X, y, openW, u.px(32)), icLaunch, u.t("Open error log"), plain, true) {
+		a.openErrorLog()
+	}
+	revealW := u.buttonWidth(icFolder, u.t("Show in folder"))
+	if u.button("settings/log/reveal", rectAt(r.X+openW+u.px(8), y, revealW, u.px(32)), icFolder, u.t("Show in folder"), ghost, true) {
+		a.revealErrorLog()
+	}
+	y += u.px(44)
 	u.heading(rectAt(r.X, y, r.W, u.px(22)), u.t("Source code"))
 	y += u.px(26)
 	link := rectAt(r.X, y, r.W, u.px(22))

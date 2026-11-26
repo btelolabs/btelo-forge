@@ -337,10 +337,10 @@ func (s *Streamer) Stop() error {
 // A stream always has sound, silence when none is chosen, since platforms expect it.
 func streamArgs(o StreamOptions, video, audio string) []string {
 	args := []string{"-hide_banner", "-loglevel", "error", "-nostats",
-		"-thread_queue_size", "64", "-f", "rawvideo", "-pix_fmt", "nv12", "-video_size", fmt.Sprintf("%dx%d", o.Size.X, o.Size.Y),
+		"-f", "rawvideo", "-pix_fmt", "nv12", "-video_size", fmt.Sprintf("%dx%d", o.Size.X, o.Size.Y),
 		"-framerate", strconv.Itoa(o.FPS), "-i", video}
 	if audio != "" {
-		args = append(args, "-thread_queue_size", "4096", "-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", strconv.Itoa(sampleRate), "-ac", strconv.Itoa(channels), "-i", audio)
+		args = append(args, "-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", strconv.Itoa(sampleRate), "-ac", strconv.Itoa(channels), "-i", audio)
 	} else {
 		args = append(args, "-f", "lavfi", "-i", fmt.Sprintf("anullsrc=r=%d:cl=stereo", sampleRate))
 	}
@@ -363,6 +363,8 @@ func streamEncodeArgs(e Encoder, fps, kbps int) []string {
 		return append([]string{"-c:v", "h264_amf", "-usage", "transcoding", "-quality", "balanced", "-rc", "cbr", "-profile:v", "high", "-header_insertion_mode", "idr"}, cbr...)
 	case "h264_mf":
 		return append([]string{"-c:v", "h264_mf", "-hw_encoding", "1", "-rate_control", "cbr"}, cbr...)
+	case "h264_videotoolbox":
+		return append([]string{"-c:v", "h264_videotoolbox", "-profile:v", "high", "-realtime", "1", "-constant_bit_rate", "1"}, cbr...)
 	default:
 		return append([]string{"-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-bf", "2", "-keyint_min", gop, "-sc_threshold", "0",
 			"-x264-params", "nal-hrd=cbr"}, cbr...)
@@ -504,6 +506,10 @@ type screenFeed struct {
 // startFeed starts grabbing the screen for the canvas, whose frames show once they come; ended hears when the feed
 // stops by itself.
 func startFeed(o Options, so StreamOptions, gpuScale bool, frames *frameStore, ended func(f *screenFeed, err error, delivered bool)) (*screenFeed, error) {
+	return startScreenFeed(o, so, gpuScale, frames, ended)
+}
+
+func startFFmpegFeed(o Options, so StreamOptions, gpuScale bool, frames *frameStore, ended func(f *screenFeed, err error, delivered bool)) (*screenFeed, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd, err := media.Command(ctx, "ffmpeg", feedArgs(o, so.Size, so.FPS, gpuScale)...)
 	var out io.ReadCloser

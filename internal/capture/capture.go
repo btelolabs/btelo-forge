@@ -20,13 +20,16 @@ import (
 
 // Errors a recording can fail with, for the interface to explain.
 var (
-	ErrUnsupported     = errors.New("screen recording is not supported on this system")
-	ErrNoEncoder       = errors.New("no way to record this screen worked")
-	ErrNoDisplay       = errors.New("no screen that can be recorded is attached")
-	ErrNoGrabber       = errors.New("this ffmpeg lacks ddagrab, the Desktop Duplication grabber")
-	ErrSystemSound     = errors.New("the system's sound could not be recorded")
-	ErrMicrophone      = errors.New("the microphone could not be recorded")
-	ErrNothingRecorded = errors.New("nothing was recorded")
+	ErrUnsupported      = errors.New("screen recording is not supported on this system")
+	ErrNoEncoder        = errors.New("no way to record this screen worked")
+	ErrNoDisplay        = errors.New("no screen that can be recorded is attached")
+	ErrNoGrabber        = errors.New("this ffmpeg lacks ddagrab, the Desktop Duplication grabber")
+	ErrSystemSound      = errors.New("the system's sound could not be recorded")
+	ErrMicrophone       = errors.New("the microphone could not be recorded")
+	ErrNothingRecorded  = errors.New("nothing was recorded")
+	ErrScreenPermission = errors.New("screen recording permission is required in System Settings → Privacy & Security → Screen & System Audio Recording")
+	ErrCameraPermission = errors.New("camera permission is required in System Settings → Privacy & Security → Camera")
+	ErrMicPermission    = errors.New("microphone permission is required in System Settings → Privacy & Security → Microphone")
 )
 
 // minimumBuild is Windows 10 version 2004, the first that can keep a window out of screen recordings.
@@ -67,9 +70,8 @@ type Encoder struct {
 // Hardware reports whether the graphics card encodes, rather than the processor.
 func (e Encoder) Hardware() bool { return e.Codec != "libx264" }
 
-// encoders are tried in order: each vendor's own encoder, then Media Foundation's (which every vendor's driver
-// provides), then the processor for a computer whose graphics card encodes nothing.
-var encoders = []Encoder{{"h264_nvenc"}, {"h264_amf"}, {"h264_mf"}, {"libx264"}}
+// encoders are tried in order: hardware encoders for this platform first, then libx264 on the processor.
+var encoders = platformEncoders()
 
 // Software encoding cannot keep up with large screens at high frame rates, so it records at most this.
 const (
@@ -159,6 +161,8 @@ func encodeArgs(e Encoder, fps int) []string {
 		return []string{"-c:v", "h264_amf", "-usage", "transcoding", "-quality", "balanced", "-rc", "cqp", "-qp_i", "22", "-qp_p", "24", "-qp_b", "26", "-g", gop}
 	case "h264_mf":
 		return []string{"-c:v", "h264_mf", "-hw_encoding", "1", "-rate_control", "quality", "-quality", "70", "-g", gop}
+	case "h264_videotoolbox":
+		return []string{"-c:v", "h264_videotoolbox", "-q:v", "65", "-profile:v", "high", "-realtime", "1", "-g", gop}
 	default:
 		return []string{"-c:v", "libx264", "-preset", "superfast", "-crf", "23", "-g", gop}
 	}
@@ -192,21 +196,7 @@ func ProbeEncoder(ctx context.Context, d Display, fps int) (Encoder, error) {
 	if !Supported() {
 		return Encoder{}, ErrUnsupported
 	}
-	if err := hasGrabber(ctx); err != nil {
-		return Encoder{}, err
-	}
-	var errs []error
-	for _, e := range encoders {
-		err := tryEncoder(ctx, Options{Display: d, FPS: fps, Encoder: e})
-		if err == nil {
-			return e, nil
-		}
-		if ctx.Err() != nil {
-			return Encoder{}, ctx.Err()
-		}
-		errs = append(errs, fmt.Errorf("%s: %w", e.Codec, err))
-	}
-	return Encoder{}, fmt.Errorf("%w: %w", ErrNoEncoder, errors.Join(errs...))
+	return probeEncoder(ctx, d, fps)
 }
 
 var (

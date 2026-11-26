@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"math"
 	"slices"
 	"strconv"
@@ -297,11 +296,25 @@ func (a *App) drawBoardOverlay(ad *artDoc, vp gfx.Rect) {
 		if e.grab == grabNew || e.grab >= 0 && e.grab < len(boxHandles) {
 			r := e.box.rect()
 			x, y := ad.toScreen(vp, [2]float64{float64(r.Max.X), float64(r.Max.Y)})
-			col := colWhite
-			if e.match != [2]int{} {
-				col = colWarning // the same size as a board beside it
+			text := fmt.Sprintf("%d × %d", r.Dx(), r.Dy())
+			f := u.face(11.5)
+			if isDarkTheme() {
+				col := colWhite
+				if e.match != [2]int{} {
+					col = colWarning // the same size as a board beside it
+				}
+				u.label(f, gfx.Rect{X: x + u.px(8), Y: y + u.px(4), W: u.px(120), H: u.px(16)}, text, col, 0)
+			} else {
+				padX := u.px(6)
+				pill := gfx.Rect{X: x + u.px(8), Y: y + u.px(4), W: f.Measure(text) + 2*padX, H: u.px(20)}
+				u.c.RoundRect(pill, u.px(4), gfx.Alpha(colSurface, 0.94))
+				u.c.RoundOutline(pill, u.px(4), max(1, u.px(1)), colBorderHi)
+				col := colText
+				if e.match != [2]int{} {
+					col = colWarning // the same size as a board beside it
+				}
+				u.label(f, pill, text, col, 0.5)
 			}
-			u.label(u.face(11.5), gfx.Rect{X: x + u.px(8), Y: y + u.px(4), W: u.px(120), H: u.px(16)}, fmt.Sprintf("%d × %d", r.Dx(), r.Dy()), col, 0)
 		}
 	default:
 		if b, ok := ad.chosenBoard(); ok {
@@ -482,10 +495,27 @@ func (a *App) exportBoards(ad *artDoc, id int) {
 // shadeOutside darkens the view outside the canvas's pages (its frame and boards, in view pixels) within area, as
 // the pasteboard around them.
 func shadeOutside(view *image.RGBA, area image.Rectangle, pages []image.Rectangle) {
-	shade := image.NewUniform(pasteboard)
+	// artPasteboard returns premultiplied color.RGBA (as passed to image.NewUniform for draw.Over).
+	pb := artPasteboard()
+	sr, sg, sb, sa := uint32(pb.R), uint32(pb.G), uint32(pb.B), uint32(pb.A)
+	inv := 255 - sa
+	blendSpan := func(row []uint8) {
+		for o := 0; o < len(row); o += 4 {
+			p := row[o : o+4 : o+4]
+			v0 := uint32(p[0])*inv + 128
+			v1 := uint32(p[1])*inv + 128
+			v2 := uint32(p[2])*inv + 128
+			v3 := uint32(p[3])*inv + 128
+			p[0] = uint8(min(sr+(v0+v0>>8)>>8, 255))
+			p[1] = uint8(min(sg+(v1+v1>>8)>>8, 255))
+			p[2] = uint8(min(sb+(v2+v2>>8)>>8, 255))
+			p[3] = uint8(min(sa+(v3+v3>>8)>>8, 255))
+		}
+	}
+	var spans [][2]int
 	for y := area.Min.Y; y < area.Max.Y; y++ {
 		// The pages crossing this row, as spans to leave clear, in order.
-		var spans [][2]int
+		spans = spans[:0]
 		for _, p := range pages {
 			// Only the part of a page within the area: one beside it leaves nothing, never a span backwards that
 			// would shade past the area's edge.
@@ -493,16 +523,19 @@ func shadeOutside(view *image.RGBA, area image.Rectangle, pages []image.Rectangl
 				spans = append(spans, s)
 			}
 		}
-		slices.SortFunc(spans, func(a, b [2]int) int { return a[0] - b[0] })
+		if len(spans) > 1 {
+			slices.SortFunc(spans, func(a, b [2]int) int { return a[0] - b[0] })
+		}
+		rowOff := view.PixOffset(0, y)
 		x := area.Min.X
 		for _, s := range spans {
 			if s[0] > x {
-				draw.Draw(view, image.Rect(x, y, s[0], y+1), shade, image.Point{}, draw.Over)
+				blendSpan(view.Pix[rowOff+x*4 : rowOff+s[0]*4])
 			}
 			x = max(x, s[1])
 		}
 		if x < area.Max.X {
-			draw.Draw(view, image.Rect(x, y, area.Max.X, y+1), shade, image.Point{}, draw.Over)
+			blendSpan(view.Pix[rowOff+x*4 : rowOff+area.Max.X*4])
 		}
 	}
 }

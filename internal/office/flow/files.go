@@ -3,7 +3,6 @@ package flow
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -21,13 +20,7 @@ func (b *Book) File(family string, bold, italic bool) string {
 	seen := map[string]bool{}
 	for key != "" && !seen[key] {
 		seen[key] = true
-		files, ok := families[key]
-		if runtime.GOOS == "darwin" {
-			if m, has := macFamilies[key]; has {
-				files, ok = m, true
-			}
-		}
-		if ok {
+		if files, ok := platformFamilies(key); ok {
 			for _, dir := range b.dirs {
 				path := filepath.Join(dir, files[style])
 				if _, err := os.Stat(path); err == nil {

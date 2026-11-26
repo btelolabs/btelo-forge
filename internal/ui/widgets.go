@@ -58,9 +58,16 @@ func (u *ctx) button(id string, r gfx.Rect, glyph, text string, kind buttonKind,
 			bg = colPrimaryHi
 		}
 	case danger:
-		bg, edge = gfx.Mix(colSurface, colDanger, 0.22), gfx.Mix(colBorder, colDanger, 0.35)
-		if hot {
-			bg = gfx.Mix(colSurface, colDanger, 0.4)
+		if isDarkTheme() {
+			bg, edge = gfx.Mix(colSurface, colDanger, 0.22), gfx.Mix(colBorder, colDanger, 0.35)
+			if hot {
+				bg = gfx.Mix(colSurface, colDanger, 0.4)
+			}
+		} else {
+			bg, fg, edge = gfx.Mix(colSurface, colDanger, 0.09), colDangerText, gfx.Mix(colBorder, colDanger, 0.30)
+			if hot {
+				bg = gfx.Mix(colSurface, colDanger, 0.16)
+			}
 		}
 	case ghost:
 		bg, edge = color.RGBA{}, color.RGBA{}
@@ -79,7 +86,11 @@ func (u *ctx) button(id string, r gfx.Rect, glyph, text string, kind buttonKind,
 		}
 	}
 	if u.active == id && enabled {
-		bg = gfx.Mix(bg, colBlack, 0.15)
+		mix := float32(0.15)
+		if !isDarkTheme() {
+			mix = 0.08
+		}
+		bg = gfx.Mix(bg, colBlack, mix)
 	}
 	u.c.Fill(r, bg)
 	if edge.A > 0 {
@@ -197,7 +208,11 @@ func (u *ctx) slider(id string, r gfx.Rect, value *float64, lo, hi float64, enab
 	track := gfx.Rect{X: r.X + u.px(7), Y: r.Y + r.H/2 - u.px(2), W: r.W - u.px(14), H: u.px(4)}
 	t := float32((*value - lo) / (hi - lo))
 	t = min(max(t, 0), 1)
-	u.c.Fill(track, colSurfaceHi)
+	trackCol := colSurfaceHi
+	if !isDarkTheme() {
+		trackCol = gfx.Mix(colBorder, colBorderHi, 0.4)
+	}
+	u.c.Fill(track, trackCol)
 	fill := gfx.Mix(colDim, colText, 0.6)
 	if !enabled {
 		fill = colFaint
@@ -211,8 +226,20 @@ func (u *ctx) slider(id string, r gfx.Rect, value *float64, lo, hi float64, enab
 		u.cursor = CursorHand
 	}
 	k := gfx.Rect{X: knob - half, Y: r.Y + r.H/2 - half, W: 2 * half, H: 2 * half}
-	u.c.Fill(k.Inset(-max(1, u.px(1))), colBackground)
-	u.c.Fill(k, colWhite)
+	if isDarkTheme() {
+		u.c.Fill(k.Inset(-max(1, u.px(1))), colBackground)
+		u.c.Fill(k, colWhite)
+	} else {
+		edge := gfx.Mix(colBorderHi, colDim, 0.4)
+		if !enabled {
+			edge = colBorderHi
+		} else if hot {
+			edge = colDim
+		}
+		u.c.Fill(gfx.Rect{X: k.X, Y: k.Y + max(1, u.px(1)), W: k.W, H: k.H}, colShadow)
+		u.c.Fill(k, colWhite)
+		u.c.Outline(k, max(1, u.px(1)), edge)
+	}
 	if !enabled {
 		return false, false
 	}
@@ -303,8 +330,12 @@ func (u *ctx) drawTip(screen gfx.Rect) time.Duration {
 	}
 	r := gfx.Rect{X: x, Y: y, W: w, H: h}
 	u.covers = append(u.covers, r)
-	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(2), W: r.W, H: r.H}, gfx.Alpha(colBlack, 0.4))
-	u.c.Fill(r, colSelected)
+	u.c.Fill(gfx.Rect{X: r.X, Y: r.Y + u.px(2), W: r.W, H: r.H}, colShadow)
+	bg := colSelected
+	if !isDarkTheme() {
+		bg = colSurface
+	}
+	u.c.Fill(r, bg)
 	u.c.Outline(r, max(1, u.px(1)), colBorderHi)
 	u.label(f, r, u.tip.text, colText, 0.5)
 	return 0

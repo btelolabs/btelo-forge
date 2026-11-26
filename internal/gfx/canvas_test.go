@@ -256,3 +256,45 @@ func TestWrapNeverStartsALineWithClosingPunctuation(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkCanvasText(b *testing.B) {
+	fonts, err := LoadSystemFonts()
+	if err != nil {
+		b.Skip(err)
+	}
+	face := fonts.Regular.Face(14)
+	c := NewCanvas(800, 200)
+	c.Clear(Hex(0x1e1f24))
+	col := Hex(0xe6e8ee)
+	const line = "The quick brown fox jumps over the lazy dog 0123456789 · Export 1920x1080"
+	// Warm glyph cache
+	c.Text(face, 10, 10, line, col)
+	b.ResetTimer()
+	for range b.N {
+		for y := float32(10); y < 180; y += 20 {
+			c.Text(face, 10, y, line, col)
+		}
+	}
+}
+
+func BenchmarkCanvasRoundRect(b *testing.B) {
+	c := NewCanvas(400, 200)
+	c.Clear(Hex(0x1e1f24))
+	r := Rect{X: 10.5, Y: 10.5, W: 360, H: 160}
+	col := color.RGBA{R: 0x3b, G: 0x82, B: 0xf6, A: 200}
+	b.ResetTimer()
+	for range b.N {
+		c.RoundRect(r, 12, col)
+	}
+}
+
+func BenchmarkCanvasFillAlpha(b *testing.B) {
+	c := NewCanvas(1280, 720)
+	c.Clear(Hex(0x1e1f24))
+	r := Rect{X: 0, Y: 0, W: 1280, H: 720}
+	col := color.RGBA{R: 0x0c, G: 0x0d, B: 0x10, A: 0x9c}
+	b.ResetTimer()
+	for range b.N {
+		c.Fill(r, col)
+	}
+}

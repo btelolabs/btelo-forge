@@ -48,7 +48,7 @@ type exportIn struct {
 	Codec    *string  `json:"codec,omitempty" jsonschema:"h264 (plays anywhere), h265 (smaller), av1 (smallest), gif (silent 256-colour loop) or webp (silent full-colour loop, far smaller than gif)"`
 	Speed    *string  `json:"speed,omitempty" jsonschema:"fast, medium, slow or slowest; slower makes smaller files"`
 	Audio    *string  `json:"audio,omitempty" jsonschema:"high (192k), normal (128k), low (96k), voice (64k mono) or none"`
-	Hardware *bool    `json:"hardware,omitempty" jsonschema:"encode on the NVIDIA graphics card when it can"`
+	Hardware *bool    `json:"hardware,omitempty" jsonschema:"encode on the graphics card (Apple VideoToolbox or NVIDIA NVENC) when available"`
 	TargetMB *float64 `json:"target_mb,omitempty" jsonschema:"aim for a file of at most this many megabytes (two-pass); 0 turns it off"`
 }
 

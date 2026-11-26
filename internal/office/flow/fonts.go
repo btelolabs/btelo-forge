@@ -3,7 +3,6 @@ package flow
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -24,19 +23,6 @@ type Book struct {
 // NewBook is a book that falls back on the window's fonts.
 func NewBook(base gfx.Fonts) *Book {
 	return &Book{base: base, dirs: fontDirs(), fonts: map[string]*gfx.Font{}}
-}
-
-func fontDirs() []string {
-	if runtime.GOOS == "darwin" {
-		home, _ := os.UserHomeDir()
-		return []string{"/System/Library/Fonts/Supplemental", "/System/Library/Fonts", "/Library/Fonts", filepath.Join(home, "Library/Fonts")}
-	}
-	dir := os.Getenv("WINDIR")
-	if dir == "" {
-		dir = `C:\Windows`
-	}
-	local := os.Getenv("LOCALAPPDATA")
-	return []string{filepath.Join(dir, "Fonts"), filepath.Join(local, `Microsoft\Windows\Fonts`)}
 }
 
 // faceFiles are the files of a family: regular, bold, italic, bold italic. Files repeat where a family has fewer.
@@ -67,17 +53,6 @@ var families = map[string]faceFiles{
 	"kaiti":           {"simkai.ttf", "simkai.ttf", "simkai.ttf", "simkai.ttf"},
 	"仿宋":              {"simfang.ttf", "simfang.ttf", "simfang.ttf", "simfang.ttf"},
 	"fangsong":        {"simfang.ttf", "simfang.ttf", "simfang.ttf", "simfang.ttf"},
-}
-
-// macFamilies are the same families where a Mac has them, or the closest it has, as "file.ttc#n" where a collection
-// holds the style.
-var macFamilies = map[string]faceFiles{
-	"arial":           {"Arial.ttf", "Arial Bold.ttf", "Arial Italic.ttf", "Arial Bold Italic.ttf"},
-	"times new roman": {"Times New Roman.ttf", "Times New Roman Bold.ttf", "Times New Roman Italic.ttf", "Times New Roman Bold Italic.ttf"},
-	"courier new":     {"Courier New.ttf", "Courier New Bold.ttf", "Courier New Italic.ttf", "Courier New Bold Italic.ttf"},
-	"georgia":         {"Georgia.ttf", "Georgia Bold.ttf", "Georgia Italic.ttf", "Georgia Bold Italic.ttf"},
-	"verdana":         {"Verdana.ttf", "Verdana Bold.ttf", "Verdana Italic.ttf", "Verdana Bold Italic.ttf"},
-	"tahoma":          {"Tahoma.ttf", "Tahoma Bold.ttf", "Tahoma.ttf", "Tahoma Bold.ttf"},
 }
 
 // similar names, for a family not on this computer, one of the same shape and of about the same widths.
@@ -146,12 +121,7 @@ func (b *Book) find(key string, style int) *gfx.Font {
 
 // open loads the family's file for the style, with the system's fonts behind it for what it lacks.
 func (b *Book) open(key string, style int) *gfx.Font {
-	files, ok := families[key]
-	if runtime.GOOS == "darwin" {
-		if m, has := macFamilies[key]; has {
-			files, ok = m, true
-		}
-	}
+	files, ok := platformFamilies(key)
 	if !ok {
 		return nil
 	}
@@ -173,8 +143,7 @@ func (b *Book) open(key string, style int) *gfx.Font {
 // fallbackFiles are searched for characters a document's font lacks: Chinese first, as most mixed documents are.
 func fallbackFiles(dirs []string) []string {
 	var out []string
-	for _, name := range []string{"msyh.ttc", "PingFang.ttc", "Hiragino Sans GB.ttc", "STHeiti Medium.ttc", "segoeui.ttf", "malgun.ttf",
-		"seguisym.ttf", "seguiemj.ttf", "Arial Unicode.ttf"} {
+	for _, name := range fallbackNames() {
 		for _, dir := range dirs {
 			path := filepath.Join(dir, name)
 			if _, err := os.Stat(path); err == nil {

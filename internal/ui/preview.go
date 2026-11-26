@@ -219,7 +219,11 @@ func (a *App) drawOverlays(v gfx.Rect, edit bool) {
 		if a.sel.kind == selOverlay && a.sel.id == items[i].ID {
 			u.c.Outline(box, u.px(2), colAccent)
 		} else if i == hit && u.active == "" {
-			u.c.Outline(box, u.px(1), gfx.Alpha(colText, 0.6))
+			hoverCol := gfx.Alpha(colText, 0.6)
+			if !isDarkTheme() {
+				hoverCol = gfx.Alpha(colWhite, 0.7)
+			}
+			u.c.Outline(box, u.px(1), hoverCol)
 		}
 	}
 	if hit >= 0 && u.active == "" && !u.blocked {
@@ -248,7 +252,11 @@ func (a *App) drawOverlays(v gfx.Rect, edit bool) {
 		snap := float64(u.px(6) / v.W)
 		if math.Abs(x-0.5) < snap {
 			x = 0.5
-			u.c.Fill(gfx.Rect{X: v.X + v.W/2, Y: v.Y, W: max(1, u.px(1)), H: v.H}, gfx.Alpha(colPlayhead, 0.8))
+			guide := colPlayhead
+			if !isDarkTheme() {
+				guide = colWhite
+			}
+			u.c.Fill(gfx.Rect{X: v.X + v.W/2, Y: v.Y, W: max(1, u.px(1)), H: v.H}, gfx.Alpha(guide, 0.8))
 		}
 		a.p.UpdateOverlay(u.drag.id, func(o *project.Overlay) { o.X, o.Y = x, y })
 	}

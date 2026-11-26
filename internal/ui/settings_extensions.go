@@ -42,7 +42,7 @@ func (a *App) settingsExtensions(r gfx.Rect) {
 		}
 	}
 	y := r.Y
-	if pick := u.chips("settings/ext/tab", rectAt(r.X, y, min(r.W, u.px(320)), u.px(30)), titles, e.tab, true); pick != e.tab {
+	if pick := u.chips("settings/ext/tab", rectAt(r.X, y, r.W, u.px(30)), titles, e.tab, true); pick != e.tab {
 		e.tab = pick
 		u.focus = ""
 	}

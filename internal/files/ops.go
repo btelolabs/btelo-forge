@@ -303,6 +303,9 @@ func copyItem(ctx context.Context, src, dst string, p *Progress) error {
 const copyBuffer = 1 << 20
 
 func copyFile(ctx context.Context, src, dst string, info fs.FileInfo, p *Progress) error {
+	if cloned, err := tryCloneFile(ctx, src, dst, info, p); cloned || err != nil {
+		return err
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err

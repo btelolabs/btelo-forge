@@ -73,7 +73,11 @@ func (a *App) drawWatchBar(r gfx.Rect) {
 		u.cursor = CursorHand
 	}
 	track := gfx.Rect{X: seek.X, Y: seek.Y + (seek.H-thick)/2, W: seek.W, H: thick}
-	u.c.Fill(track, colSurfaceHi)
+	trackCol := colSurfaceHi
+	if !isDarkTheme() {
+		trackCol = colBorder
+	}
+	u.c.Fill(track, trackCol)
 	done := float32(0)
 	if length > 0 {
 		done = float32(min(max(a.playhead/length, 0), 1))
@@ -91,7 +95,7 @@ func (a *App) drawWatchBar(r gfx.Rect) {
 			w := f.Measure(text) + u.px(12)
 			tip := gfx.Rect{X: min(max(u.mx-w/2, r.X+u.px(4)), r.Right()-w-u.px(4)), Y: r.Y - u.px(26), W: w, H: u.px(22)}
 			u.c.Fill(tip, gfx.Alpha(colBlack, 0.75))
-			u.label(f, tip, text, colText, 0.5)
+			u.label(f, tip, text, colWhite, 0.5)
 		}
 	}
 	if u.press("watch/seek", seek) {

@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package proc
 
@@ -10,22 +10,22 @@ import (
 	"time"
 )
 
-// processInfo is the program file of the process pid and the time it began, and false when there is no such process.
-// ps names the program by its path on macOS and by its name, cut short, on Linux (see sameImage).
+// processInfo is the program file of the process pid and the time it began, and false when there is no such process
+// or when it has already exited as a zombie.
 func processInfo(pid int) (image string, began time.Time, ok bool) {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "etime=", "-o", "comm=").Output()
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "stat=", "-o", "etime=", "-o", "comm=").Output()
 	if err != nil {
 		return "", time.Time{}, false
 	}
 	fields := strings.Fields(strings.TrimSpace(string(out)))
-	if len(fields) < 2 {
+	if len(fields) < 3 || strings.HasPrefix(fields[0], "Z") {
 		return "", time.Time{}, false
 	}
-	age, ok := parseElapsed(fields[0])
+	age, ok := parseElapsed(fields[1])
 	if !ok {
 		return "", time.Time{}, false
 	}
-	return strings.Join(fields[1:], " "), time.Now().Add(-age), true
+	return strings.Join(fields[2:], " "), time.Now().Add(-age), true
 }
 
 // parseElapsed reads the elapsed time ps gives, [[dd-]hh:]mm:ss.

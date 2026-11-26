@@ -138,14 +138,19 @@ func (a *App) drawUVEditor(md *modelDoc, r gfx.Rect) {
 	u := &a.u
 	e := md.edit
 	u.c.Fill(r, colBackground)
+	u.c.Fill(rectAt(r.X, r.Y, max(1, u.px(1)), r.H), colBorder)
 	square := a.uvRect(r)
 	var p *modelPicture
 	if m := md.materialOfEdit(); m >= 0 && m < len(md.asset.Materials) && md.asset.Materials[m].BaseTex.Image >= 0 {
 		p = a.pictureOf(md, m)
 	}
 	u.c.Blit(a.uvThumb(md, p, int(square.W)), int(square.X), int(square.Y), true)
+	u.c.Outline(square, max(1, u.px(1)), colBorder)
 	if len(e.island) > 0 {
 		chosen := color.RGBA{R: 255, G: 150, B: 40, A: 255}
+		if !isDarkTheme() && p == nil {
+			chosen = color.RGBA{R: 217, G: 100, B: 10, A: 255}
+		}
 		for _, f := range e.island {
 			c := e.em.FaceCorners(int(f))
 			for i := range c {

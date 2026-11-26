@@ -60,6 +60,7 @@ type segment struct {
 	closing   bool
 	listening bool  // the sound goes to ffmpeg through a connection
 	origin    int64 // the counter reading the segment's sound is timed from
+	onStop    func()
 }
 
 // Start begins recording; it returns once ffmpeg and the audio devices are running.
@@ -196,7 +197,7 @@ func removeFinished(path string) error {
 func (r *Recorder) begin() error {
 	o := r.opts
 	part := strings.TrimSuffix(o.Path, filepath.Ext(o.Path)) + fmt.Sprintf(".part%d.mkv", len(r.parts)+1)
-	_, err := startSegment(o, func(t0 int64, audio string) []string { return recordArgs(o, t0, audio, part) }, nil, segmentHooks{
+	_, err := startRecordSegment(o, part, segmentHooks{
 		started: func(s *segment) {
 			r.mu.Lock()
 			r.parts = append(r.parts, part)
@@ -297,9 +298,14 @@ func startSegment(o Options, args func(t0 int64, audio string) []string, stdout 
 	return s, nil
 }
 
-// end stops the segment's audio and waits for it.
+// end stops the segment's audio and any platform video capture and waits for them.
 func (s *segment) end() {
-	s.ending.Do(func() { close(s.quit) })
+	s.ending.Do(func() {
+		close(s.quit)
+		if s.onStop != nil {
+			s.onStop()
+		}
+	})
 	s.audio.Wait()
 }
 

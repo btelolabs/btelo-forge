@@ -8,11 +8,15 @@ import (
 	"flag"
 	"fmt"
 	"image/png"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"time"
 
+	"github.com/btelolabs/btelo-forge/internal/errlog"
 	"github.com/btelolabs/btelo-forge/internal/gfx"
 	"github.com/btelolabs/btelo-forge/internal/matting"
 	"github.com/btelolabs/btelo-forge/internal/ui"
@@ -51,22 +55,35 @@ func main() {
 		return
 	}
 	ui.Version = version
+	defer func() {
+		if r := recover(); r != nil {
+			errlog.Error("panic", fmt.Sprintf("uncaught panic: %v\n%s", r, debug.Stack()), nil)
+			panic(r)
+		}
+	}()
 	if err := run(*background, *capture, *deadline, flag.Args()); err != nil {
+		errlog.Error("app", "startup or runtime error", err)
 		alert(err.Error())
 		os.Exit(1)
 	}
 }
 
 func run(background bool, capture string, deadline time.Duration, files []string) error {
+	config, err := os.UserConfigDir()
+	if err != nil {
+		return err
+	}
+	stateDir, stateMoves := dataDir(config)
+	logger := errlog.Open(filepath.Join(stateDir, "logs", "error.log"))
+	defer logger.Close()
+	errlog.SetDefault(logger)
+	log.SetOutput(io.MultiWriter(os.Stderr, logger.Writer()))
+
 	fonts, err := gfx.LoadSystemFonts()
 	if err != nil {
 		return err
 	}
 	cache, err := os.UserCacheDir()
-	if err != nil {
-		return err
-	}
-	config, err := os.UserConfigDir()
 	if err != nil {
 		return err
 	}
@@ -95,7 +112,6 @@ func run(background bool, capture string, deadline time.Duration, files []string
 	defer w.Close()
 	// The data folders under the app's current name, moved from its old one on the first run.
 	cacheDir, moves := dataDir(cache)
-	stateDir, stateMoves := dataDir(config)
 	for old, now := range stateMoves {
 		moves[old] = now
 	}

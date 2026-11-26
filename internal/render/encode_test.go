@@ -18,6 +18,7 @@ import (
 
 func TestEncoderPrefersTheCardOnlyWhenAsked(t *testing.T) {
 	all := media.Encoders{"libx264": true, "libx265": true, "libaom-av1": true, "h264_nvenc": true}
+	vt := media.Encoders{"libx264": true, "libx265": true, "h264_videotoolbox": true, "hevc_videotoolbox": true}
 	for _, c := range []struct {
 		codec    project.Codec
 		hardware bool
@@ -27,6 +28,9 @@ func TestEncoderPrefersTheCardOnlyWhenAsked(t *testing.T) {
 		{project.H264, false, all, "libx264"},
 		{project.H264, true, all, "h264_nvenc"},
 		{project.HEVC, true, all, "libx265"},
+		{project.H264, false, vt, "libx264"},
+		{project.H264, true, vt, "h264_videotoolbox"},
+		{project.HEVC, true, vt, "hevc_videotoolbox"},
 		{project.AV1, false, all, "libaom-av1"},
 		{project.AV1, false, media.Encoders{"libsvtav1": true, "libaom-av1": true}, "libsvtav1"},
 		{project.AV1, false, media.Encoders{"libx264": true}, ""},
@@ -100,6 +104,11 @@ func TestPlansFollowEverySetting(t *testing.T) {
 	if last := job.Passes[0]; !hasArgs(last, "-c:v", "hevc_nvenc") || !hasArgs(last, "-cq", "21") || hasArgs(last, "-c:a", "aac") {
 		t.Fatalf("%q", last)
 	}
+	vt := media.Encoders{"libx264": true, "libx265": true, "h264_videotoolbox": true, "hevc_videotoolbox": true}
+	job = planFor(t, project.Export{Audio: project.AudioNone, Codec: project.HEVC, Quality: project.Balanced, Speed: project.Slow, Hardware: true}, vt)
+	if last := job.Passes[0]; !hasArgs(last, "-c:v", "hevc_videotoolbox") || !hasArgs(last, "-q:v", "65") || !hasArgs(last, "-spatial_aq", "1") || hasArgs(last, "-preset", "slow") {
+		t.Fatalf("%q", last)
+	}
 	job = planFor(t, project.Export{TargetMB: 5}, all)
 	if len(job.Passes) != 2 || !hasArgs(job.Passes[0], "-pass", "1") || !hasArgs(job.Passes[1], "-pass", "2") ||
 		!hasArgs(job.Passes[0], "-an") || job.Dir == "" || hasArgs(job.Passes[1], "-crf", "23") {
@@ -153,7 +162,7 @@ func TestExportsEncodeEveryAvailableFormat(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			name := Encoder(c.e.Codec, c.e.Hardware, enc)
-			if name == "" || c.e.Hardware && !strings.HasSuffix(name, "_nvenc") {
+			if name == "" || c.e.Hardware && name == Encoder(c.e.Codec, false, enc) {
 				t.Skipf("no encoder for %s on this computer", c.name)
 			}
 			p := project.New(src, c.e)

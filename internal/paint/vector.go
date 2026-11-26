@@ -335,24 +335,121 @@ func (v *Vector) Render(dst *image.RGBA, r image.Rectangle, scale float64) {
 // object's own, where gradients are placed.
 func paintCoverage(dst *image.RGBA, r image.Rectangle, cover []uint8, p VectorPaint, inv Affine) {
 	w := r.Dx()
-	solid := premul(p.Color)
+	if !p.Gradient() {
+		c := premul(p.Color)
+		if c[3] == 0 {
+			return
+		}
+		c0, c1, c2, c3 := c[0], c[1], c[2], c[3]
+		b0, b1, b2 := uint8(c0), uint8(c1), uint8(c2)
+		opaque := c3 == 255
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			row := cover[(y-r.Min.Y)*w : (y-r.Min.Y+1)*w]
+			drow := dst.Pix[dst.PixOffset(r.Min.X, y):][:w*4]
+			for x, kv := range row {
+				if kv == 0 {
+					continue
+				}
+				px := drow[x*4 : x*4+4 : x*4+4]
+				if opaque && kv == 255 {
+					px[0], px[1], px[2], px[3] = b0, b1, b2, 255
+					continue
+				}
+				k := uint32(kv)
+				keep := 255 - mul8(c3, k)
+				px[0] = uint8(min(mul8(uint32(px[0]), keep)+mul8(c0, k), 255))
+				px[1] = uint8(min(mul8(uint32(px[1]), keep)+mul8(c1, k), 255))
+				px[2] = uint8(min(mul8(uint32(px[2]), keep)+mul8(c2, k), 255))
+				px[3] = uint8(min(mul8(uint32(px[3]), keep)+mul8(c3, k), 255))
+			}
+		}
+		return
+	}
+	// Precompute a 512-entry premultiplied stop table and gradient basis once per shape.
+	const lutSize = 512
+	var table [lutSize][4]uint32
+	if len(p.Stops) == 0 {
+		s := premul(p.Color)
+		for i := range table {
+			table[i] = s
+		}
+	} else {
+		stops := p.Stops
+		for i := range table {
+			t := float64(i) / (lutSize - 1)
+			var col color.NRGBA
+			switch {
+			case t <= stops[0].At:
+				col = stops[0].Color
+			case t >= stops[len(stops)-1].At:
+				col = stops[len(stops)-1].Color
+			default:
+				for j := 1; j < len(stops); j++ {
+					a, b := stops[j-1], stops[j]
+					if t <= b.At {
+						f := (t - a.At) / max(b.At-a.At, 1e-9)
+						col = color.NRGBA{
+							R: uint8(math.Round(float64(a.Color.R) + (float64(b.Color.R)-float64(a.Color.R))*f)),
+							G: uint8(math.Round(float64(a.Color.G) + (float64(b.Color.G)-float64(a.Color.G))*f)),
+							B: uint8(math.Round(float64(a.Color.B) + (float64(b.Color.B)-float64(a.Color.B))*f)),
+							A: uint8(math.Round(float64(a.Color.A) + (float64(b.Color.A)-float64(a.Color.A))*f)),
+						}
+						break
+					}
+				}
+			}
+			table[i] = premul(col)
+		}
+	}
+	d := p.To.Sub(p.From)
+	l2 := max(d.Dot(d), 1e-18)
+	invL2 := 1 / l2
+	invL2Lin := 1 / max(d.Dot(d), 1e-9)
+	perp := d.Perp()
+	invAsp := 1 / p.aspect()
+	baseAngle := math.Atan2(d.Y, d.X)
+	const invTwoPi = 1 / (2 * math.Pi)
+
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		row := cover[(y-r.Min.Y)*w : (y-r.Min.Y+1)*w]
-		for x := r.Min.X; x < r.Max.X; x++ {
-			k := uint32(row[x-r.Min.X])
-			if k == 0 {
+		drow := dst.Pix[dst.PixOffset(r.Min.X, y):][:w*4]
+		fy := float64(y) + 0.5
+		q0 := inv.Map(Pt{float64(r.Min.X) + 0.5, fy})
+		rx0, ry0 := q0.X-p.From.X, q0.Y-p.From.Y
+		for x, kv := range row {
+			if kv == 0 {
 				continue
 			}
-			c := solid
-			if p.Gradient() {
-				c = premul(p.colorAt(inv.Map(Pt{float64(x) + 0.5, float64(y) + 0.5})))
+			rx := rx0 + float64(x)*inv.A
+			ry := ry0 + float64(x)*inv.D
+			var t float64
+			switch p.Kind {
+			case PaintRadial:
+				along := (rx*d.X + ry*d.Y) * invL2
+				across := (rx*perp.X + ry*perp.Y) * invL2 * invAsp
+				t = math.Sqrt(along*along + across*across)
+			case PaintConical:
+				a := math.Atan2(ry, rx) - baseAngle
+				t = math.Mod(a*invTwoPi+2, 1)
+			default:
+				t = (rx*d.X + ry*d.Y) * invL2Lin
 			}
-			i := dst.PixOffset(x, y)
-			px := dst.Pix[i : i+4 : i+4]
+			var idx int
+			if t <= 0 {
+				idx = 0
+			} else if t >= 1 {
+				idx = lutSize - 1
+			} else {
+				idx = int(t*(lutSize-1) + 0.5)
+			}
+			c := table[idx]
+			k := uint32(kv)
+			px := drow[x*4 : x*4+4 : x*4+4]
 			keep := 255 - mul8(c[3], k)
-			for ch := range 4 {
-				px[ch] = uint8(min(mul8(uint32(px[ch]), keep)+mul8(c[ch], k), 255))
-			}
+			px[0] = uint8(min(mul8(uint32(px[0]), keep)+mul8(c[0], k), 255))
+			px[1] = uint8(min(mul8(uint32(px[1]), keep)+mul8(c[1], k), 255))
+			px[2] = uint8(min(mul8(uint32(px[2]), keep)+mul8(c[2], k), 255))
+			px[3] = uint8(min(mul8(uint32(px[3]), keep)+mul8(c[3], k), 255))
 		}
 	}
 }

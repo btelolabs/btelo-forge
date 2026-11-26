@@ -105,7 +105,7 @@ jobs:
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           identity="$(security find-identity -v -p codesigning "$keychain" | grep -m1 'Developer ID Application' | sed -E 's/.*"(.*)"/\1/')"
           [ -n "$identity" ] || { echo "::error::No Developer ID Application certificate in the secret."; exit 1; }
-          codesign --force --options runtime --timestamp --sign "$identity" "$app"
+          codesign --force --options runtime --timestamp --entitlements packaging/macos/entitlements.plist --sign "$identity" "$app"
           codesign --verify --strict --verbose=2 "$app"
           ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
           xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --password "$APPLE_APP_PWD" \

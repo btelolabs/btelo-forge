@@ -40,4 +40,7 @@ func drawLogo(u *ctx, r gfx.Rect) {
 	if scaled := logoScaler.Scaled(logo(), p.Dx(), p.Dy()); scaled != nil {
 		u.c.Blit(scaled, p.Min.X, p.Min.Y, false)
 	}
+	if !isDarkTheme() {
+		u.c.Outline(r, max(1, u.px(1)), colBorder)
+	}
 }

@@ -232,6 +232,16 @@ func (s *Stroke) dab(cx, cy float64) image.Rectangle {
 	}
 	flow := b.Flow
 	shape := b.shape()
+	if b.Tip == TipShaped && b.Shape != nil {
+		s.dabShaped(box, cx, cy, &shape, flow)
+		s.dirty = s.dirty.Union(box)
+		return box
+	}
+	if b.Tip == TipRound && !shape.turned && shape.invRound == 1 {
+		s.dabRound(box, cx, cy, shape.r, shape.soft, flow)
+		s.dirty = s.dirty.Union(box)
+		return box
+	}
 	for y := box.Min.Y; y < box.Max.Y; y++ {
 		py := float64(y) + 0.5
 		// A row goes tile by tile, each tile's coverage looked up once.
@@ -252,6 +262,169 @@ func (s *Stroke) dab(cx, cy float64) image.Rectangle {
 	}
 	s.dirty = s.dirty.Union(box)
 	return box
+}
+
+// dabShaped stamps a picture brush tip using affine row stepping and per-row horizontal clipping.
+func (s *Stroke) dabShaped(box image.Rectangle, cx, cy float64, sh *dabShape, flow float64) {
+	t := sh.b.Shape
+	tw, th := t.W, t.H
+	pix := t.Pix
+	scale := sh.tipScale
+	dux, dvx := scale, 0.0
+	duy, dvy := 0.0, sh.invRound*scale
+	if sh.turned {
+		dux = sh.cs * scale
+		dvx = sh.sn * sh.invRound * scale
+		duy = -sh.sn * scale
+		dvy = sh.cs * sh.invRound * scale
+	}
+	halfW := float64(tw)*0.5 - 0.5
+	halfH := float64(th)*0.5 - 0.5
+	flowScale := flow / 255.0
+	fw, fh := float64(tw), float64(th)
+	fw1, fh1 := float64(tw-1), float64(th-1)
+
+	for y := box.Min.Y; y < box.Max.Y; y++ {
+		dy := float64(y) + 0.5 - cy
+		xStart, xEnd := box.Min.X, box.Max.X
+		// Clip x range to where -1 < u < fw and -1 < v < fh.
+		uAt0 := (float64(xStart)+0.5-cx)*dux + dy*duy + halfW
+		vAt0 := (float64(xStart)+0.5-cx)*dvx + dy*dvy + halfH
+		if dux == 0 {
+			if uAt0 <= -1 || uAt0 >= fw {
+				continue
+			}
+		} else {
+			lo, hi := (-1.0-uAt0)/dux, (fw-uAt0)/dux
+			if lo > hi {
+				lo, hi = hi, lo
+			}
+			if s0 := box.Min.X + int(math.Floor(lo)) + 1; s0 > xStart {
+				xStart = s0
+			}
+			if e1 := box.Min.X + int(math.Ceil(hi)); e1 < xEnd {
+				xEnd = e1
+			}
+		}
+		if xStart >= xEnd {
+			continue
+		}
+		if dvx == 0 {
+			if vAt0 <= -1 || vAt0 >= fh {
+				continue
+			}
+		} else {
+			lo, hi := (-1.0-vAt0)/dvx, (fh-vAt0)/dvx
+			if lo > hi {
+				lo, hi = hi, lo
+			}
+			if s0 := box.Min.X + int(math.Floor(lo)) + 1; s0 > xStart {
+				xStart = s0
+			}
+			if e1 := box.Min.X + int(math.Ceil(hi)); e1 < xEnd {
+				xEnd = e1
+			}
+		}
+		if xStart >= xEnd {
+			continue
+		}
+
+		for x0 := xStart; x0 < xEnd; {
+			x1 := min(xEnd, (x0>>tileShift+1)<<tileShift)
+			row := s.coverRow(x0, y)[:x1-x0]
+			u := (float64(x0)+0.5-cx)*dux + dy*duy + halfW
+			v := (float64(x0)+0.5-cx)*dvx + dy*dvy + halfH
+			for idx := range row {
+				var sample float64
+				if u >= 0 && v >= 0 && u < fw1 && v < fh1 {
+					i, j := int(u), int(v)
+					fx, fy := u-float64(i), v-float64(j)
+					k := j*tw + i
+					p00, p10 := float64(pix[k]), float64(pix[k+1])
+					p01, p11 := float64(pix[k+tw]), float64(pix[k+tw+1])
+					top := p00 + (p10-p00)*fx
+					bot := p01 + (p11-p01)*fx
+					sample = top + (bot-top)*fy
+				} else if u > -1 && v > -1 && u < fw && v < fh {
+					x0f, y0f := math.Floor(u), math.Floor(v)
+					fx, fy := u-x0f, v-y0f
+					i, j := int(x0f), int(y0f)
+					var p00, p10, p01, p11 float64
+					if j >= 0 && j < th {
+						if i >= 0 && i < tw {
+							p00 = float64(pix[j*tw+i])
+						}
+						if i+1 >= 0 && i+1 < tw {
+							p10 = float64(pix[j*tw+i+1])
+						}
+					}
+					if j+1 >= 0 && j+1 < th {
+						if i >= 0 && i < tw {
+							p01 = float64(pix[(j+1)*tw+i])
+						}
+						if i+1 >= 0 && i+1 < tw {
+							p11 = float64(pix[(j+1)*tw+i+1])
+						}
+					}
+					sample = (p00+(p10-p00)*fx)*(1-fy) + (p01+(p11-p01)*fx)*fy
+				}
+				if sample > 0 {
+					c := sample * flowScale
+					m := float64(row[idx])
+					row[idx] = uint16(m + (65535-m)*c + 0.5)
+				}
+				u += dux
+				v += dvx
+			}
+			x0 = x1
+		}
+	}
+}
+
+// dabRound stamps an unrotated circular brush with squared-distance early out for interior and exterior pixels.
+func (s *Stroke) dabRound(box image.Rectangle, cx, cy, r, soft, flow float64) {
+	r2 := r * r
+	inner := max(r-soft, 0)
+	inner2 := inner * inner
+	invSoft := 1 / soft
+	fullFlow := flow >= 1
+	for y := box.Min.Y; y < box.Max.Y; y++ {
+		dy := float64(y) + 0.5 - cy
+		dy2 := dy * dy
+		if dy2 >= r2 {
+			continue
+		}
+		span := math.Sqrt(r2 - dy2)
+		xStart := max(box.Min.X, int(math.Floor(cx-span)))
+		xEnd := min(box.Max.X, int(math.Ceil(cx+span)))
+		for x0 := xStart; x0 < xEnd; {
+			x1 := min(xEnd, (x0>>tileShift+1)<<tileShift)
+			row := s.coverRow(x0, y)[:x1-x0]
+			dx := float64(x0) + 0.5 - cx
+			for idx := range row {
+				d2 := dx*dx + dy2
+				if d2 < r2 {
+					var c float64
+					if d2 <= inner2 {
+						c = flow
+					} else {
+						t := (r - math.Sqrt(d2)) * invSoft
+						c = t * t * (3 - 2*t) * flow
+					}
+					if c > 0 {
+						if fullFlow && c >= 1 {
+							row[idx] = 65535
+						} else {
+							m := float64(row[idx])
+							row[idx] = uint16(m + (65535-m)*c + 0.5)
+						}
+					}
+				}
+				dx++
+			}
+			x0 = x1
+		}
+	}
 }
 
 // vary is the brush and centre of the next dab with the brush's shape dynamics: turned with the stroke, then
@@ -328,9 +501,9 @@ func (s *Stroke) compose(r image.Rectangle) {
 		})
 		return
 	}
-	before := s.beforePix.Read(r)
 	lock := s.layer.LockAlpha
 	if s.retouch != nil {
+		before := s.beforePix.Read(r)
 		target := s.retouchTarget(before, r)
 		s.layer.Pixels.Tiles(r, func(pix []uint8, part image.Rectangle, corner image.Point) {
 			for y := part.Min.Y; y < part.Max.Y; y++ {
@@ -353,10 +526,101 @@ func (s *Stroke) compose(r image.Rectangle) {
 		})
 		return
 	}
+	// Fast tile-direct path: s.beforePix is a snapshot of s.layer.Pixels with identical offset, so each tile in
+	// s.layer.Pixels maps 1:1 to the same tile in s.beforePix without allocating a temporary RGBA copy.
+	if s.beforePix.p.off == s.layer.Pixels.p.off && src == nil {
+		cr, cg, cb := uint32(col.R), uint32(col.G), uint32(col.B)
+		fullOp := opacity == 65535
+		erase := s.erase
+		if erase && lock {
+			return // locked transparency cannot be erased
+		}
+		s.layer.Pixels.Tiles(r, func(pix []uint8, part image.Rectangle, corner image.Point) {
+			bt := s.beforePix.p.tiles[tileKey(corner.Sub(s.beforePix.p.off))]
+			var bpix []uint8
+			if bt != nil {
+				bpix = bt.pix
+			}
+			for y := part.Min.Y; y < part.Max.Y; y++ {
+				ty := (y - corner.Y) * TileSize
+				cy := (y & tileMask) * TileSize
+				for x0 := part.Min.X; x0 < part.Max.X; {
+					x1 := min(part.Max.X, (x0>>tileShift+1)<<tileShift)
+					ct := s.cover[image.Pt(x0>>tileShift, y>>tileShift)]
+					if ct == nil {
+						x0 = x1
+						continue
+					}
+					crow := ct[cy+(x0&tileMask) : cy+(x0&tileMask)+(x1-x0)]
+					poff := (ty + (x0 - corner.X)) * 4
+					drow := pix[poff : poff+(x1-x0)*4]
+					var brow []uint8
+					if bpix != nil {
+						brow = bpix[poff : poff+(x1-x0)*4]
+					}
+					var srow []uint8
+					if sel != nil && y >= sel.Rect.Min.Y && y < sel.Rect.Max.Y {
+						if sx0, sx1 := max(x0, sel.Rect.Min.X), min(x1, sel.Rect.Max.X); sx0 < sx1 {
+							srow = sel.Pix[sel.PixOffset(sx0, y):]
+						}
+					}
+					for i, cv := range crow {
+						if cv == 0 {
+							continue
+						}
+						var a uint32
+						if fullOp {
+							a = (uint32(cv)*255 + 32767) / 65535
+						} else {
+							a = (uint32(cv)*opacity/65535*255 + 32767) / 65535
+						}
+						if sel != nil {
+							x := x0 + i
+							if srow == nil || x < sel.Rect.Min.X || x >= sel.Rect.Max.X {
+								continue
+							}
+							a = mul8(a, uint32(sel.Pix[sel.PixOffset(x, y)]))
+						}
+						if a == 0 {
+							continue
+						}
+						p := drow[i*4 : i*4+4 : i*4+4]
+						var b0, b1, b2, b3 uint32
+						if brow != nil {
+							bp := brow[i*4 : i*4+4 : i*4+4]
+							b0, b1, b2, b3 = uint32(bp[0]), uint32(bp[1]), uint32(bp[2]), uint32(bp[3])
+						}
+						k := 255 - a
+						if erase {
+							p[0], p[1], p[2], p[3] = uint8(mul8(b0, k)), uint8(mul8(b1, k)), uint8(mul8(b2, k)), uint8(mul8(b3, k))
+							continue
+						}
+						if a == 255 && !lock {
+							p[0], p[1], p[2], p[3] = col.R, col.G, col.B, 255
+							continue
+						}
+						p[0] = uint8(mul8(cr, a) + mul8(b0, k))
+						p[1] = uint8(mul8(cg, a) + mul8(b1, k))
+						p[2] = uint8(mul8(cb, a) + mul8(b2, k))
+						p[3] = uint8(a + mul8(b3, k))
+						if lock {
+							keepAlpha(p, b3)
+						}
+					}
+					x0 = x1
+				}
+			}
+		})
+		return
+	}
+	before := s.beforePix.Read(r)
 	s.layer.Pixels.Tiles(r, func(pix []uint8, part image.Rectangle, corner image.Point) {
 		for y := part.Min.Y; y < part.Max.Y; y++ {
 			for x := part.Min.X; x < part.Max.X; x++ {
 				a := cover(x, y)
+				if a == 0 {
+					continue
+				}
 				bi := before.PixOffset(x, y)
 				b0, b1, b2, b3 := uint32(before.Pix[bi]), uint32(before.Pix[bi+1]), uint32(before.Pix[bi+2]), uint32(before.Pix[bi+3])
 				p := pix[((y-corner.Y)*TileSize+x-corner.X)*4:][:4]
