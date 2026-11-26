@@ -207,7 +207,7 @@ func parseRule(line string) (Rule, *RuleError) {
 	if word, rest, found := cutWord(right); found {
 		switch word {
 		case "open":
-			target, args, perr := quoted(rest)
+			target, args, perr := quotedPath(rest)
 			if perr != nil {
 				return Rule{}, perr
 			}
@@ -264,6 +264,29 @@ func parseAbbr(left, right string) (Rule, *RuleError) {
 	return r, nil
 }
 
+// quotedPath reads an open target from s. Inside double quotes, both raw ("E:\dir\app.exe") and
+// escaped ("E:\\dir\\app.exe") Windows paths work; \n and \t stay literal so folder names like
+// \new or \tools are not mangled.
+func quotedPath(s string) (text, rest string, err *RuleError) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", "", &RuleError{Problem: EmptyAction}
+	}
+	if s[0] != '"' {
+		return s, "", nil
+	}
+	end := strings.IndexByte(s[1:], '"')
+	if end < 0 {
+		return "", "", &RuleError{Problem: BadText}
+	}
+	raw := s[1 : 1+end]
+	rest = s[2+end:]
+	if strings.HasPrefix(raw, `\\`) && len(raw) > 2 && raw[2] != '\\' && !strings.Contains(raw[2:], `\\`) {
+		return raw, rest, nil
+	}
+	return strings.ReplaceAll(raw, `\\`, `\`), rest, nil
+}
+
 // quoted reads a text that starts s, in double quotes with \" \\ \n and \t, or else all of s, and what follows it.
 func quoted(s string) (text, rest string, err *RuleError) {
 	s = strings.TrimSpace(s)
@@ -279,14 +302,18 @@ func quoted(s string) (text, rest string, err *RuleError) {
 		case c == '"':
 			return b.String(), s[i+1:], nil
 		case c == '\\' && i+1 < len(s):
-			i++
-			switch s[i] {
+			switch s[i+1] {
 			case 'n':
 				b.WriteByte('\n')
+				i++
 			case 't':
 				b.WriteByte('\t')
+				i++
+			case '"', '\\':
+				b.WriteByte(s[i+1])
+				i++
 			default:
-				b.WriteByte(s[i])
+				b.WriteByte(c)
 			}
 		default:
 			b.WriteByte(c)

@@ -65,6 +65,59 @@ F1 -> Ctrl+Z`, "\n"))
 	}
 }
 
+func TestParseOpenPaths(t *testing.T) {
+	cases := []struct {
+		line string
+		text string
+		args string
+	}{
+		{
+			line: `Ctrl+Shift+9 -> open "E:\\projects\\btelo-pillar\\.pillar\\bin\\harnessviewer.exe"`,
+			text: `E:\projects\btelo-pillar\.pillar\bin\harnessviewer.exe`,
+		},
+		{
+			line: `Ctrl+Shift+9 -> open "E:\projects\btelo-pillar\.pillar\bin\harnessviewer.exe"`,
+			text: `E:\projects\btelo-pillar\.pillar\bin\harnessviewer.exe`,
+		},
+		{
+			line: `F1 -> open "C:\new\tools\app.exe" --flag`,
+			text: `C:\new\tools\app.exe`,
+			args: `--flag`,
+		},
+		{
+			line: `F2 -> open "C:\\new\\tools\\app.exe" --flag`,
+			text: `C:\new\tools\app.exe`,
+			args: `--flag`,
+		},
+		{
+			line: `F3 -> open "E:\projects\btelo-pillar\"`,
+			text: `E:\projects\btelo-pillar\`,
+		},
+		{
+			line: `F4 -> open "E:\\projects\\btelo-pillar\\"`,
+			text: `E:\projects\btelo-pillar\`,
+		},
+		{
+			line: `F5 -> open "\\server\share\app.exe"`,
+			text: `\\server\share\app.exe`,
+		},
+		{
+			line: `F6 -> open "\\\\server\\share\\app.exe"`,
+			text: `\\server\share\app.exe`,
+		},
+	}
+	for _, tc := range cases {
+		rules, err := Parse([]string{tc.line})
+		if err != nil {
+			t.Errorf("%s: %v", tc.line, err)
+			continue
+		}
+		if len(rules) != 1 || rules[0].Kind != OpenItem || rules[0].Text != tc.text || rules[0].Args != tc.args {
+			t.Errorf("%s: got %+v, want text=%q args=%q", tc.line, rules, tc.text, tc.args)
+		}
+	}
+}
+
 func TestOnlyEnglishWords(t *testing.T) {
 	for _, line := range []string{"右Alt -> Esc", `F1 -> 打开 "x"`, `F1 -> 输入 "x"`, "F1 -> 回车", "F1 → F2"} {
 		if _, err := Parse([]string{line}); err == nil {
