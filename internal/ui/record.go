@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/btelolabs/btelo-forge/internal/capture"
@@ -67,16 +68,17 @@ type recordState struct {
 	failures map[string]error
 	probing  string // the encoderKey being probed
 
-	rec        *capture.Recorder
-	starting   bool
-	stopping   bool // being saved, or thrown away when discarding
-	discarding bool
-	ask        discardAsk // where deleting the recording is being asked about
-	busy       bool       // pausing or resuming
-	shooting   bool       // a screenshot is being taken
-	title      string
-	scroll     float32 // the dialog's scroll offset
-	content    float32 // and its content height at the last frame
+	rec              *capture.Recorder
+	starting         bool
+	stopping         bool // being saved, or thrown away when discarding
+	discarding       bool
+	minimizedByStart bool       // startRecordingOn minimized this window
+	ask              discardAsk // where deleting the recording is being asked about
+	busy             bool       // pausing or resuming
+	shooting         bool       // a screenshot is being taken
+	title            string
+	scroll           float32 // the dialog's scroll offset
+	content          float32 // and its content height at the last frame
 }
 
 // discardAsk is where the question before deleting a recording is: beside the button that was clicked, as the window
@@ -105,13 +107,45 @@ func encoderKey(d capture.Display, fps int) string { return d.Key() + "@" + strc
 // recording reports whether a recording is running, paused or being saved.
 func (a *App) recording() bool { return a.rec.rec != nil || a.rec.starting }
 
-// openRecorder shows the recording dialog and looks up what can be recorded.
+// openRecorder shows the recording dialog and refreshes the list of attached displays and microphones.
 func (a *App) openRecorder() {
 	if a.recorder() == nil || a.recording() {
 		return
 	}
 	a.rec.open = true
-	a.checkRecording()
+	if a.rec.listed {
+		if a.rec.listErr == nil {
+			a.refreshRecordingDevices()
+		}
+	} else {
+		a.checkRecording()
+	}
+}
+
+// refreshRecordingDevices re-enumerates displays and microphones in the background so hot-plugged monitors and
+// microphones appear without restarting the app, while keeping the recording dialog interactive.
+func (a *App) refreshRecordingDevices() {
+	r := &a.rec
+	if a.recorder() == nil || r.listing {
+		return
+	}
+	r.listing = true
+	a.background(func(context.Context) {
+		var displays []capture.Display
+		var mics []capture.AudioDevice
+		err := capture.CheckSystem()
+		if err == nil {
+			displays, err = capture.Displays()
+			mics, _ = capture.Microphones()
+		}
+		a.post(func() {
+			r.listing, r.listed = false, true
+			if err == nil || len(r.displays) == 0 {
+				r.displays, r.mics, r.listErr = displays, mics, err
+			}
+			a.probeEncoder()
+		})
+	})
 }
 
 // checkRecording finds out, once, whether and what this computer can record: the Windows version, the displays and
@@ -364,6 +398,9 @@ func (a *App) startRecordingOn(d capture.Display, region image.Rectangle, done f
 	key := encoderKey(d, s.FPS)
 	e, known := r.encoders[key]
 	r.starting, r.open = true, false
+	if !region.Empty() {
+		a.showRegionFrame(d, region)
+	}
 	a.player.Stop()
 	a.audition.Stop()
 	a.background(func(ctx context.Context) {
@@ -392,13 +429,16 @@ func (a *App) startRecordingOn(d capture.Display, region image.Rectangle, done f
 			}
 			r.rec = rec
 			a.liveFollow()
-			a.showRegionFrame(d, rec.Options().Region)
+			if recRegion := rec.Options().Region; recRegion != region || a.over.frame == nil && !recRegion.Empty() {
+				a.showRegionFrame(d, recRegion)
+			}
 			if s.HideWindow {
 				if err := host.ExcludeFromCapture(true); err != nil {
 					a.toast(a.u.tf("The window could not be left out of the recording: %s", err), true)
 				}
 			}
 			if s.Minimize {
+				r.minimizedByStart = true
 				host.Minimize()
 			}
 			report(path, nil)
@@ -457,6 +497,7 @@ func (a *App) stopRecording(done func(path string, err error)) {
 		rec.Pause()
 		a.post(func() {
 			a.releaseRecordingWindow()
+			r.minimizedByStart = false
 			if host := a.recorder(); host != nil {
 				host.Restore()
 			}
@@ -517,8 +558,11 @@ func (a *App) discardRecording() {
 		err := rec.Discard()
 		a.post(func() {
 			a.releaseRecordingWindow()
-			if host := a.recorder(); host != nil {
-				host.Restore()
+			if r.minimizedByStart {
+				r.minimizedByStart = false
+				if host := a.recorder(); host != nil {
+					host.Restore()
+				}
 			}
 			r.rec, r.stopping, r.discarding = nil, false, false
 			a.host.SetTitle(a.Title())
@@ -769,21 +813,163 @@ const (
 // shotTargets are the targets of the screenshot hotkeys, from hotkeyScreenshot on.
 var shotTargets = [...]shotTarget{shotClipboard, shotFile, shotPath}
 
-// screenshotRegion lets the user pick a region of any display, or click for all of one, and sends it to the target.
+// screenshotRegion captures a frozen desktop snapshot across every display (plus window/popup rects for auto-snap)
+// BEFORE opening or activating any picker overlay, so focused windows, popups, dropdowns and hover states are
+// preserved intact. Confirming crops directly from the frozen frame (<1ms) and writes/copies asynchronously.
 func (a *App) screenshotRegion(to shotTarget) {
-	if _, ok := a.chosenDisplay(); !ok || a.rec.shooting {
+	r := &a.rec
+	host := a.recorder()
+	if host == nil || r.shooting || r.listErr != nil || !r.listed {
 		a.takeScreenshot(capture.Display{}, image.Rectangle{}, to, nil) // says why it cannot
 		return
 	}
-	a.closeShotNotice() // the picker takes the screen; a new screenshot brings its own
-	a.pickRegion(a.shotPick(to), func(d capture.Display, region image.Rectangle, ok bool) {
-		if ok {
-			a.takeScreenshot(d, region, to, func(shot shotTaken, err error) {
-				if err == nil {
-					a.showShotNotice(d, to, shot)
-				}
-			})
+	if _, ok := a.chosenDisplay(); !ok {
+		a.takeScreenshot(capture.Display{}, image.Rectangle{}, to, nil)
+		return
+	}
+	if to == shotClipboard {
+		if _, pictures := a.host.(imageClipboard); !pictures {
+			a.takeScreenshot(capture.Display{}, image.Rectangle{}, to, nil)
+			return
 		}
+	}
+	if _, hasOverlay := a.host.(overlayHost); !hasOverlay {
+		a.takeScreenshot(capture.Display{}, image.Rectangle{}, to, nil)
+		return
+	}
+	a.closeShotNotice() // the picker takes the screen; a new screenshot brings its own
+	s := a.settings.Record
+	hide := s.HideWindow && r.rec == nil // while recording the window is already handled
+	if hide {
+		host.ExcludeFromCapture(true)
+	}
+	r.shooting = true
+	cachedDisplays := slices.Clone(r.displays)
+	a.background(func(ctx context.Context) {
+		displays, derr := capture.Displays()
+		if derr != nil || len(displays) == 0 {
+			displays = cachedDisplays
+		}
+		var (
+			imgs    []*image.RGBA
+			grabErr error
+			windows []capture.WindowRect
+			wg      sync.WaitGroup
+		)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			imgs, grabErr = capture.GrabDisplays(ctx, displays, s.Cursor, hide)
+		}()
+		go func() {
+			defer wg.Done()
+			windows = capture.Windows()
+		}()
+		wg.Wait()
+
+		var snaps, dimmed map[string]*image.RGBA
+		if grabErr == nil {
+			snaps = make(map[string]*image.RGBA, len(displays))
+			for i, d := range displays {
+				if i < len(imgs) && imgs[i] != nil {
+					snaps[d.Key()] = imgs[i]
+				}
+			}
+			dimmed = dimSnapshots(snaps)
+		}
+		a.post(func() {
+			if hide {
+				host.ExcludeFromCapture(false)
+			}
+			r.shooting = false
+			if grabErr != nil {
+				a.toast(a.u.tf("The screenshot could not be taken: %s", a.describe(grabErr)), true)
+				return
+			}
+			if len(displays) > 0 {
+				r.displays = displays
+			}
+			a.pickRegionWith(a.shotPick(to), pickOptions{snaps: snaps, dimmed: dimmed, windows: windows}, func(d capture.Display, region image.Rectangle, ok bool) {
+				if !ok {
+					return
+				}
+				if snap := snaps[d.Key()]; snap != nil {
+					a.finishFrozenScreenshot(d, snap, region, to, func(shot shotTaken, err error) {
+						if err == nil {
+							a.showShotNotice(d, to, shot)
+						}
+					})
+					return
+				}
+				a.takeScreenshot(d, region, to, func(shot shotTaken, err error) {
+					if err == nil {
+						a.showShotNotice(d, to, shot)
+					}
+				})
+			})
+		})
+	})
+}
+
+// finishFrozenScreenshot crops region out of an already-captured frozen display snapshot (<1ms) and writes PNG /
+// updates the image clipboard off the UI thread so the picker closes instantaneously with zero UI stall.
+func (a *App) finishFrozenScreenshot(d capture.Display, snap *image.RGBA, region image.Rectangle, to shotTarget, done func(shot shotTaken, err error)) {
+	r := &a.rec
+	report := func(shot shotTaken, err error) {
+		if err != nil {
+			a.toast(a.u.tf("The screenshot could not be taken: %s", a.describe(err)), true)
+		}
+		if done != nil {
+			done(shot, err)
+		}
+	}
+	cb, pictures := a.host.(imageClipboard)
+	if to == shotClipboard && !pictures {
+		report(shotTaken{}, errors.New(a.u.t("Pictures cannot be put on the clipboard on this system")))
+		return
+	}
+	var path string
+	if to != shotClipboard {
+		dir, err := a.categoryDir(categoryTools)
+		if err != nil {
+			report(shotTaken{}, err)
+			return
+		}
+		path = a.datedPath(dir, a.u.t("Screenshot %s"), ".png", time.Now())
+	}
+	img := capture.CropDisplay(d, snap, region)
+	r.shooting = true
+	a.background(func(ctx context.Context) {
+		var err error
+		if to != shotClipboard {
+			err = capture.WritePNG(path, img, false)
+		} else {
+			err = cb.SetClipboardImage(img)
+		}
+		a.post(func() {
+			r.shooting = false
+			if err == nil && to == shotPath {
+				err = a.host.SetClipboard(path)
+			}
+			if err != nil {
+				report(shotTaken{}, err)
+				return
+			}
+			b := img.Bounds()
+			if to == shotClipboard {
+				a.toast(a.u.tf("Copied a screenshot of %d × %d", b.Dx(), b.Dy()), false)
+				report(shotTaken{img: img, size: b.Size()}, nil)
+				return
+			}
+			a.refreshPanes([]string{filepath.Dir(path)})
+			actions := a.shotActions(path)
+			msg := a.u.tf("Saved the screenshot %s", filepath.Base(path))
+			if to == shotPath {
+				msg = a.u.tf("Saved the screenshot %s and copied its path", filepath.Base(path))
+			}
+			a.toastActions(msg, false, actions)
+			report(shotTaken{path: path, img: img, size: b.Size()}, nil)
+		})
 	})
 }
 
@@ -866,13 +1052,13 @@ func (a *App) takeScreenshot(d capture.Display, region image.Rectangle, to shotT
 		if err == nil && to != shotClipboard {
 			err = capture.WritePNG(path, img, false)
 		}
+		if err == nil && to == shotClipboard {
+			err = cb.SetClipboardImage(img)
+		}
 		a.post(func() {
 			r.shooting = false
 			if hide {
 				host.ExcludeFromCapture(false)
-			}
-			if err == nil && to == shotClipboard {
-				err = cb.SetClipboardImage(img)
 			}
 			if err == nil && to == shotPath {
 				err = a.host.SetClipboard(path)

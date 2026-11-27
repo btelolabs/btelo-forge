@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -9,10 +10,23 @@ import (
 
 // Hotkey is a key combination that works system-wide; Key is a Windows virtual-key code, 0 for none.
 type Hotkey struct {
+	Cmd   bool   `json:"cmd,omitempty"`
 	Ctrl  bool   `json:"ctrl,omitempty"`
 	Alt   bool   `json:"alt,omitempty"`
 	Shift bool   `json:"shift,omitempty"`
 	Key   uint16 `json:"key"`
+}
+
+// UnmarshalJSON replaces h wholesale so default modifier flags (such as Cmd on macOS) never bleed into a saved
+// hotkey that omits them.
+func (h *Hotkey) UnmarshalJSON(data []byte) error {
+	type raw Hotkey
+	var v raw
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*h = Hotkey(v)
+	return nil
 }
 
 // The actions that have a hotkey, in the order Settings shows them and the window registers them.
@@ -40,15 +54,6 @@ type hotkeySettings struct {
 	ScreenshotPath Hotkey `json:"screenshotPath"`
 	Record         Hotkey `json:"record"`
 	Pause          Hotkey `json:"pause"`
-}
-
-// defaultHotkeys number the actions in the order Settings shows them, Ctrl+Shift with the digit, avoiding the
-// combinations other programs often take, such as Ctrl+Alt+R and NVIDIA's Alt+F9. The screenshots saved as files
-// and pausing have none: most people want one kind of screenshot at hand, and pausing has its button on the
-// recording toolbar.
-func defaultHotkeys() hotkeySettings {
-	digit := func(d uint16) Hotkey { return Hotkey{Ctrl: true, Shift: true, Key: '0' + d} }
-	return hotkeySettings{Window: digit(1), Draw: digit(2), Screenshot: digit(3), Record: digit(4)}
 }
 
 func (h *hotkeySettings) list() [hotkeyCount]*Hotkey {
@@ -86,7 +91,7 @@ func keyName(vk uint16) string {
 	return fmt.Sprintf("0x%02X", vk)
 }
 
-// String is the combination as people write it, such as Ctrl+Shift+F9, or "" for none.
+// String is the combination as people write it, such as Ctrl+Shift+F9 or Cmd+Shift+3, or "" for none.
 func (h Hotkey) String() string {
 	if h.Key == 0 {
 		return ""
@@ -95,7 +100,7 @@ func (h Hotkey) String() string {
 	for _, m := range []struct {
 		on   bool
 		name string
-	}{{h.Ctrl, "Ctrl"}, {h.Alt, "Alt"}, {h.Shift, "Shift"}} {
+	}{{h.Cmd, "Cmd"}, {h.Ctrl, "Ctrl"}, {h.Alt, "Alt"}, {h.Shift, "Shift"}} {
 		if m.on {
 			parts = append(parts, m.name)
 		}
@@ -103,10 +108,10 @@ func (h Hotkey) String() string {
 	return strings.Join(append(parts, keyName(h.Key)), "+")
 }
 
-// usable reports whether a combination may be taken system-wide: with Ctrl or Alt, or a function key, so that it
-// never swallows plain typing in other programs.
+// usable reports whether a combination may be taken system-wide: with Cmd, Ctrl or Alt, or a function key, so that
+// it never swallows plain typing in other programs.
 func (h Hotkey) usable() bool {
-	return h.Key != 0 && (h.Ctrl || h.Alt || h.Key >= 0x70 && h.Key <= 0x87)
+	return h.Key != 0 && (h.Cmd || h.Ctrl || h.Alt || h.Key >= 0x70 && h.Key <= 0x87)
 }
 
 // applyHotkeys registers the chosen hotkeys with the window, or none while one is being chosen (so pressing a
@@ -294,9 +299,13 @@ func (a *App) captureHotkey() {
 			a.applyHotkeys()
 			break
 		}
-		key := Hotkey{Ctrl: k.Ctrl, Alt: k.Alt, Shift: k.Shift, Key: k.Code}
+		cmd, ctrl := k.Cmd, k.Ctrl
+		if k.Cmd || k.Control {
+			ctrl = k.Control
+		}
+		key := Hotkey{Cmd: cmd, Ctrl: ctrl, Alt: k.Alt, Shift: k.Shift, Key: k.Code}
 		if !key.usable() {
-			h.refused = u.tf("%s would get in the way of typing; add Ctrl or Alt, or use F1 to F24", key.String())
+			h.refused = hotkeyRefusal(u, key.String())
 			continue
 		}
 		keys := a.settings.Hotkeys.list()

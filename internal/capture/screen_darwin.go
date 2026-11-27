@@ -55,17 +55,25 @@ func goScreenStopped(handle C.uintptr_t, msg *C.char) {
 }
 
 type darwinScreen struct {
-	ctx    unsafe.Pointer
-	handle cgo.Handle
-	once   sync.Once
+	ctx         unsafe.Pointer
+	handle      cgo.Handle
+	audioHandle cgo.Handle
+	hasAudio    bool
+	once        sync.Once
 }
 
-func startDarwinScreen(d Display, area image.Rectangle, outW, outH, fps int, cursor bool, cb *screenCallback) (*darwinScreen, error) {
+func startDarwinScreen(d Display, area image.Rectangle, outW, outH, fps int, cursor bool, cb *screenCallback, audioCB *audioCallback) (*darwinScreen, error) {
 	if !isAppBundle() && !hasScreenPermission() {
 		return nil, ErrScreenPermission
 	}
 	sx, sy, sw, sh := displaySourceRect(d, struct{ MinX, MinY, W, H int }{area.Min.X, area.Min.Y, area.Dx(), area.Dy()})
 	h := cgo.NewHandle(cb)
+	var ah cgo.Handle
+	capAudio := C.int(0)
+	if audioCB != nil {
+		ah = cgo.NewHandle(audioCB)
+		capAudio = 1
+	}
 	cur := C.int(0)
 	if cursor {
 		cur = 1
@@ -76,16 +84,20 @@ func startDarwinScreen(d Display, area image.Rectangle, outW, outH, fps int, cur
 		C.uint32_t(displayIDOf(d)),
 		C.double(sx), C.double(sy), C.double(sw), C.double(sh),
 		C.int(outW), C.int(outH), C.int(fps), cur,
-		C.uintptr_t(h), &errCode, &errBuf[0], C.int(len(errBuf)),
+		C.uintptr_t(h), capAudio, C.uintptr_t(ah),
+		&errCode, &errBuf[0], C.int(len(errBuf)),
 	)
 	if ctx == nil {
 		h.Delete()
+		if audioCB != nil {
+			ah.Delete()
+		}
 		if errCode == C.CAP_ERR_PERMISSION {
 			return nil, ErrScreenPermission
 		}
 		return nil, fmt.Errorf("screen capture: %s", C.GoString(&errBuf[0]))
 	}
-	return &darwinScreen{ctx: ctx, handle: h}, nil
+	return &darwinScreen{ctx: ctx, handle: h, audioHandle: ah, hasAudio: audioCB != nil}, nil
 }
 
 func (ds *darwinScreen) stop() {
@@ -96,6 +108,9 @@ func (ds *darwinScreen) stop() {
 		C.cap_screen_stop(ds.ctx)
 		ds.ctx = nil
 		ds.handle.Delete()
+		if ds.hasAudio {
+			ds.audioHandle.Delete()
+		}
 	})
 }
 
@@ -166,8 +181,8 @@ func darwinRecordArgs(o Options, w, h int, video, audio, out string) []string {
 	return append(args, "-flush_packets", "1", "-cluster_time_limit", "1000", "-f", "matroska", out)
 }
 
-// startRecordSegment captures macOS screen frames via ScreenCaptureKit and paces them into ffmpeg alongside audio
-// timed from the exact same mach_absolute_time origin.
+// startRecordSegment captures macOS screen frames (and optionally system audio on the same single SCStream) via
+// ScreenCaptureKit and paces them into ffmpeg alongside audio timed from the exact same mach_absolute_time origin.
 func startRecordSegment(o Options, part string, hooks segmentHooks) (*segment, error) {
 	if !isAppBundle() && !hasScreenPermission() {
 		return nil, ErrScreenPermission
@@ -193,6 +208,23 @@ func startRecordSegment(o Options, part string, hooks segmentHooks) (*segment, e
 	streamDone := make(chan struct{})
 	var doneOnce sync.Once
 
+	origin, t0 := counter(), wallMicros()
+	var sysTrack *track
+	var audioCB *audioCallback
+	if o.SystemAudio {
+		sysTrack = newTrack()
+		audioCB = &audioCallback{
+			origin:  origin,
+			deliver: sysTrack.add,
+		}
+	}
+
+	videoListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+	videoAddr := "tcp://" + videoListener.Addr().String()
+
 	sc, err := startDarwinScreen(o.Display, area, w, h, fps, o.Cursor, &screenCallback{
 		onFrame: func(y []byte, yStride int, uv []byte, uvStride int, fw, fh int, _ int64) {
 			blitNV12Letterbox(buf, w, h, y, yStride, uv, uvStride, fw, fh)
@@ -205,8 +237,9 @@ func startRecordSegment(o Options, part string, hooks segmentHooks) (*segment, e
 			streamErrMu.Unlock()
 			doneOnce.Do(func() { close(streamDone) })
 		},
-	})
+	}, audioCB)
 	if err != nil {
+		videoListener.Close()
 		return nil, err
 	}
 
@@ -214,6 +247,7 @@ func startRecordSegment(o Options, part string, hooks segmentHooks) (*segment, e
 	select {
 	case <-firstFrame:
 	case <-streamDone:
+		videoListener.Close()
 		sc.stop()
 		streamErrMu.Lock()
 		se := streamErr
@@ -221,13 +255,6 @@ func startRecordSegment(o Options, part string, hooks segmentHooks) (*segment, e
 		return nil, se
 	case <-time.After(2 * time.Second):
 	}
-
-	videoListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		sc.stop()
-		return nil, err
-	}
-	videoAddr := "tcp://" + videoListener.Addr().String()
 
 	started := make(chan *segment, 1)
 	var pacing sync.WaitGroup
@@ -256,7 +283,7 @@ func startRecordSegment(o Options, part string, hooks segmentHooks) (*segment, e
 		failed: hooks.failed,
 	}
 
-	seg, err := startSegment(o, func(_ int64, audio string) []string {
+	seg, err := startSegmentWith(o, origin, t0, sysTrack, func(_ int64, audio string) []string {
 		return darwinRecordArgs(o, w, h, videoAddr, audio, part)
 	}, nil, wrappedHooks)
 	if err != nil {
@@ -299,15 +326,20 @@ func paceRecordVideo(l net.Listener, started <-chan *segment, streamDone <-chan 
 		return
 	}
 	defer conn.Close()
+	if tc, ok := conn.(*net.TCPConn); ok {
+		tc.SetNoDelay(true)
+		tc.SetWriteBuffer(4 << 20)
+	}
 	fps64, freq := int64(fps), counterFrequency()
 	frame := make([]byte, frames.size)
 	tick := time.NewTicker(time.Second / time.Duration(fps) / 2)
 	defer tick.Stop()
 	var sent int64
+	var lastGen uint64
 	for {
 		due := (counter()-seg.origin)*fps64/freq + 1
 		for ; sent < due; sent++ {
-			frames.copyTo(frame)
+			lastGen = frames.copyIfChanged(frame, lastGen)
 			if _, err := conn.Write(frame); err != nil {
 				return
 			}
@@ -374,7 +406,7 @@ func startScreenFeed(o Options, so StreamOptions, _ bool, frames *frameStore, en
 			default:
 			}
 		},
-	})
+	}, nil)
 	if err != nil {
 		cancel()
 		frames.release(f)

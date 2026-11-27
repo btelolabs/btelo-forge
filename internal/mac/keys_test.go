@@ -14,6 +14,8 @@ func TestKeyVKTranslatesMacKeys(t *testing.T) {
 		// Function keys & Insert
 		{122, "\uf704", 0x70, true}, {120, "\uf705", 0x71, true}, {96, "\uf708", 0x74, true},
 		{103, "\uf70e", 0x7a, true}, {111, "\uf70f", 0x7b, true}, {114, "", 0x2d, true},
+		// Shifted top-row digits (charactersIgnoringModifiers still applies Shift on macOS)
+		{18, "!", '1', true}, {19, "@", '2', true}, {20, "#", '3', true}, {21, "$", '4', true}, {29, ")", '0', true},
 		{0, "å", 0, false}, {10, "§", 0, false}} {
 		if vk, ok := keyVK(c.code, c.chars); vk != c.vk || ok != c.ok {
 			t.Errorf("keyVK(%d, %q) = %#x %v, want %#x %v", c.code, c.chars, vk, ok, c.vk, c.ok)

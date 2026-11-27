@@ -32,6 +32,7 @@ type Overlay struct {
 	imeH       float32
 	cursor     int
 	cursorSet  bool
+	keyboard   bool
 	closed     bool
 }
 
@@ -80,7 +81,7 @@ func OpenOverlay(o OverlayOptions) (*Overlay, error) {
 	if h == nil {
 		return nil, errors.New("overlay: could not create panel")
 	}
-	ov := &Overlay{id: id, handle: h, bounds: o.Bounds}
+	ov := &Overlay{id: id, handle: h, bounds: o.Bounds, keyboard: o.Activate}
 	overlayMu.Lock()
 	overlays[id] = ov
 	overlayMu.Unlock()
@@ -98,16 +99,26 @@ func (o *Overlay) Scale() float32 {
 	return float32(C.forge_overlay_scale(o.handle))
 }
 
-// PresentLayered shows a premultiplied RGBA image of the overlay's size.
+// PresentLayered shows a premultiplied RGBA image of the overlay's size, updating only dirty (or all when empty).
 // Thread-safe: may be called from background goroutines (such as camera capture) as well as the main thread.
-func (o *Overlay) PresentLayered(rgba []byte, width, height int, _ image.Rectangle) error {
+func (o *Overlay) PresentLayered(rgba []byte, width, height int, dirty image.Rectangle) error {
 	if o.handle == nil || o.closed {
 		return nil
 	}
 	if width <= 0 || height <= 0 || len(rgba) < width*height*4 {
 		return errors.New("present: bad image")
 	}
-	C.forge_overlay_present(o.handle, unsafe.Pointer(&rgba[0]), C.int(width), C.int(height))
+	full := image.Rect(0, 0, width, height)
+	if dirty.Empty() {
+		dirty = full
+	} else {
+		dirty = dirty.Intersect(full)
+		if dirty.Empty() {
+			return nil
+		}
+	}
+	C.forge_overlay_present(o.handle, unsafe.Pointer(&rgba[0]), C.int(width), C.int(height),
+		C.int(dirty.Min.X), C.int(dirty.Min.Y), C.int(dirty.Dx()), C.int(dirty.Dy()))
 	runtime.KeepAlive(rgba)
 	return nil
 }
@@ -126,9 +137,10 @@ func (o *Overlay) SetClickThrough(on bool) {
 
 // TakeKeyboard brings the overlay in front to take keyboard focus, or yields focus back.
 func (o *Overlay) TakeKeyboard(on bool) {
-	if o.handle == nil {
+	if o.handle == nil || o.keyboard == on {
 		return
 	}
+	o.keyboard = on
 	v := C.int(0)
 	if on {
 		v = 1

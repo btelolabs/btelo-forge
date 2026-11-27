@@ -95,6 +95,27 @@ func TestDarwinDisplaysMicrophonesAndCameras(t *testing.T) {
 			t.Errorf("cam[%d] missing id/name: %+v", i, c)
 		}
 	}
+
+	wins := Windows()
+	t.Logf("Windows() returned %d rects", len(wins))
+	for i, w := range wins {
+		if i < 10 {
+			t.Logf("win[%d]: %s %v", i, w.Title, w.Rect)
+		}
+		if w.Rect.Dx() < 8 || w.Rect.Dy() < 8 {
+			t.Errorf("win[%d] too small: %+v", i, w)
+		}
+		if strings.HasPrefix(w.Title, "Window Server") {
+			t.Errorf("win[%d] leaked Window Server entry: %+v", i, w)
+		}
+		if len(displays) > 0 {
+			d0 := displays[0]
+			if w.Rect.Dx() >= d0.Width*9/10 && w.Rect.Dy() >= d0.Height*9/10 &&
+				(w.Title == "Dock" || w.Title == "Notification Center") {
+				t.Errorf("win[%d] leaked full-screen system backdrop: %+v", i, w)
+			}
+		}
+	}
 }
 
 func TestDarwinVideoToolboxArgsAndProbe(t *testing.T) {
@@ -256,6 +277,9 @@ func TestDarwinPermissionPreflightDoesNotHang(t *testing.T) {
 		}
 		if _, err := GrabScreenshot(context.Background(), d, image.Rect(0, 0, 100, 100), false, false); !errors.Is(err, ErrScreenPermission) {
 			t.Errorf("GrabScreenshot without permission: got %v, want ErrScreenPermission", err)
+		}
+		if _, err := GrabDisplays(context.Background(), []Display{d}, false, false); !errors.Is(err, ErrScreenPermission) {
+			t.Errorf("GrabDisplays without permission: got %v, want ErrScreenPermission", err)
 		}
 		if err := Screenshot(context.Background(), d, image.Rect(0, 0, 100, 100), false, filepath.Join(t.TempDir(), "s.png")); !errors.Is(err, ErrScreenPermission) {
 			t.Errorf("Screenshot without permission: got %v, want ErrScreenPermission", err)

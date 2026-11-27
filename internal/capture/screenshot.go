@@ -58,6 +58,44 @@ func GrabScreenshot(ctx context.Context, d Display, region image.Rectangle, curs
 	return out, nil
 }
 
+// GrabDisplays captures every display in displays as close to simultaneously as possible (typically before any picker
+// overlay opens so popups, menus, dropdowns, and hover states stay frozen), returning one *image.RGBA per display.
+func GrabDisplays(ctx context.Context, displays []Display, cursor, flush bool) ([]*image.RGBA, error) {
+	if !Supported() {
+		return nil, ErrUnsupported
+	}
+	if len(displays) == 0 {
+		return nil, ErrNoDisplay
+	}
+	return grabDisplays(ctx, displays, cursor, flush)
+}
+
+// CropDisplay extracts region (empty for the whole display) from a frozen display snapshot, rounding sides down to
+// even dimensions as GrabScreenshot does, and returns a standalone tight *image.RGBA.
+func CropDisplay(d Display, snap *image.RGBA, region image.Rectangle) *image.RGBA {
+	if snap == nil {
+		return nil
+	}
+	area := evenArea(d, region).Intersect(snap.Bounds())
+	if area.Empty() {
+		return nil
+	}
+	area.Max.X -= area.Dx() % 2
+	area.Max.Y -= area.Dy() % 2
+	if area.Empty() {
+		return nil
+	}
+	w, h := area.Dx(), area.Dy()
+	out := image.NewRGBA(image.Rect(0, 0, w, h))
+	rowBytes := w * 4
+	for y := range h {
+		srcOff := snap.PixOffset(area.Min.X, area.Min.Y+y)
+		dstOff := y * out.Stride
+		copy(out.Pix[dstOff:dstOff+rowBytes], snap.Pix[srcOff:srcOff+rowBytes])
+	}
+	return out
+}
+
 // Screenshot saves the display, or a region of it (empty for all), as it is now to a PNG at path.
 func Screenshot(ctx context.Context, d Display, region image.Rectangle, cursor bool, path string) error {
 	if !Supported() {

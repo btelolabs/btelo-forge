@@ -181,10 +181,9 @@ func (a *App) startScreenDraw() {
 	ad := &artDoc{d: pd, path: path, zoom: 1, panX: float64(d.Width) / 2, panY: float64(d.Height) / 2, renaming: -1, layerHeld: -1, onScreen: true}
 	sd := &screenDraw{d: d, tab: &doc{art: ad}, ad: ad, pic: pic, marks: marks, panel: panel, tool: toolBrush, rows: 1}
 	sc.draw = sd
-	// The recording's bar opens again, in front of the new windows.
+	// Keep the recording's bar in front of the new drawing overlays without closing/reopening it.
 	if sc.bar != nil {
-		sc.bar.s.close()
-		sc.bar = nil
+		sc.bar.s.o.Raise()
 	}
 	sd.drawing = false
 	a.setScreenDrawing(true)

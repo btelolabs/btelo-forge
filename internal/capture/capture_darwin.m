@@ -425,6 +425,168 @@ static SCDisplay *find_sc_display(SCShareableContent *content, uint32_t display_
 	return content.displays.firstObject;
 }
 
+// ---- Window / Popup Enumeration (Front-to-Back Z-Order, Desktop Physical Pixels) ----
+
+static int find_display_for_rect(const cap_display_info *displays, int count, CGRect r) {
+	if (count <= 0) return -1;
+	double cx = r.origin.x + r.size.width * 0.5;
+	double cy = r.origin.y + r.size.height * 0.5;
+	for (int i = 0; i < count; i++) {
+		const cap_display_info *d = &displays[i];
+		if (cx >= d->bounds_x && cx < d->bounds_x + d->bounds_w &&
+		    cy >= d->bounds_y && cy < d->bounds_y + d->bounds_h) {
+			return i;
+		}
+	}
+	int best = 0;
+	double bestArea = -1;
+	for (int i = 0; i < count; i++) {
+		CGRect db = CGRectMake(displays[i].bounds_x, displays[i].bounds_y, displays[i].bounds_w, displays[i].bounds_h);
+		CGRect inter = CGRectIntersection(r, db);
+		if (!CGRectIsNull(inter)) {
+			double a = inter.size.width * inter.size.height;
+			if (a > bestArea) {
+				bestArea = a;
+				best = i;
+			}
+		}
+	}
+	return best;
+}
+
+int cap_list_windows(cap_window_info *out, int max_count) {
+	@autoreleasepool {
+		if (!out || max_count <= 0) return 0;
+		cap_display_info displays[32];
+		int dcount = cap_list_displays(displays, 32);
+		if (dcount <= 0) return 0;
+
+		CFArrayRef arr = CGWindowListCopyWindowInfo(
+			kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+			kCGNullWindowID);
+		if (!arr) return 0;
+		NSArray *list = (__bridge_transfer NSArray *)arr;
+
+		pid_t selfPID = getpid();
+		int written = 0;
+		for (NSDictionary *w in list) {
+			if (written >= max_count) break;
+			double alpha = [w[(__bridge NSString *)kCGWindowAlpha] doubleValue];
+			if (alpha <= 0.01) continue;
+			int layer = [w[(__bridge NSString *)kCGWindowLayer] intValue];
+			// Keep normal windows (0), floating/modal panels (3..20), and popup menus (101);
+			// skip desktop/below-normal (< 0) and system shield/cursor layers (> 101).
+			if (layer < 0 || layer > 101) continue;
+			NSNumber *pidNum = w[(__bridge NSString *)kCGWindowOwnerPID];
+			NSNumber *sharing = w[(__bridge NSString *)kCGWindowSharingState];
+			// On modern macOS, kCGWindowSharingState is 0 for other apps' windows unless
+			// they opt into legacy CG sharing, so only apply the capture-excluded filter
+			// to our own process's windows (e.g. picker/recording overlays with NSWindowSharingNone).
+			if (pidNum && pidNum.intValue == (int)selfPID && sharing && sharing.intValue == kCGWindowSharingNone) {
+				continue;
+			}
+
+			CGRect r = CGRectZero;
+			CFDictionaryRef bdict = (__bridge CFDictionaryRef)w[(__bridge NSString *)kCGWindowBounds];
+			if (!bdict || !CGRectMakeWithDictionaryRepresentation(bdict, &r)) continue;
+			if (r.size.width < 8 || r.size.height < 8) continue;
+
+			NSString *owner = w[(__bridge NSString *)kCGWindowOwnerName] ?: @"";
+			if ([owner isEqualToString:@"Window Server"]) continue;
+
+			int di = find_display_for_rect(displays, dcount, r);
+			if (di < 0) continue;
+			const cap_display_info *d = &displays[di];
+
+			// Skip tiny menu-bar status icons (kCGStatusWindowLevel == 25) along the top bar
+			// while keeping real dropdown menus (layer 101) and Control Center popovers.
+			if (layer == 25 && r.size.height <= 48 && r.origin.y <= d->bounds_y + 4) continue;
+
+			// macOS exposes full-screen transparent Dock / Notification Center / Wallpaper / Spotlight layers
+			// with alpha=1.0; filter those full-screen system backdrops so real windows & popups snap cleanly.
+			double dispArea = d->bounds_w * d->bounds_h;
+			double winArea = r.size.width * r.size.height;
+			if (dispArea > 0 && winArea >= dispArea * 0.90) {
+				if ([owner isEqualToString:@"Dock"] ||
+				    [owner isEqualToString:@"Notification Center"] ||
+				    [owner isEqualToString:@"Wallpaper"] ||
+				    [owner isEqualToString:@"Spotlight"] ||
+				    [owner isEqualToString:@"Control Center"]) {
+					continue;
+				}
+			}
+
+			int px = d->x + (int)llround((r.origin.x - d->bounds_x) * d->scale);
+			int py = d->y + (int)llround((r.origin.y - d->bounds_y) * d->scale);
+			int pw = (int)llround(r.size.width * d->scale);
+			int ph = (int)llround(r.size.height * d->scale);
+			if (pw < 8 || ph < 8) continue;
+
+			cap_window_info *info = &out[written++];
+			memset(info, 0, sizeof(*info));
+			info->x = px;
+			info->y = py;
+			info->w = pw;
+			info->h = ph;
+			NSString *name = w[(__bridge NSString *)kCGWindowName];
+			if (name.length > 0 && owner.length > 0) {
+				snprintf(info->title, sizeof(info->title), "%s — %s", owner.UTF8String, name.UTF8String);
+			} else if (owner.length > 0) {
+				strlcpy(info->title, owner.UTF8String, sizeof(info->title));
+			} else if (name.length > 0) {
+				strlcpy(info->title, name.UTF8String, sizeof(info->title));
+			}
+		}
+		return written;
+	}
+}
+
+// ---- Fast CGImage -> Opaque RGBA Conversion ----
+
+static int cgimage_to_rgba_fast(CGImageRef captured, uint8_t *rgba_out, int out_w, int out_h) {
+	if (!captured || !rgba_out || out_w <= 0 || out_h <= 0) return 0;
+	size_t iw = CGImageGetWidth(captured);
+	size_t ih = CGImageGetHeight(captured);
+	size_t bpp = CGImageGetBitsPerPixel(captured);
+	size_t bpc = CGImageGetBitsPerComponent(captured);
+	CGBitmapInfo info = CGImageGetBitmapInfo(captured);
+	CGBitmapInfo order = info & kCGBitmapByteOrderMask;
+	// Fast path: 32-bit little-endian BGRA matching exact target dimensions -> SIMD vImage (~1.1ms for 4K+).
+	if (iw == (size_t)out_w && ih == (size_t)out_h && bpp == 32 && bpc == 8 && order == kCGBitmapByteOrder32Little) {
+		CGDataProviderRef prov = CGImageGetDataProvider(captured);
+		CFDataRef raw = prov ? CGDataProviderCopyData(prov) : NULL;
+		if (raw) {
+			size_t srcStride = CGImageGetBytesPerRow(captured);
+			size_t rawLen = (size_t)CFDataGetLength(raw);
+			const uint8_t *bytes = CFDataGetBytePtr(raw);
+			if (bytes && srcStride >= (size_t)out_w * 4 && rawLen >= srcStride * (size_t)out_h) {
+				vImage_Buffer srcBuf = { (void *)bytes, (vImagePixelCount)out_h, (vImagePixelCount)out_w, srcStride };
+				vImage_Buffer dstBuf = { rgba_out, (vImagePixelCount)out_h, (vImagePixelCount)out_w, (size_t)out_w * 4 };
+				const uint8_t permuteMap[4] = { 2, 1, 0, 3 }; // BGRA -> RGBA
+				vImage_Error ve = vImagePermuteChannels_ARGB8888(&srcBuf, &dstBuf, permuteMap, kvImageNoFlags);
+				if (ve == kvImageNoError) {
+					vImageOverwriteChannelsWithScalar_ARGB8888(255, &dstBuf, &dstBuf, 0x1, kvImageNoFlags);
+					CFRelease(raw);
+					return 1;
+				}
+			}
+			CFRelease(raw);
+		}
+	}
+	// Fallback: CoreGraphics redraw into opaque sRGB RGBA bitmap context.
+	CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+	CGContextRef ctx = CGBitmapContextCreate(rgba_out, (size_t)out_w, (size_t)out_h, 8, (size_t)out_w * 4,
+		cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+	CGColorSpaceRelease(cs);
+	if (!ctx) return 0;
+	CGContextSetRGBFillColor(ctx, 0, 0, 0, 1);
+	CGContextFillRect(ctx, CGRectMake(0, 0, out_w, out_h));
+	CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
+	CGContextDrawImage(ctx, CGRectMake(0, 0, out_w, out_h), captured);
+	CGContextRelease(ctx);
+	return 1;
+}
+
 // ---- Native Screenshot (SCScreenshotManager, macOS 14+) ----
 
 int cap_grab_screenshot(uint32_t display_id, double src_x, double src_y, double src_w, double src_h,
@@ -480,22 +642,12 @@ int cap_grab_screenshot(uint32_t display_id, double src_x, double src_y, double 
 				int code = CAP_ERR_GENERIC;
 				return classify_sck_error("SCScreenshotManager", capErr, &code, err_buf, err_len);
 			}
-			CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-			CGContextRef ctx = CGBitmapContextCreate(rgba_out, (size_t)out_w, (size_t)out_h, 8, (size_t)out_w * 4,
-				cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-			CGColorSpaceRelease(cs);
-			if (!ctx) {
-				CGImageRelease(captured);
-				set_err(err_buf, err_len, "CGBitmapContextCreate failed");
+			int ok = cgimage_to_rgba_fast(captured, rgba_out, out_w, out_h);
+			CGImageRelease(captured);
+			if (!ok) {
+				set_err(err_buf, err_len, "RGBA conversion failed");
 				return CAP_ERR_GENERIC;
 			}
-			// Fill opaque black first so every pixel ends up with alpha=255.
-			CGContextSetRGBFillColor(ctx, 0, 0, 0, 1);
-			CGContextFillRect(ctx, CGRectMake(0, 0, out_w, out_h));
-			CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
-			CGContextDrawImage(ctx, CGRectMake(0, 0, out_w, out_h), captured);
-			CGContextRelease(ctx);
-			CGImageRelease(captured);
 			return CAP_OK;
 		}
 		set_err(err_buf, err_len, "SCScreenshotManager requires macOS 14 or later");
@@ -503,22 +655,193 @@ int cap_grab_screenshot(uint32_t display_id, double src_x, double src_y, double 
 	}
 }
 
-// ---- ScreenCaptureKit Video Stream ----
+int cap_grab_displays(cap_display_shot *shots, int count, int cursor, int flush, char *err_buf, int err_len) {
+	@autoreleasepool {
+		if (!cap_is_app_bundle() && !CGPreflightScreenCaptureAccess()) {
+			set_err(err_buf, err_len, "screen recording permission denied");
+			return CAP_ERR_PERMISSION;
+		}
+		if (!shots || count <= 0) {
+			set_err(err_buf, err_len, "no displays requested");
+			return CAP_ERR_NO_DEVICE;
+		}
+		if (flush) {
+			usleep(20000);
+		}
+		if (@available(macOS 14.0, *)) {
+			int scErr = CAP_OK;
+			SCShareableContent *content = get_shareable_content(&scErr, err_buf, err_len);
+			if (!content) return scErr != CAP_OK ? scErr : CAP_ERR_GENERIC;
+
+			dispatch_group_t group = dispatch_group_create();
+			__block _Atomic int failedCode = CAP_OK;
+			__block NSError *firstErr = nil;
+			NSObject *errLock = [[NSObject alloc] init];
+
+			for (int i = 0; i < count; i++) {
+				cap_display_shot s = shots[i];
+				if (s.out_w <= 0 || s.out_h <= 0 || !s.rgba_out) {
+					set_err(err_buf, err_len, "empty display bounds");
+					return CAP_ERR_GENERIC;
+				}
+				SCDisplay *disp = find_sc_display(content, s.display_id);
+				if (!disp) {
+					set_err(err_buf, err_len, "display not found");
+					return CAP_ERR_NO_DEVICE;
+				}
+				SCContentFilter *filter = [[SCContentFilter alloc] initWithDisplay:disp excludingWindows:@[]];
+				SCStreamConfiguration *cfg = [[SCStreamConfiguration alloc] init];
+				cfg.width = (size_t)s.out_w;
+				cfg.height = (size_t)s.out_h;
+				cfg.showsCursor = cursor ? YES : NO;
+				cfg.pixelFormat = kCVPixelFormatType_32BGRA;
+				cfg.scalesToFit = YES;
+
+				dispatch_group_enter(group);
+				[SCScreenshotManager captureImageWithFilter:filter
+					configuration:cfg
+					completionHandler:^(CGImageRef image, NSError *error) {
+						if (!image) {
+							@synchronized(errLock) {
+								if (!firstErr) firstErr = error;
+							}
+							atomic_store(&failedCode, CAP_ERR_GENERIC);
+						} else if (!cgimage_to_rgba_fast(image, s.rgba_out, s.out_w, s.out_h)) {
+							atomic_store(&failedCode, CAP_ERR_GENERIC);
+						}
+						dispatch_group_leave(group);
+					}];
+			}
+			if (dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) != 0) {
+				set_err(err_buf, err_len, "multi-display screenshot timed out");
+				return CAP_ERR_GENERIC;
+			}
+			if (atomic_load(&failedCode) != CAP_OK) {
+				if (firstErr) {
+					int code = CAP_ERR_GENERIC;
+					return classify_sck_error("SCScreenshotManager(multi)", firstErr, &code, err_buf, err_len);
+				}
+				set_err(err_buf, err_len, "RGBA conversion failed");
+				return CAP_ERR_GENERIC;
+			}
+			return CAP_OK;
+		}
+		set_err(err_buf, err_len, "SCScreenshotManager requires macOS 14 or later");
+		return CAP_ERR_UNSUPPORTED;
+	}
+}
+
+// ---- Shared ScreenCaptureKit Audio Sample Extraction ----
+
+static void deliver_sc_audio_sample(CMSampleBufferRef sampleBuffer, uintptr_t handle, float **interleaved, size_t *interleavedCap) {
+	if (!CMSampleBufferIsValid(sampleBuffer) || handle == 0) return;
+	CMFormatDescriptionRef fmt = CMSampleBufferGetFormatDescription(sampleBuffer);
+	const AudioStreamBasicDescription *asbd = fmt ? CMAudioFormatDescriptionGetStreamBasicDescription(fmt) : NULL;
+	if (!asbd || !(asbd->mFormatFlags & kAudioFormatFlagIsFloat)) return;
+
+	CMItemCount frames = CMSampleBufferGetNumSamples(sampleBuffer);
+	if (frames <= 0) return;
+
+	size_t listSize = 0;
+	CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sampleBuffer, &listSize, NULL, 0, NULL, NULL, 0, NULL);
+	if (listSize == 0) return;
+
+	AudioBufferList *abl = (AudioBufferList *)malloc(listSize);
+	if (!abl) return;
+	CMBlockBufferRef blockBuf = NULL;
+	OSStatus st = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+		sampleBuffer, NULL, abl, listSize, NULL, NULL,
+		kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment, &blockBuf);
+	if (st != noErr) {
+		free(abl);
+		return;
+	}
+
+	size_t need = (size_t)frames * 2;
+	if (need > *interleavedCap) {
+		float *grown = (float *)realloc(*interleaved, need * sizeof(float));
+		if (!grown) {
+			if (blockBuf) CFRelease(blockBuf);
+			free(abl);
+			return;
+		}
+		*interleaved = grown;
+		*interleavedCap = need;
+	}
+
+	float *dst = *interleaved;
+	int ok = 0;
+	if (abl->mNumberBuffers >= 2 && abl->mBuffers[0].mData && abl->mBuffers[1].mData) {
+		const float *l = (const float *)abl->mBuffers[0].mData;
+		const float *r = (const float *)abl->mBuffers[1].mData;
+		size_t avail = abl->mBuffers[0].mDataByteSize / sizeof(float);
+		if ((size_t)frames > avail) frames = (CMItemCount)avail;
+		for (CMItemCount i = 0; i < frames; i++) {
+			dst[i * 2] = l[i];
+			dst[i * 2 + 1] = r[i];
+		}
+		ok = 1;
+	} else if (abl->mNumberBuffers == 1 && abl->mBuffers[0].mData) {
+		const float *src = (const float *)abl->mBuffers[0].mData;
+		if (abl->mBuffers[0].mNumberChannels >= 2) {
+			size_t avail = abl->mBuffers[0].mDataByteSize / (2 * sizeof(float));
+			if ((size_t)frames > avail) frames = (CMItemCount)avail;
+			memcpy(dst, src, (size_t)frames * 2 * sizeof(float));
+			ok = 1;
+		} else if (abl->mBuffers[0].mNumberChannels == 1) {
+			size_t avail = abl->mBuffers[0].mDataByteSize / sizeof(float);
+			if ((size_t)frames > avail) frames = (CMItemCount)avail;
+			for (CMItemCount i = 0; i < frames; i++) {
+				dst[i * 2] = src[i];
+				dst[i * 2 + 1] = src[i];
+			}
+			ok = 1;
+		}
+	}
+
+	if (ok && frames > 0) {
+		int64_t ts = cmtime_to_100ns(CMSampleBufferGetPresentationTimeStamp(sampleBuffer));
+		goAudioSamples(handle, dst, (int)frames, ts);
+	}
+	if (blockBuf) CFRelease(blockBuf);
+	free(abl);
+}
+
+// ---- ScreenCaptureKit Video (+ Optional Unified System Audio) Stream ----
 
 API_AVAILABLE(macos(12.3))
 @interface ForgeScreenStream : NSObject <SCStreamOutput, SCStreamDelegate> {
 @public
 	_Atomic int _stopping;
+@private
+	float *_interleaved;
+	size_t _interleavedCap;
 }
 @property(nonatomic, strong) SCStream *stream;
 @property(nonatomic, strong) dispatch_queue_t queue;
+@property(nonatomic, strong) dispatch_queue_t audioQueue;
 @property(nonatomic) uintptr_t handle;
+@property(nonatomic) uintptr_t audioHandle;
+@property(nonatomic) BOOL hasAudio;
 @end
 
 @implementation ForgeScreenStream
 
+- (void)dealloc {
+	free(_interleaved);
+}
+
 - (void)stream:(SCStream *)stream didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer ofType:(SCStreamOutputType)type {
-	if (atomic_load(&_stopping) || type != SCStreamOutputTypeScreen) return;
+	if (atomic_load(&_stopping)) return;
+	if (@available(macOS 13.0, *)) {
+		if (type == SCStreamOutputTypeAudio) {
+			if (_hasAudio && _audioHandle != 0) {
+				deliver_sc_audio_sample(sampleBuffer, _audioHandle, &_interleaved, &_interleavedCap);
+			}
+			return;
+		}
+	}
+	if (type != SCStreamOutputTypeScreen) return;
 	if (!CMSampleBufferIsValid(sampleBuffer)) return;
 
 	CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, false);
@@ -560,7 +883,9 @@ API_AVAILABLE(macos(12.3))
 @end
 
 void *cap_screen_start(uint32_t display_id, double src_x, double src_y, double src_w, double src_h,
-	int out_w, int out_h, int fps, int cursor, uintptr_t handle, int *err_code, char *err_buf, int err_len) {
+	int out_w, int out_h, int fps, int cursor, uintptr_t handle,
+	int captures_audio, uintptr_t audio_handle,
+	int *err_code, char *err_buf, int err_len) {
 	@autoreleasepool {
 		if (!cap_is_app_bundle() && !CGPreflightScreenCaptureAccess()) {
 			if (err_code) *err_code = CAP_ERR_PERMISSION;
@@ -592,12 +917,23 @@ void *cap_screen_start(uint32_t display_id, double src_x, double src_y, double s
 			cfg.showsCursor = cursor ? YES : NO;
 			cfg.queueDepth = 3;
 			cfg.scalesToFit = YES;
+			BOOL wantAudio = NO;
 			if (@available(macOS 13.0, *)) {
-				cfg.capturesAudio = NO;
+				if (captures_audio && audio_handle != 0) {
+					cfg.capturesAudio = YES;
+					cfg.excludesCurrentProcessAudio = NO;
+					cfg.sampleRate = 48000;
+					cfg.channelCount = 2;
+					wantAudio = YES;
+				} else {
+					cfg.capturesAudio = NO;
+				}
 			}
 
 			ForgeScreenStream *holder = [[ForgeScreenStream alloc] init];
 			holder.handle = handle;
+			holder.audioHandle = audio_handle;
+			holder.hasAudio = wantAudio;
 			atomic_store(&holder->_stopping, 0);
 			holder.queue = dispatch_queue_create("com.btelo.forge.capture.screen", DISPATCH_QUEUE_SERIAL);
 			holder.stream = [[SCStream alloc] initWithFilter:filter configuration:cfg delegate:holder];
@@ -607,6 +943,16 @@ void *cap_screen_start(uint32_t display_id, double src_x, double src_y, double s
 				if (err_code) *err_code = CAP_ERR_GENERIC;
 				set_nserr(err_buf, err_len, addErr);
 				return NULL;
+			}
+			if (wantAudio) {
+				if (@available(macOS 13.0, *)) {
+					holder.audioQueue = dispatch_queue_create("com.btelo.forge.capture.screen.audio", DISPATCH_QUEUE_SERIAL);
+					if (![holder.stream addStreamOutput:holder type:SCStreamOutputTypeAudio sampleHandlerQueue:holder.audioQueue error:&addErr]) {
+						if (err_code) *err_code = CAP_ERR_GENERIC;
+						set_nserr(err_buf, err_len, addErr);
+						return NULL;
+					}
+				}
 			}
 
 			dispatch_semaphore_t sem = dispatch_semaphore_create(0);
@@ -647,17 +993,25 @@ void cap_screen_stop(void *ctx) {
 				}];
 				dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
 				[holder.stream removeStreamOutput:holder type:SCStreamOutputTypeScreen error:nil];
+				if (holder.hasAudio) {
+					if (@available(macOS 13.0, *)) {
+						[holder.stream removeStreamOutput:holder type:SCStreamOutputTypeAudio error:nil];
+					}
+				}
 				holder.stream = nil;
 			}
-			// Drain serial queue so no in-flight callback accesses Go handle after return.
+			// Drain both serial queues so no in-flight callback accesses Go handles after return.
 			if (holder.queue) {
 				dispatch_sync(holder.queue, ^{});
+			}
+			if (holder.audioQueue) {
+				dispatch_sync(holder.audioQueue, ^{});
 			}
 		}
 	}
 }
 
-// ---- System Audio via ScreenCaptureKit (macOS 13+) ----
+// ---- Standalone System Audio via ScreenCaptureKit (macOS 13+, for audio-only streaming) ----
 
 API_AVAILABLE(macos(13.0))
 @interface ForgeSysAudioStream : NSObject <SCStreamOutput, SCStreamDelegate> {
@@ -680,78 +1034,7 @@ API_AVAILABLE(macos(13.0))
 
 - (void)stream:(SCStream *)stream didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer ofType:(SCStreamOutputType)type {
 	if (atomic_load(&_stopping) || type != SCStreamOutputTypeAudio) return;
-	if (!CMSampleBufferIsValid(sampleBuffer)) return;
-
-	CMFormatDescriptionRef fmt = CMSampleBufferGetFormatDescription(sampleBuffer);
-	const AudioStreamBasicDescription *asbd = fmt ? CMAudioFormatDescriptionGetStreamBasicDescription(fmt) : NULL;
-	if (!asbd || !(asbd->mFormatFlags & kAudioFormatFlagIsFloat)) return;
-
-	CMItemCount frames = CMSampleBufferGetNumSamples(sampleBuffer);
-	if (frames <= 0) return;
-
-	size_t listSize = 0;
-	CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sampleBuffer, &listSize, NULL, 0, NULL, NULL, 0, NULL);
-	if (listSize == 0) return;
-
-	AudioBufferList *abl = (AudioBufferList *)malloc(listSize);
-	if (!abl) return;
-	CMBlockBufferRef blockBuf = NULL;
-	OSStatus st = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-		sampleBuffer, NULL, abl, listSize, NULL, NULL,
-		kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment, &blockBuf);
-	if (st != noErr) {
-		free(abl);
-		return;
-	}
-
-	size_t need = (size_t)frames * 2;
-	if (need > _interleavedCap) {
-		float *grown = (float *)realloc(_interleaved, need * sizeof(float));
-		if (!grown) {
-			if (blockBuf) CFRelease(blockBuf);
-			free(abl);
-			return;
-		}
-		_interleaved = grown;
-		_interleavedCap = need;
-	}
-
-	int ok = 0;
-	if (abl->mNumberBuffers >= 2 && abl->mBuffers[0].mData && abl->mBuffers[1].mData) {
-		// Non-interleaved stereo (ScreenCaptureKit default).
-		const float *l = (const float *)abl->mBuffers[0].mData;
-		const float *r = (const float *)abl->mBuffers[1].mData;
-		size_t avail = abl->mBuffers[0].mDataByteSize / sizeof(float);
-		if ((size_t)frames > avail) frames = (CMItemCount)avail;
-		for (CMItemCount i = 0; i < frames; i++) {
-			_interleaved[i * 2] = l[i];
-			_interleaved[i * 2 + 1] = r[i];
-		}
-		ok = 1;
-	} else if (abl->mNumberBuffers == 1 && abl->mBuffers[0].mData) {
-		const float *src = (const float *)abl->mBuffers[0].mData;
-		if (abl->mBuffers[0].mNumberChannels >= 2) {
-			size_t avail = abl->mBuffers[0].mDataByteSize / (2 * sizeof(float));
-			if ((size_t)frames > avail) frames = (CMItemCount)avail;
-			memcpy(_interleaved, src, (size_t)frames * 2 * sizeof(float));
-			ok = 1;
-		} else if (abl->mBuffers[0].mNumberChannels == 1) {
-			size_t avail = abl->mBuffers[0].mDataByteSize / sizeof(float);
-			if ((size_t)frames > avail) frames = (CMItemCount)avail;
-			for (CMItemCount i = 0; i < frames; i++) {
-				_interleaved[i * 2] = src[i];
-				_interleaved[i * 2 + 1] = src[i];
-			}
-			ok = 1;
-		}
-	}
-
-	if (ok && frames > 0) {
-		int64_t ts = cmtime_to_100ns(CMSampleBufferGetPresentationTimeStamp(sampleBuffer));
-		goAudioSamples((uintptr_t)_handle, _interleaved, (int)frames, ts);
-	}
-	if (blockBuf) CFRelease(blockBuf);
-	free(abl);
+	deliver_sc_audio_sample(sampleBuffer, (uintptr_t)_handle, &_interleaved, &_interleavedCap);
 }
 
 - (void)stream:(SCStream *)stream didStopWithError:(NSError *)error {

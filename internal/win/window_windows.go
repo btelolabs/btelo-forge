@@ -56,6 +56,8 @@ const (
 	wmEraseBkgnd    = 0x0014
 	wmSettingChange = 0x001a
 	wmSetCursor     = 0x0020
+	wmMouseActivate = 0x0021
+	maNoActivate    = 3
 	wmGetMinMaxInfo = 0x0024
 	styleWindow     = 0x00CF0000 // WS_OVERLAPPEDWINDOW
 	classDblClicks  = 0x0008
@@ -204,6 +206,10 @@ func windowProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 			if uint16(lp) == 1 {
 				w.applyCursor()
 				return 1
+			}
+		case wmMouseActivate:
+			if o := w.overlay; o != nil && !o.keyboard && !o.activated {
+				return maNoActivate
 			}
 		case wmSize, wmPaint:
 			if w.Refresh != nil {
@@ -399,11 +405,17 @@ func (w *Window) Close() {
 	if w.Handle == 0 {
 		return
 	}
-	destroyWindow.Call(w.Handle)
-	windows.Delete(w.Handle)
+	hwnd := w.Handle
+	var restore uintptr
+	if w.overlay != nil {
+		restore = w.overlay.closing(hwnd)
+	}
+	destroyWindow.Call(hwnd)
+	windows.Delete(hwnd)
 	w.Handle = 0
 	if w.overlay != nil {
 		w.overlay.release() // an overlay shares the main window's thread, which stays locked
+		restoreForeground(restore)
 		return
 	}
 	runtime.UnlockOSThread()

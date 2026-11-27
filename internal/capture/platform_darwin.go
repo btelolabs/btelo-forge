@@ -109,7 +109,7 @@ func tryStreamEncoderWithArgs(ctx context.Context, size image.Point, fps int, en
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-f", "lavfi", "-i",
-		fmt.Sprintf("color=c=black:s=%dx%d:r=%d,format=nv12", size.X, size.Y, fps), "-t", "0.5"}
+		fmt.Sprintf("color=c=black:s=%dx%d:r=%d,format=nv12", size.X, size.Y, fps), "-frames:v", "2"}
 	args = append(args, encArgs...)
 	args = append(args, "-f", "null", "-")
 	return runFFmpegQuick(ctx, args)

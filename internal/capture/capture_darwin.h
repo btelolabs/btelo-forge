@@ -53,13 +53,33 @@ typedef struct {
 
 int cap_list_cameras(cap_camera_info *out, int max_count);
 
+// Window / popup enumeration (front-to-back Z-order, desktop physical pixels).
+typedef struct {
+	int x, y, w, h;
+	char title[256];
+} cap_window_info;
+
+int cap_list_windows(cap_window_info *out, int max_count);
+
 // Screenshot (writes opaque RGBA pixels into rgba_out of size width*height*4).
 int cap_grab_screenshot(uint32_t display_id, double src_x, double src_y, double src_w, double src_h,
 	int out_w, int out_h, int cursor, int flush, uint8_t *rgba_out, char *err_buf, int err_len);
 
-// Screen video stream (delivers NV12 frames to goScreenFrame).
+// Parallel multi-display screenshot (single SCShareableContent + concurrent SCScreenshotManager).
+typedef struct {
+	uint32_t display_id;
+	int out_w, out_h;
+	uint8_t *rgba_out;
+} cap_display_shot;
+
+int cap_grab_displays(cap_display_shot *shots, int count, int cursor, int flush, char *err_buf, int err_len);
+
+// Screen video stream (delivers NV12 frames to goScreenFrame, and optionally 48kHz stereo float32 system audio
+// to goAudioSamples on the same single SCStream when captures_audio != 0).
 void *cap_screen_start(uint32_t display_id, double src_x, double src_y, double src_w, double src_h,
-	int out_w, int out_h, int fps, int cursor, uintptr_t handle, int *err_code, char *err_buf, int err_len);
+	int out_w, int out_h, int fps, int cursor, uintptr_t handle,
+	int captures_audio, uintptr_t audio_handle,
+	int *err_code, char *err_buf, int err_len);
 void cap_screen_stop(void *ctx);
 
 // System audio capture via ScreenCaptureKit (delivers 48kHz stereo float32 to goAudioSamples).

@@ -12,10 +12,12 @@ type PointerEvent struct {
 	Double bool
 }
 
-// KeyEvent is a key press translated to a Windows virtual-key code; Command counts as Control.
+// KeyEvent is a key press translated to a Windows virtual-key code; Ctrl is true for Command or Control,
+// while Cmd and Control report the physical Command and Control keys separately.
 type KeyEvent struct {
 	VK               uint16
 	Ctrl, Shift, Alt bool
+	Cmd, Control     bool
 }
 
 // Input holds the state at the last Poll and the events since the Poll before it.
@@ -65,6 +67,24 @@ func (q *inputQueue) releaseAll() {
 		}
 	}
 	q.next.Down = false
+}
+
+func applyMods(q *inputQueue, mods int) {
+	q.next.Ctrl = mods&1 != 0
+	q.next.Shift = mods&2 != 0
+	q.next.Alt = mods&4 != 0
+}
+
+func (q *inputQueue) addKey(vk uint16, mods int) {
+	applyMods(q, mods)
+	q.next.Keys = append(q.next.Keys, KeyEvent{
+		VK:      vk,
+		Ctrl:    mods&1 != 0,
+		Shift:   mods&2 != 0,
+		Alt:     mods&4 != 0,
+		Cmd:     mods&8 != 0,
+		Control: mods&16 != 0,
+	})
 }
 
 // flip makes what was collected since the previous flip the current input, and starts collecting afresh with the

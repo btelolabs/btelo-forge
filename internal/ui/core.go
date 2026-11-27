@@ -46,10 +46,12 @@ const (
 	keyMinus    = 0xbd // - and _
 )
 
-// Key is one key press.
+// Key is one key press. On macOS, Ctrl is true for either Command or Control (for in-app shortcuts), while Cmd and
+// Control distinguish the physical modifiers for system-wide hotkey capture.
 type Key struct {
 	Code             uint16
 	Ctrl, Shift, Alt bool
+	Cmd, Control     bool
 }
 
 // Pointer is one mouse button transition.

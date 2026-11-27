@@ -46,7 +46,7 @@ func uiInput(raw *mac.Input, inactive bool) ui.Input {
 		in.Pointer = append(in.Pointer, ui.Pointer{X: p.X, Y: p.Y, Right: p.Right, Middle: p.Middle, Down: p.Down, Double: p.Double})
 	}
 	for _, k := range raw.Keys {
-		in.Keys = append(in.Keys, ui.Key{Code: k.VK, Ctrl: k.Ctrl, Shift: k.Shift, Alt: k.Alt})
+		in.Keys = append(in.Keys, ui.Key{Code: k.VK, Ctrl: k.Ctrl, Shift: k.Shift, Alt: k.Alt, Cmd: k.Cmd, Control: k.Control})
 	}
 	return in
 }
@@ -102,7 +102,7 @@ func (h macWindow) ExcludeFromCapture(on bool) error { return h.w.ExcludeFromCap
 func (h macWindow) SetHotkeys(keys []ui.Hotkey) []error {
 	list := make([]mac.Hotkey, len(keys))
 	for i, k := range keys {
-		list[i] = mac.Hotkey{Ctrl: k.Ctrl, Alt: k.Alt, Shift: k.Shift, VK: k.Key}
+		list[i] = mac.Hotkey{Cmd: k.Cmd, Ctrl: k.Ctrl, Alt: k.Alt, Shift: k.Shift, VK: k.Key}
 	}
 	return h.w.SetHotkeys(list)
 }

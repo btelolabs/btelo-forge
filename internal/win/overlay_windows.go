@@ -22,11 +22,64 @@ var (
 	setWindowPos          = user32.NewProc("SetWindowPos")
 	isWindow              = user32.NewProc("IsWindow")
 	getCursorPos          = user32.NewProc("GetCursorPos")
+	attachThreadInput     = user32.NewProc("AttachThreadInput")
+	getCurrentThreadId    = kernel32.NewProc("GetCurrentThreadId")
 	overlayClassOnce      sync.Once
 	overlayClassErr       error
 	overlayClass, _       = syscall.UTF16PtrFromString("BteloForgeOverlay")
 	mainWindow            atomic.Uintptr // the first window Open made, which overlays pass requests to close to
+	overlayFocusMu        sync.Mutex
+	savedForeground       uintptr // the foreground window before the first activating overlay opened
+	activeKeyOverlays     int
 )
+
+// captureForeground remembers the current foreground window (excluding our own overlays) before the first
+// activating overlay takes focus, so closing a multi-display picker returns focus to the user's previous app.
+func captureForeground() {
+	overlayFocusMu.Lock()
+	defer overlayFocusMu.Unlock()
+	if savedForeground != 0 {
+		return
+	}
+	front, _, _ := getForeground.Call()
+	if front == 0 {
+		return
+	}
+	if v, ok := windows.Load(front); ok && v.(*Window).overlay != nil {
+		return
+	}
+	savedForeground = front
+}
+
+// forceForeground brings hwnd to the foreground, using an AttachThreadInput fallback if Windows' foreground
+// lock expired (for example, after an async freeze-frame capture triggered by WM_HOTKEY).
+func forceForeground(hwnd uintptr) {
+	setForeground.Call(hwnd)
+	front, _, _ := getForeground.Call()
+	if front == hwnd {
+		return
+	}
+	if front != 0 {
+		fgTID, _, _ := getWindowThreadPID.Call(front, 0)
+		curTID, _, _ := getCurrentThreadId.Call()
+		if fgTID != 0 && curTID != 0 && fgTID != curTID {
+			if ok, _, _ := attachThreadInput.Call(curTID, fgTID, 1); ok != 0 {
+				setForeground.Call(hwnd)
+				setFocus.Call(hwnd)
+				attachThreadInput.Call(curTID, fgTID, 0)
+			}
+		}
+	}
+}
+
+func restoreForeground(target uintptr) {
+	if target == 0 {
+		return
+	}
+	if alive, _, _ := isWindow.Call(target); alive != 0 {
+		setForeground.Call(target)
+	}
+}
 
 const (
 	exLayered     = 0x00080000
@@ -51,15 +104,16 @@ type OverlayOptions struct {
 
 // overlayState is what an overlay window has besides a normal window's input.
 type overlayState struct {
-	bounds       image.Rectangle
-	memDC        uintptr
-	bitmap       uintptr
-	bits         []byte // the DIB section's premultiplied BGRA pixels
-	size         image.Point
-	clickThru    bool
-	forwardClose bool    // a request to close goes to the main window
-	keyboard     bool    // it takes the keyboard (TakeKeyboard)
-	before       uintptr // the window in front before it took the keyboard
+	bounds        image.Rectangle
+	memDC         uintptr
+	bitmap        uintptr
+	bits          []byte // the DIB section's premultiplied BGRA pixels
+	size          image.Point
+	clickThru     bool
+	forwardClose  bool // a request to close goes to the main window
+	activated     bool // opened with Activate: true
+	keyboard      bool // it takes the keyboard (TakeKeyboard)
+	countedActive bool // counted in activeKeyOverlays
 }
 
 // OpenOverlay creates a borderless, always-on-top window whose pixels can be partly transparent: the region picker,
@@ -94,7 +148,9 @@ func OpenOverlay(o OverlayOptions) (*Window, error) {
 	if hwnd == 0 {
 		return nil, fmt.Errorf("CreateWindowExW: %w", e)
 	}
-	w := &Window{Handle: hwnd, cursor: Arrow, overlay: &overlayState{bounds: b, clickThru: o.ClickThrough, forwardClose: !o.Activate}}
+	w := &Window{Handle: hwnd, cursor: Arrow, overlay: &overlayState{
+		bounds: b, clickThru: o.ClickThrough, forwardClose: !o.Activate, activated: o.Activate, countedActive: o.Activate,
+	}}
 	windows.Store(hwnd, w)
 	// Without an IME keys come as themselves, as the brush keys over a drawing need, until TextInput asks for it.
 	if err := associateIME(hwnd, false); err != nil {
@@ -109,9 +165,13 @@ func OpenOverlay(o OverlayOptions) (*Window, error) {
 	}
 	// It shows on its first PresentLayered; until then a layered window has no pixels.
 	if o.Activate {
+		captureForeground()
+		overlayFocusMu.Lock()
+		activeKeyOverlays++
+		overlayFocusMu.Unlock()
 		const show = 5
 		showWindow.Call(hwnd, show)
-		setForeground.Call(hwnd)
+		forceForeground(hwnd)
 	} else {
 		const showNoActivate = 4
 		showWindow.Call(hwnd, showNoActivate)
@@ -148,14 +208,7 @@ func (w *Window) PresentLayered(rgba []byte, width, height int, dirty image.Rect
 		dirty = full
 	}
 	dirty = dirty.Intersect(full)
-	for y := dirty.Min.Y; y < dirty.Max.Y; y++ {
-		i := (y*width + dirty.Min.X) * 4
-		n := dirty.Dx() * 4
-		src, dst := rgba[i:i+n], o.bits[i:i+n]
-		for j := 0; j < n; j += 4 {
-			dst[j], dst[j+1], dst[j+2], dst[j+3] = src[j+2], src[j+1], src[j], src[j+3]
-		}
-	}
+	swizzlePremulBGRA(o.bits, rgba, width, dirty)
 	type point struct{ X, Y int32 }
 	pos := point{int32(o.bounds.Min.X), int32(o.bounds.Min.Y)}
 	size := point{int32(width), int32(height)}
@@ -232,6 +285,67 @@ func (w *Window) SetClickThrough(on bool) {
 	setWindowLong.Call(w.Handle, gwlExStyle, ex)
 }
 
+// swizzlePremulBGRA swaps red and blue while preserving premultiplied alpha across dirty,
+// four bytes per word and parallelized in bands for large updates.
+func swizzlePremulBGRA(dst, src []byte, width int, dirty image.Rectangle) {
+	dx, dy := dirty.Dx(), dirty.Dy()
+	if dx <= 0 || dy <= 0 {
+		return
+	}
+	swapRows := func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			off := (y*width + dirty.Min.X) * 4
+			d := unsafe.Slice((*uint32)(unsafe.Pointer(unsafe.SliceData(dst[off:]))), dx)
+			s := unsafe.Slice((*uint32)(unsafe.Pointer(unsafe.SliceData(src[off:]))), dx)
+			for i, v := range s {
+				d[i] = v&0xff00ff00 | (v>>16)&0xff | (v&0xff)<<16
+			}
+		}
+	}
+	const bandPixels = 1 << 18
+	if dx*dy <= bandPixels || dy < 4 {
+		swapRows(dirty.Min.Y, dirty.Max.Y)
+		return
+	}
+	rowsPerBand := max(bandPixels/dx, 1)
+	var wg sync.WaitGroup
+	for y := dirty.Min.Y; y < dirty.Max.Y; y += rowsPerBand {
+		y0, y1 := y, min(y+rowsPerBand, dirty.Max.Y)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			swapRows(y0, y1)
+		}()
+	}
+	wg.Wait()
+}
+
+// closing updates activating-overlay focus tracking before DestroyWindow runs, returning any previous
+// foreground window that should be restored once this overlay is destroyed.
+func (o *overlayState) closing(hwnd uintptr) uintptr {
+	if !o.countedActive {
+		return 0
+	}
+	o.countedActive = false
+	front, _, _ := getForeground.Call()
+	overlayFocusMu.Lock()
+	if activeKeyOverlays > 0 {
+		activeKeyOverlays--
+	}
+	var restore uintptr
+	if activeKeyOverlays == 0 && savedForeground != 0 {
+		if front == hwnd || front == 0 {
+			restore = savedForeground
+		}
+		savedForeground = 0
+	}
+	overlayFocusMu.Unlock()
+	if restore == hwnd {
+		return 0
+	}
+	return restore
+}
+
 // TakeKeyboard brings an overlay opened without Activate in front to take the keyboard, as drawing on the screen
 // does, or gives the keyboard back to the window that had it. While it has the keyboard, a request to close (Alt+F4)
 // closes the overlay rather than the app.
@@ -243,18 +357,20 @@ func (w *Window) TakeKeyboard(on bool) {
 	o.keyboard, o.forwardClose = on, !on
 	ex, _, _ := getWindowLong.Call(w.Handle, gwlExStyle)
 	if on {
-		o.before, _, _ = getForeground.Call()
+		captureForeground()
+		if !o.countedActive {
+			o.countedActive = true
+			overlayFocusMu.Lock()
+			activeKeyOverlays++
+			overlayFocusMu.Unlock()
+		}
 		setWindowLong.Call(w.Handle, gwlExStyle, ex&^exNoActivate)
-		setForeground.Call(w.Handle)
+		forceForeground(w.Handle)
 		return
 	}
 	setWindowLong.Call(w.Handle, gwlExStyle, ex|exNoActivate)
-	if front, _, _ := getForeground.Call(); front == w.Handle && o.before != 0 && o.before != w.Handle {
-		if alive, _, _ := isWindow.Call(o.before); alive != 0 {
-			setForeground.Call(o.before)
-		}
-	}
-	o.before = 0
+	restore := o.closing(w.Handle)
+	restoreForeground(restore)
 }
 
 // Raise brings the overlay back to the front of the always-on-top windows, without activating it; one that has taken

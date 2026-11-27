@@ -7,10 +7,15 @@ import (
 	"image"
 	"image/png"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 )
+
+var clipboardMu sync.Mutex
 
 var (
 	setClipboardData    = user32.NewProc("SetClipboardData")
@@ -48,7 +53,9 @@ func (w *Window) SetClipboard(text string) error {
 	}
 	moveMemory.Call(p, uintptr(unsafe.Pointer(&units[0])), uintptr(len(units)*2))
 	globalUnlock.Call(h)
-	if r, _, _ := openClipboard.Call(w.Handle); r == 0 {
+	clipboardMu.Lock()
+	defer clipboardMu.Unlock()
+	if !openClipboardRetry(w.Handle) {
 		globalFree.Call(h)
 		return errors.New("clipboard busy")
 	}
@@ -238,8 +245,23 @@ func globalBytes(data []byte) (uintptr, error) {
 	return h, nil
 }
 
+// openClipboardRetry opens the clipboard with brief retries in case another program temporarily holds it,
+// safe to call from any goroutine (serialized by clipboardMu).
+func openClipboardRetry(hwnd uintptr) bool {
+	for i := range 5 {
+		if r, _, _ := openClipboard.Call(hwnd); r != 0 {
+			return true
+		}
+		if i < 4 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	return false
+}
+
 // SetClipboardImage puts a picture on the clipboard: as a 32-bit bitmap over white, and, when it has any
 // non-opaque pixel, also as PNG so programs that read PNG keep its transparency.
+// Safe to call from a background goroutine so encoding 4K screenshots never blocks the UI thread.
 func (w *Window) SetClipboardImage(img image.Image) error {
 	b := img.Bounds()
 	width, height := b.Dx(), b.Dy()
@@ -279,7 +301,9 @@ func (w *Window) SetClipboardImage(img image.Image) error {
 		}
 		return err
 	}
-	if r, _, _ := openClipboard.Call(w.Handle); r == 0 {
+	clipboardMu.Lock()
+	defer clipboardMu.Unlock()
+	if !openClipboardRetry(w.Handle) {
 		if hPNG != 0 {
 			globalFree.Call(hPNG)
 		}
@@ -302,43 +326,80 @@ func (w *Window) SetClipboardImage(img image.Image) error {
 }
 
 // fillClipboardDIB writes bottom-up BGRX rows over white into dst and reports whether every pixel was opaque.
+// Large images are converted in parallel bands using 32-bit word writes for opaque pixels.
 func fillClipboardDIB(dst []byte, img image.Image, b image.Rectangle, width, height int) bool {
-	opaque := true
+	var hasAlpha atomic.Bool
+	runBands := func(fn func(y0, y1 int)) {
+		const bandPixels = 1 << 18
+		if width*height <= bandPixels || height < 4 {
+			fn(0, height)
+			return
+		}
+		rowsPerBand := max(bandPixels/width, 1)
+		var wg sync.WaitGroup
+		for y := 0; y < height; y += rowsPerBand {
+			y0, y1 := y, min(y+rowsPerBand, height)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				fn(y0, y1)
+			}()
+		}
+		wg.Wait()
+	}
+
 	switch src := img.(type) {
 	case *image.RGBA:
-		for y := 0; y < height; y++ {
-			s := src.Pix[(b.Min.Y+y-src.Rect.Min.Y)*src.Stride+(b.Min.X-src.Rect.Min.X)*4:]
-			row := dst[(height-1-y)*width*4:]
-			for i := 0; i < width*4; i += 4 {
-				r, g, bl, a := s[i], s[i+1], s[i+2], s[i+3]
-				if a == 255 {
-					row[i], row[i+1], row[i+2], row[i+3] = bl, g, r, 0xff
-					continue
+		runBands(func(y0, y1 int) {
+			localAlpha := false
+			for y := y0; y < y1; y++ {
+				sOff := (b.Min.Y+y-src.Rect.Min.Y)*src.Stride + (b.Min.X-src.Rect.Min.X)*4
+				dOff := (height - 1 - y) * width * 4
+				sw := unsafe.Slice((*uint32)(unsafe.Pointer(unsafe.SliceData(src.Pix[sOff:]))), width)
+				dw := unsafe.Slice((*uint32)(unsafe.Pointer(unsafe.SliceData(dst[dOff:]))), width)
+				for i, v := range sw {
+					if v >= 0xff000000 {
+						dw[i] = v&0x0000ff00 | (v>>16)&0xff | (v&0xff)<<16 | 0xff000000
+						continue
+					}
+					localAlpha = true
+					r, g, bl, a := byte(v), byte(v>>8), byte(v>>16), byte(v>>24)
+					white := 255 - a
+					dw[i] = uint32(bl+white) | uint32(g+white)<<8 | uint32(r+white)<<16 | 0xff000000
 				}
-				opaque = false
-				white := 255 - a
-				row[i], row[i+1], row[i+2], row[i+3] = bl+white, g+white, r+white, 0xff
 			}
-		}
+			if localAlpha {
+				hasAlpha.Store(true)
+			}
+		})
 	case *image.NRGBA:
-		for y := 0; y < height; y++ {
-			s := src.Pix[(b.Min.Y+y-src.Rect.Min.Y)*src.Stride+(b.Min.X-src.Rect.Min.X)*4:]
-			row := dst[(height-1-y)*width*4:]
-			for i := 0; i < width*4; i += 4 {
-				r, g, bl, a := s[i], s[i+1], s[i+2], s[i+3]
-				if a == 255 {
-					row[i], row[i+1], row[i+2], row[i+3] = bl, g, r, 0xff
-					continue
+		runBands(func(y0, y1 int) {
+			localAlpha := false
+			for y := y0; y < y1; y++ {
+				sOff := (b.Min.Y+y-src.Rect.Min.Y)*src.Stride + (b.Min.X-src.Rect.Min.X)*4
+				dOff := (height - 1 - y) * width * 4
+				sw := unsafe.Slice((*uint32)(unsafe.Pointer(unsafe.SliceData(src.Pix[sOff:]))), width)
+				dw := unsafe.Slice((*uint32)(unsafe.Pointer(unsafe.SliceData(dst[dOff:]))), width)
+				for i, v := range sw {
+					if v >= 0xff000000 {
+						dw[i] = v&0x0000ff00 | (v>>16)&0xff | (v&0xff)<<16 | 0xff000000
+						continue
+					}
+					localAlpha = true
+					r, g, bl, a := uint32(v&0xff), uint32((v>>8)&0xff), uint32((v>>16)&0xff), uint32(v>>24)
+					ww := (255 - a) * 255
+					bOut := (bl*a + ww + 127) / 255
+					gOut := (g*a + ww + 127) / 255
+					rOut := (r*a + ww + 127) / 255
+					dw[i] = bOut | gOut<<8 | rOut<<16 | 0xff000000
 				}
-				opaque = false
-				aa, ww := uint32(a), uint32(255-a)*255
-				row[i] = uint8((uint32(bl)*aa + ww + 127) / 255)
-				row[i+1] = uint8((uint32(g)*aa + ww + 127) / 255)
-				row[i+2] = uint8((uint32(r)*aa + ww + 127) / 255)
-				row[i+3] = 0xff
 			}
-		}
+			if localAlpha {
+				hasAlpha.Store(true)
+			}
+		})
 	default:
+		opaque := true
 		for y := 0; y < height; y++ {
 			row := dst[(height-1-y)*width*4:]
 			for x := 0; x < width; x++ {
@@ -353,6 +414,7 @@ func fillClipboardDIB(dst []byte, img image.Image, b image.Rectangle, width, hei
 				row[x*4+3] = 0xff
 			}
 		}
+		return opaque
 	}
-	return opaque
+	return !hasAlpha.Load()
 }

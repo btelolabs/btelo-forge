@@ -110,12 +110,14 @@ func (a *App) overlayScale() float32 {
 func (a *App) showShotNotice(d capture.Display, to shotTarget, shot shotTaken) {
 	a.closeShotNotice()
 	n := &shotNotice{to: to, shot: shot, until: time.Now().Add(shotNoticeLife)}
-	scale := a.overlayScale()
-	measure := &ctx{fonts: a.u.fonts, s: scale, lang: a.u.lang}
-	_, _, _, _, _, w := a.shotNoticeParts(measure, n)
-	width, height := int(w+0.5), int(shotNoticeHeight*scale)
-	at := image.Pt(d.X+(d.Width-width)/2, d.Y+int(shotNoticeTop*scale))
-	s, err := a.openSurface(OverlayOptions{Bounds: image.Rectangle{Min: at, Max: at.Add(image.Pt(width, height))}, Excluded: true})
+	layout := func(scale float32) image.Rectangle {
+		measure := &ctx{fonts: a.u.fonts, s: scale, lang: a.u.lang}
+		_, _, _, _, _, w := a.shotNoticeParts(measure, n)
+		width, height := int(w+0.5), int(shotNoticeHeight*scale)
+		at := image.Pt(d.X+(d.Width-width)/2, d.Y+int(shotNoticeTop*scale))
+		return image.Rectangle{Min: at, Max: at.Add(image.Pt(width, height))}
+	}
+	s, err := a.openScaledSurface(OverlayOptions{Excluded: true}, layout)
 	if err != nil {
 		return
 	}
@@ -200,20 +202,17 @@ func (a *App) shotNoticeCopy(n *shotNotice) {
 		if !ok {
 			return
 		}
-		if n.shot.img != nil {
-			done(cb.SetClipboardImage(n.shot.img))
-			return
-		}
 		n.busy, n.dirty = true, true
-		path := n.shot.path
+		img, path := n.shot.img, n.shot.path
 		a.background(func(ctx context.Context) {
-			img, err := readPNG(path)
-			a.post(func() {
-				if err == nil {
-					err = cb.SetClipboardImage(img)
-				}
-				done(err)
-			})
+			var err error
+			if img == nil {
+				img, err = readPNG(path)
+			}
+			if err == nil {
+				err = cb.SetClipboardImage(img)
+			}
+			a.post(func() { done(err) })
 		})
 	case n.shot.path != "":
 		done(a.host.SetClipboard(n.shot.path))

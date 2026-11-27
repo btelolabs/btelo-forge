@@ -182,6 +182,7 @@ func TestScreenshotOfARegion(t *testing.T) {
 	x := overlayHarness(t)
 	a, h := x.a, x.h
 	a.Tick(Input{Hotkeys: []int{hotkeyScreenshotFile}})
+	x.pump(10*time.Second, func() bool { return len(h.open()) > 0 })
 	open := h.open()
 	if len(open) == 0 {
 		t.Fatal("the screenshot hotkey did not open the picker")
@@ -809,6 +810,7 @@ func shootWithNotice(t *testing.T, x *harness, hotkey int) *shotNotice {
 	t.Helper()
 	a, h := x.a, x.h
 	a.Tick(Input{Hotkeys: []int{hotkey}})
+	x.pump(10*time.Second, func() bool { return len(h.open()) > 0 })
 	open := h.open()
 	if len(open) == 0 {
 		t.Fatal("the screenshot hotkey did not open the picker")

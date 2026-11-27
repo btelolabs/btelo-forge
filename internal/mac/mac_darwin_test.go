@@ -92,7 +92,25 @@ func TestHotkeysRegisterAndUnregister(t *testing.T) {
 		}
 		defer w.Close()
 
-		// Default recording hotkeys: Ctrl+Shift+1..4 (mapped to Control+Shift on macOS so no Cmd+Shift+3/4 collision).
+		// Test Cmd+Shift+1..4 (macOS defaults) and report live RegisterEventHotKey results.
+		cmdKeys := []Hotkey{
+			{Cmd: true, Shift: true, VK: '1'},
+			{Cmd: true, Shift: true, VK: '2'},
+			{Cmd: true, Shift: true, VK: '3'},
+			{Cmd: true, Shift: true, VK: '4'},
+			{VK: 0}, // empty slot skipped
+		}
+		cmdErrs := w.SetHotkeys(cmdKeys)
+		for i, e := range cmdErrs {
+			if cmdKeys[i].VK != 0 {
+				t.Logf("Cmd+Shift+%c register err = %v", rune(cmdKeys[i].VK), e)
+			}
+			if e != nil {
+				t.Errorf("Cmd+Shift+%c failed to register: %v", rune(cmdKeys[i].VK), e)
+			}
+		}
+
+		// Also verify Ctrl+Shift+1..4 (Control modifier) still registers cleanly.
 		errs := w.SetHotkeys([]Hotkey{
 			{Ctrl: true, Shift: true, VK: '1'},
 			{Ctrl: true, Shift: true, VK: '2'},
@@ -102,7 +120,7 @@ func TestHotkeysRegisterAndUnregister(t *testing.T) {
 		})
 		for i, e := range errs {
 			if e != nil {
-				t.Errorf("hotkey %d failed to register: %v", i, e)
+				t.Errorf("Ctrl+Shift hotkey %d failed to register: %v", i, e)
 			}
 		}
 		// Clearing hotkeys should leave no error.
@@ -136,7 +154,7 @@ func TestOverlayLifecycleAndThreadSafePresent(t *testing.T) {
 			t.Fatalf("Scale = %v", sc)
 		}
 
-		// Present from the main thread.
+		// Present from the main thread (full frame then dirty sub-rect).
 		rgba := make([]byte, 240*160*4)
 		for i := 0; i < len(rgba); i += 4 {
 			rgba[i], rgba[i+1], rgba[i+2], rgba[i+3] = 10, 200, 80, 180
@@ -144,6 +162,17 @@ func TestOverlayLifecycleAndThreadSafePresent(t *testing.T) {
 		if err := ov.PresentLayered(rgba, 240, 160, image.Rectangle{}); err != nil {
 			t.Fatalf("main-thread PresentLayered: %v", err)
 		}
+		// Partial dirty rect across all 3 ring slots.
+		for i := range 6 {
+			dirty := image.Rect(10+i*5, 10, 80+i*5, 70)
+			if err := ov.PresentLayered(rgba, 240, 160, dirty); err != nil {
+				t.Fatalf("dirty PresentLayered %d: %v", i, err)
+			}
+		}
+
+		// TakeKeyboard no-op guard & toggle.
+		ov.TakeKeyboard(false) // already false: no-op
+		ov.TakeKeyboard(false)
 
 		// Present concurrently from a background goroutine (as internal/ui/camera.go does).
 		var wg sync.WaitGroup
@@ -186,12 +215,14 @@ func TestClipboardImageFilesAndTrash(t *testing.T) {
 			}
 		}()
 
-		// 1. Image clipboard with transparency round-trip.
+		// 1. Image clipboard with transparency round-trip (called from a background goroutine to verify thread safety).
 		img := image.NewNRGBA(image.Rect(0, 0, 12, 8))
 		img.SetNRGBA(0, 0, color.NRGBA{200, 50, 30, 255})
 		img.SetNRGBA(1, 0, color.NRGBA{10, 120, 240, 128})
-		if err := w.SetClipboardImage(img); err != nil {
-			t.Fatalf("SetClipboardImage: %v", err)
+		errCh := make(chan error, 1)
+		go func() { errCh <- w.SetClipboardImage(img) }()
+		if err := <-errCh; err != nil {
+			t.Fatalf("SetClipboardImage (background goroutine): %v", err)
 		}
 		gotImg, _, _ := w.Paste()
 		if gotImg == nil {
@@ -226,6 +257,9 @@ func TestClipboardImageFilesAndTrash(t *testing.T) {
 }
 
 func BenchmarkPresentIOSurface1440x900(b *testing.B) {
+	if !hasGUISession() {
+		b.Skip("no macOS GUI WindowServer session")
+	}
 	runOnMain(func() {
 		w, err := Open("bench", 1440, 900, true)
 		if err != nil {
@@ -239,6 +273,79 @@ func BenchmarkPresentIOSurface1440x900(b *testing.B) {
 		b.ResetTimer()
 		for range b.N {
 			_ = w.Present(rgba, width, height)
+		}
+	})
+}
+
+func BenchmarkOverlayPresentFullVsDirty4K(b *testing.B) {
+	if !hasGUISession() {
+		b.Skip("no macOS GUI WindowServer session")
+	}
+	const width, height = 3840, 2160
+	rgba := make([]byte, width*height*4)
+	for i := 3; i < len(rgba); i += 4 {
+		rgba[i] = 255
+	}
+	b.Run("full-4K", func(b *testing.B) {
+		runOnMain(func() {
+			ov, err := OpenOverlay(OverlayOptions{Bounds: image.Rect(0, 0, width, height), ClickThrough: true, Excluded: true})
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer ov.Close()
+			_ = ov.PresentLayered(rgba, width, height, image.Rectangle{})
+			b.ResetTimer()
+			for range b.N {
+				_ = ov.PresentLayered(rgba, width, height, image.Rectangle{})
+			}
+		})
+	})
+	b.Run("dirty-320x320-loupe", func(b *testing.B) {
+		runOnMain(func() {
+			ov, err := OpenOverlay(OverlayOptions{Bounds: image.Rect(0, 0, width, height), ClickThrough: true, Excluded: true})
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer ov.Close()
+			_ = ov.PresentLayered(rgba, width, height, image.Rectangle{})
+			// Prime all 3 ring slots.
+			for range 3 {
+				_ = ov.PresentLayered(rgba, width, height, image.Rect(400, 400, 720, 720))
+			}
+			b.ResetTimer()
+			for i := range b.N {
+				off := (i % 64) * 2
+				_ = ov.PresentLayered(rgba, width, height, image.Rect(400+off, 400+off, 720+off, 720+off))
+			}
+		})
+	})
+}
+
+func BenchmarkSetClipboardImage2880x1800(b *testing.B) {
+	if !hasGUISession() {
+		b.Skip("no macOS GUI WindowServer session")
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 2880, 1800))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = byte(i), byte(i>>2), byte(i>>4), 255
+	}
+	runOnMain(func() {
+		w, err := Open("clip bench", 320, 200, true)
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer w.Close()
+		prev, prevErr := w.Clipboard()
+		defer func() {
+			if prevErr == nil {
+				_ = w.SetClipboard(prev)
+			}
+		}()
+		b.ResetTimer()
+		for range b.N {
+			if err := w.SetClipboardImage(img); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 }

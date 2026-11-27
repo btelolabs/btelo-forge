@@ -31,6 +31,10 @@ func grabScreen(d Display, area image.Rectangle, cursor, flush bool) (*image.RGB
 	return nil, ErrUnsupported
 }
 
+func grabDisplays(context.Context, []Display, bool, bool) ([]*image.RGBA, error) {
+	return nil, ErrUnsupported
+}
+
 func platformEncoders() []Encoder {
 	return []Encoder{{"libx264"}}
 }

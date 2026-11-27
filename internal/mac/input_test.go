@@ -35,3 +35,24 @@ func TestEventsBetweenPollsReachTheNextFrame(t *testing.T) {
 		t.Fatalf("second frame got %q", q.last.Dropped)
 	}
 }
+
+func TestModifierBitsSplitCmdAndControl(t *testing.T) {
+	var q inputQueue
+	q.addKey('3', 1|2|8)  // Cmd+Shift+3
+	q.addKey('4', 1|2|16) // Control+Shift+4
+	q.addKey('5', 1|4|8|16)
+	q.flip()
+	if len(q.last.Keys) != 3 {
+		t.Fatalf("got %d keys, want 3", len(q.last.Keys))
+	}
+	k0, k1, k2 := q.last.Keys[0], q.last.Keys[1], q.last.Keys[2]
+	if !k0.Ctrl || !k0.Shift || !k0.Cmd || k0.Control || k0.Alt {
+		t.Fatalf("Cmd+Shift+3 key = %+v", k0)
+	}
+	if !k1.Ctrl || !k1.Shift || k1.Cmd || !k1.Control || k1.Alt {
+		t.Fatalf("Control+Shift+4 key = %+v", k1)
+	}
+	if !k2.Ctrl || k2.Shift || !k2.Alt || !k2.Cmd || !k2.Control {
+		t.Fatalf("Cmd+Control+Option+5 key = %+v", k2)
+	}
+}

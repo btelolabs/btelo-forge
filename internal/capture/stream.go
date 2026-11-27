@@ -177,11 +177,16 @@ func (s *Streamer) pace(l net.Listener, started <-chan *segment) {
 		return
 	}
 	defer conn.Close()
+	if tc, ok := conn.(*net.TCPConn); ok {
+		tc.SetNoDelay(true)
+		tc.SetWriteBuffer(4 << 20)
+	}
 	fps, freq := int64(s.opts.FPS), counterFrequency()
 	frame := make([]byte, s.frames.size)
 	tick := time.NewTicker(time.Second / time.Duration(fps) / 2)
 	defer tick.Stop()
 	var sent int64
+	var lastGen uint64
 	for {
 		due := (counter()-seg.origin)*fps/freq + 1
 		// The frames written as the encoder first connects are its start, not lateness.
@@ -189,7 +194,7 @@ func (s *Streamer) pace(l net.Listener, started <-chan *segment) {
 			s.frames.addLate(int(behind - 1))
 		}
 		for ; sent < due; sent++ {
-			s.frames.copyTo(frame)
+			lastGen = s.frames.copyIfChanged(frame, lastGen)
 			if _, err := conn.Write(frame); err != nil {
 				return
 			}
@@ -413,6 +418,7 @@ type frameStore struct {
 
 	mu    sync.Mutex
 	cur   []byte
+	gen   uint64
 	owner *screenFeed // the feed whose frames are shown
 	lates int
 }
@@ -427,7 +433,7 @@ func newFrameStore(canvas image.Point) *frameStore {
 			black[i] = 128
 		}
 	}
-	return &frameStore{size: len(black), black: black}
+	return &frameStore{size: len(black), black: black, gen: 1}
 }
 
 // copyTo copies the current picture into frame.
@@ -441,10 +447,29 @@ func (f *frameStore) copyTo(frame []byte) {
 	}
 }
 
+// copyIfChanged copies the current picture into frame only when the stored frame generation has advanced since lastGen,
+// avoiding redundant multi-megabyte copies while the screen is static.
+func (f *frameStore) copyIfChanged(frame []byte, lastGen uint64) uint64 {
+	f.mu.Lock()
+	if f.gen == lastGen && lastGen != 0 {
+		f.mu.Unlock()
+		return lastGen
+	}
+	g := f.gen
+	if f.cur != nil {
+		copy(frame, f.cur)
+	} else {
+		copy(frame, f.black)
+	}
+	f.mu.Unlock()
+	return g
+}
+
 // own makes a feed's frames the ones shown, once they come; until then the canvas is black.
 func (f *frameStore) own(feed *screenFeed) {
 	f.mu.Lock()
 	f.owner, f.cur = feed, nil
+	f.gen++
 	f.mu.Unlock()
 }
 
@@ -456,6 +481,7 @@ func (f *frameStore) put(feed *screenFeed, frame []byte) []byte {
 		return frame
 	}
 	frame, f.cur = f.cur, frame
+	f.gen++
 	if frame == nil {
 		frame = make([]byte, f.size)
 	}
@@ -467,6 +493,7 @@ func (f *frameStore) release(feed *screenFeed) {
 	f.mu.Lock()
 	if f.owner == feed {
 		f.owner, f.cur = nil, nil
+		f.gen++
 	}
 	f.mu.Unlock()
 }
@@ -474,6 +501,7 @@ func (f *frameStore) release(feed *screenFeed) {
 func (f *frameStore) clear() {
 	f.mu.Lock()
 	f.owner, f.cur = nil, nil
+	f.gen++
 	f.mu.Unlock()
 }
 

@@ -20,25 +20,26 @@ import (
 )
 
 type fakeHost struct {
-	woke       chan struct{}
-	cursor     Cursor
-	typing     bool
-	opened     []string
-	clip       string
-	pasteImage image.Image
-	languages  []string
-	minimized  bool
-	hidden     bool
-	excluded   bool
-	hotkeys    []Hotkey
-	clipImage  image.Image
-	overlaysOn bool           // OpenOverlay works; off, it fails, as on a window without overlays
-	overlays   []*fakeOverlay // every overlay opened, closed ones too
-	pointer    image.Point    // where the mouse pointer is on the desktop
-	title      string
-	chosen     []string // what the open dialog answers
-	pasteText  string   // the text and files a paste finds, besides pasteImage
-	pasteFiles []string
+	woke         chan struct{}
+	cursor       Cursor
+	typing       bool
+	opened       []string
+	clip         string
+	pasteImage   image.Image
+	languages    []string
+	minimized    bool
+	hidden       bool
+	excluded     bool
+	hotkeys      []Hotkey
+	clipImage    image.Image
+	overlaysOn   bool           // OpenOverlay works; off, it fails, as on a window without overlays
+	overlayScale float32        // backing scale reported by fakeOverlay (defaults to 1 when 0)
+	overlays     []*fakeOverlay // every overlay opened, closed ones too
+	pointer      image.Point    // where the mouse pointer is on the desktop
+	title        string
+	chosen       []string // what the open dialog answers
+	pasteText    string   // the text and files a paste finds, besides pasteImage
+	pasteFiles   []string
 }
 
 func (h *fakeHost) Wake() {
@@ -274,7 +275,7 @@ func (h *fakeHost) OpenOverlay(o OverlayOptions) (Overlay, error) {
 	if !h.overlaysOn {
 		return nil, errors.New("no overlays here")
 	}
-	f := &fakeOverlay{opts: o, bounds: o.Bounds, clickThrough: o.ClickThrough}
+	f := &fakeOverlay{opts: o, bounds: o.Bounds, scale: h.overlayScale, clickThrough: o.ClickThrough}
 	h.overlays = append(h.overlays, f)
 	return f, nil
 }
@@ -296,12 +297,14 @@ func (h *fakeHost) open() []*fakeOverlay {
 type fakeOverlay struct {
 	opts         OverlayOptions
 	bounds       image.Rectangle
+	scale        float32
 	queued       []Input
 	raised       int
 	typing       bool
 	mx, my       float32
 	down         bool
 	shown        *image.RGBA
+	lastDirty    image.Rectangle
 	presents     int
 	clickThrough bool
 	keyboard     bool
@@ -310,7 +313,12 @@ type fakeOverlay struct {
 }
 
 func (o *fakeOverlay) Bounds() image.Rectangle { return o.bounds }
-func (o *fakeOverlay) Scale() float32          { return 1 }
+func (o *fakeOverlay) Scale() float32 {
+	if o.scale > 0 {
+		return o.scale
+	}
+	return 1
+}
 func (o *fakeOverlay) Input() Input {
 	if len(o.queued) == 0 {
 		return Input{X: o.mx, Y: o.my, Down: o.down}
@@ -324,6 +332,7 @@ func (o *fakeOverlay) Present(img *image.RGBA, dirty image.Rectangle) error {
 		o.shown = image.NewRGBA(img.Rect)
 	}
 	copy(o.shown.Pix, img.Pix)
+	o.lastDirty = dirty
 	o.presents++
 	return nil
 }

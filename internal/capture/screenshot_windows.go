@@ -1,9 +1,11 @@
 package capture
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"image"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -138,4 +140,95 @@ func drawCursorOn(memDC uintptr, sx, sy, w, h int) {
 	}
 	const diNormal = 0x0003
 	drawIconEx.Call(memDC, uintptr(cx), uintptr(cy), ci.Cursor, 0, 0, 0, 0, diNormal)
+}
+
+// grabDisplays captures all displays in one DWM flush + one desktop DC acquisition, converting BGRA→RGBA in parallel
+// across displays for instant multi-monitor freeze-frame screenshots.
+func grabDisplays(ctx context.Context, displays []Display, cursor, flush bool) ([]*image.RGBA, error) {
+	const perMonitorV2 = ^uintptr(3)
+	if prev, _, _ := setThreadDpiContext.Call(perMonitorV2); prev != 0 {
+		defer setThreadDpiContext.Call(prev)
+	}
+	if flush {
+		dwmFlush.Call()
+	}
+	screenDC, _, _ := getDC.Call(0)
+	if screenDC == 0 {
+		// Fallback per display if GetDC fails.
+		out := make([]*image.RGBA, len(displays))
+		for i, d := range displays {
+			img, err := GrabScreenshot(ctx, d, image.Rectangle{}, cursor, false)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = img
+		}
+		return out, nil
+	}
+	defer releaseDC.Call(0, screenDC)
+
+	type grabbed struct {
+		memDC uintptr
+		bmp   uintptr
+		old   uintptr
+		bits  []byte
+		w, h  int
+	}
+	raw := make([]grabbed, len(displays))
+	defer func() {
+		for _, g := range raw {
+			if g.memDC != 0 {
+				if g.old != 0 {
+					selectObject.Call(g.memDC, g.old)
+				}
+				if g.bmp != 0 {
+					deleteObject.Call(g.bmp)
+				}
+				deleteDC.Call(g.memDC)
+			}
+		}
+	}()
+
+	const srccopy = 0x00CC0020
+	for i, d := range displays {
+		w, h := d.Width, d.Height
+		if w <= 0 || h <= 0 {
+			return nil, errors.New("empty display bounds")
+		}
+		memDC, _, _ := createCompatibleDC.Call(0)
+		if memDC == 0 {
+			return nil, errors.New("CreateCompatibleDC failed")
+		}
+		bmi := bitmapInfoHeader{Size: 40, Width: int32(w), Height: -int32(h), Planes: 1, BitCount: 32}
+		var bits unsafe.Pointer
+		bmp, _, err := createDIBSection.Call(memDC, uintptr(unsafe.Pointer(&bmi)), 0, uintptr(unsafe.Pointer(&bits)), 0, 0)
+		if bmp == 0 || bits == nil {
+			deleteDC.Call(memDC)
+			return nil, fmt.Errorf("CreateDIBSection: %w", err)
+		}
+		old, _, _ := selectObject.Call(memDC, bmp)
+		raw[i] = grabbed{memDC: memDC, bmp: bmp, old: old, bits: unsafe.Slice((*byte)(bits), w*h*4), w: w, h: h}
+		if r, _, err := bitBlt.Call(memDC, 0, 0, uintptr(w), uintptr(h), screenDC, uintptr(d.X), uintptr(d.Y), srccopy); r == 0 {
+			return nil, fmt.Errorf("BitBlt: %w", err)
+		}
+		if cursor {
+			drawCursorOn(memDC, d.X, d.Y, w, h)
+		}
+	}
+	gdiFlush.Call()
+
+	out := make([]*image.RGBA, len(displays))
+	var wg sync.WaitGroup
+	for i := range raw {
+		g := raw[i]
+		img := image.NewRGBA(image.Rect(0, 0, g.w, g.h))
+		out[i] = img
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			bgraToRGBA(img.Pix, g.bits)
+		}()
+	}
+	wg.Wait()
+	return out, nil
 }

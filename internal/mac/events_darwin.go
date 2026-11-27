@@ -9,12 +9,6 @@ import "strings"
 
 // The functions below are called by the Objective-C side while forge_poll dispatches events.
 
-func applyMods(q *inputQueue, mods int) {
-	q.next.Ctrl = mods&1 != 0
-	q.next.Shift = mods&2 != 0
-	q.next.Alt = mods&4 != 0
-}
-
 //export goModifiers
 func goModifiers(mods C.int) {
 	if w := current; w != nil {
@@ -67,11 +61,6 @@ func goWheel(dy C.double, mods C.int) {
 		w.input.next.Wheel += float32(dy)
 		applyMods(&w.input, int(mods))
 	}
-}
-
-func (q *inputQueue) addKey(vk uint16, mods int) {
-	applyMods(q, mods)
-	q.next.Keys = append(q.next.Keys, KeyEvent{VK: vk, Ctrl: mods&1 != 0, Shift: mods&2 != 0, Alt: mods&4 != 0})
 }
 
 //export goKey

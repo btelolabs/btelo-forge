@@ -36,14 +36,14 @@ void forge_hide(void);
 int forge_shown(void);
 void forge_exclude_capture(int on);
 void forge_clear_hotkeys(void);
-int forge_register_hotkey(int id, uint32_t macKeyCode, int ctrl, int alt, int shift);
+int forge_register_hotkey(int id, uint32_t macKeyCode, int cmd, int ctrl, int alt, int shift);
 
 // Desktop pointer & transparent always-on-top overlay panels.
 int forge_has_gui_session(void);
 void forge_pointer_at(int *outX, int *outY);
 void *forge_overlay_open(int id, int x, int y, int width, int height, int activate, int clickThrough, int excluded);
 double forge_overlay_scale(void *handle);
-int forge_overlay_present(void *handle, const void *rgba, int width, int height);
+int forge_overlay_present(void *handle, const void *rgba, int width, int height, int dx, int dy, int dw, int dh);
 void forge_overlay_set_click_through(void *handle, int on);
 void forge_overlay_take_keyboard(void *handle, int on);
 void forge_overlay_raise(void *handle);

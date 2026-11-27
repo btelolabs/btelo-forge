@@ -231,7 +231,12 @@ type segmentHooks struct {
 // ffmpeg with the arguments args makes for t0 and the sound's address ("" without sound); stdout, when not nil,
 // receives what ffmpeg writes to its standard output.
 func startSegment(o Options, args func(t0 int64, audio string) []string, stdout io.Writer, hooks segmentHooks) (*segment, error) {
-	origin, t0 := counter(), wallMicros()
+	return startSegmentWith(o, counter(), wallMicros(), nil, args, stdout, hooks)
+}
+
+// startSegmentWith is like startSegment, with an explicit origin/t0 clock and an optional pre-started system-audio
+// track (used on macOS so video and system audio share a single ScreenCaptureKit SCStream).
+func startSegmentWith(o Options, origin, t0 int64, sysAudio *track, args func(t0 int64, audio string) []string, stdout io.Writer, hooks segmentHooks) (*segment, error) {
 	s := &segment{origin: origin, exited: make(chan struct{}), quit: make(chan struct{}), drain: make(chan struct{}), stderr: &tailBuffer{}}
 	// ffmpeg grabs no picture until its sound input delivers, so the mixer feeds it from the start, with silence
 	// until the audio devices have opened; they open meanwhile, timed from origin like the picture.
@@ -245,7 +250,7 @@ func startSegment(o Options, args func(t0 int64, audio string) []string, stdout 
 		}
 		address = "tcp://" + listener.Addr().String()
 		var tracks []*track
-		tracks, opened = s.startAudio(o, origin)
+		tracks, opened = s.startAudio(o, origin, sysAudio)
 		s.audio.Add(1)
 		go func() {
 			defer s.audio.Done()
@@ -323,14 +328,19 @@ func (r *Recorder) fail(s *segment, err error) {
 }
 
 // startAudio starts the chosen sources; opened waits until each has opened its device, or failed to.
-func (s *segment) startAudio(o Options, origin int64) (tracks []*track, opened func() error) {
+// When sysAudio is non-nil, it is used directly as the system-audio track without opening a second loopback source.
+func (s *segment) startAudio(o Options, origin int64, sysAudio *track) (tracks []*track, opened func() error) {
 	type source struct {
 		loopback bool
 		id       string
 	}
 	var sources []source
 	if o.SystemAudio {
-		sources = append(sources, source{loopback: true})
+		if sysAudio != nil {
+			tracks = append(tracks, sysAudio)
+		} else {
+			sources = append(sources, source{loopback: true})
+		}
 	}
 	if o.Microphone {
 		sources = append(sources, source{id: o.MicrophoneID})
@@ -380,6 +390,9 @@ func (s *segment) feed(l net.Listener, tracks []*track, origin int64, report fun
 	l.Close()
 	if err != nil {
 		return
+	}
+	if tc, ok := conn.(*net.TCPConn); ok {
+		tc.SetNoDelay(true)
 	}
 	s.connMu.Lock()
 	if s.closing {

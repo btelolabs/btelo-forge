@@ -16,6 +16,8 @@ func TestHotkeyNames(t *testing.T) {
 		want string
 	}{
 		{Hotkey{Ctrl: true, Shift: true, Key: 0x78}, "Ctrl+Shift+F9"},
+		{Hotkey{Cmd: true, Shift: true, Key: '3'}, "Cmd+Shift+3"},
+		{Hotkey{Cmd: true, Ctrl: true, Alt: true, Shift: true, Key: 'A'}, "Cmd+Ctrl+Alt+Shift+A"},
 		{Hotkey{Ctrl: true, Alt: true, Key: 'R'}, "Ctrl+Alt+R"},
 		{Hotkey{Alt: true, Key: 0x61}, "Alt+Num1"},
 		{Hotkey{Ctrl: true, Key: 0xc0}, "Ctrl+`"},
@@ -31,6 +33,7 @@ func TestHotkeyNames(t *testing.T) {
 		usable bool
 	}{
 		{Hotkey{Key: 'A'}, false}, {Hotkey{Shift: true, Key: 'A'}, false}, {Hotkey{Ctrl: true, Key: 'A'}, true},
+		{Hotkey{Cmd: true, Key: 'A'}, true}, {Hotkey{Cmd: true, Shift: true, Key: '3'}, true},
 		{Hotkey{Alt: true, Key: '1'}, true}, {Hotkey{Key: 0x7b}, true}, {Hotkey{}, false},
 	} {
 		if c.key.usable() != c.usable {
@@ -53,7 +56,8 @@ func TestHotkeyNames(t *testing.T) {
 		}
 		seen[*k] = true
 	}
-	if d.Window.String() != "Ctrl+Shift+1" || d.Screenshot.String() != "Ctrl+Shift+3" || d.Record.String() != "Ctrl+Shift+4" {
+	if d.Window.String() != defaultModPrefix+"+Shift+1" || d.Draw.String() != defaultModPrefix+"+Shift+2" ||
+		d.Screenshot.String() != defaultModPrefix+"+Shift+3" || d.Record.String() != defaultModPrefix+"+Shift+4" {
 		t.Errorf("defaults %+v", d)
 	}
 }
@@ -64,7 +68,8 @@ func TestHotkeysAreRegisteredAndChosenByPressing(t *testing.T) {
 	if a.recorder() == nil {
 		t.Skip("hotkeys are not offered here")
 	}
-	if len(h.hotkeys) != hotkeyCount || h.hotkeys[hotkeyRecord].String() != "Ctrl+Shift+4" {
+	wantRecord := defaultHotkeys().Record
+	if len(h.hotkeys) != hotkeyCount || h.hotkeys[hotkeyRecord] != wantRecord {
 		t.Fatalf("registered at start: %v", h.hotkeys)
 	}
 	// The Hotkeys page opens on the system-wide hotkeys, its first tab.
@@ -86,10 +91,24 @@ func TestHotkeysAreRegisteredAndChosenByPressing(t *testing.T) {
 	if a.hotkeys.capturing != hotkeyScreenshot || !strings.Contains(a.hotkeys.refused, "P") {
 		t.Fatalf("a plain key was taken: capturing %d, refused %q", a.hotkeys.capturing, a.hotkeys.refused)
 	}
-	x.frame(Input{Keys: []Key{{Code: '4', Ctrl: true, Shift: true}}})
-	if a.hotkeys.capturing != hotkeyScreenshot || !strings.Contains(a.hotkeys.refused, "Ctrl+Shift+4") {
+	x.frame(Input{Keys: []Key{{Code: wantRecord.Key, Ctrl: wantRecord.Ctrl || wantRecord.Cmd, Cmd: wantRecord.Cmd, Control: wantRecord.Ctrl, Shift: wantRecord.Shift}}})
+	if a.hotkeys.capturing != hotkeyScreenshot || !strings.Contains(a.hotkeys.refused, wantRecord.String()) {
 		t.Fatalf("a hotkey of another action was taken: refused %q", a.hotkeys.refused)
 	}
+	// Physical Cmd vs Control distinction on macOS (when Cmd or Control is set alongside Ctrl).
+	x.frame(Input{Keys: []Key{{Code: 'K', Ctrl: true, Cmd: true, Shift: true}}})
+	if got := a.settings.Hotkeys.Screenshot; got != (Hotkey{Cmd: true, Shift: true, Key: 'K'}) {
+		t.Errorf("Cmd+Shift+K captured as %+v", got)
+	}
+	a.hotkeys.capturing = hotkeyScreenshot
+	a.applyHotkeys()
+	x.frame(Input{Keys: []Key{{Code: 'K', Ctrl: true, Control: true, Shift: true}}})
+	if got := a.settings.Hotkeys.Screenshot; got != (Hotkey{Ctrl: true, Shift: true, Key: 'K'}) {
+		t.Errorf("Control+Shift+K captured as %+v", got)
+	}
+	// Legacy Ctrl-only Key (Windows / synthetic input where Cmd and Control are both false).
+	a.hotkeys.capturing = hotkeyScreenshot
+	a.applyHotkeys()
 	x.frame(Input{Keys: []Key{{Code: 'P', Ctrl: true, Alt: true}}})
 	if a.hotkeys.capturing != -1 || !a.settingsOpen {
 		t.Fatalf("capturing %d, settings open %v", a.hotkeys.capturing, a.settingsOpen)
@@ -107,7 +126,7 @@ func TestHotkeysAreRegisteredAndChosenByPressing(t *testing.T) {
 	if a.hotkeys.capturing != -1 || !a.settingsOpen || a.settings.Hotkeys.Pause != defaultHotkeys().Pause {
 		t.Errorf("Esc: capturing %d, settings open %v, pause %s", a.hotkeys.capturing, a.settingsOpen, a.settings.Hotkeys.Pause)
 	}
-	// The choice is kept between runs.
+	// The choice is kept between runs, and reloading a saved Ctrl-only hotkey never bleeds platform Cmd defaults.
 	data, err := os.ReadFile(a.settingsPath())
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +134,10 @@ func TestHotkeysAreRegisteredAndChosenByPressing(t *testing.T) {
 	var saved settings
 	if err := json.Unmarshal(data, &saved); err != nil || saved.Hotkeys.Screenshot.String() != "Ctrl+Alt+P" {
 		t.Errorf("saved %+v, %v", saved.Hotkeys, err)
+	}
+	a.loadSettings()
+	if got := a.settings.Hotkeys.Screenshot; got != (Hotkey{Ctrl: true, Alt: true, Key: 'P'}) {
+		t.Errorf("reloaded hotkey %+v (want Ctrl+Alt+P without Cmd bleed)", got)
 	}
 }
 
@@ -245,7 +268,7 @@ func TestWindowHotkeyHidesAndBringsBack(t *testing.T) {
 	if a.recorder() == nil {
 		t.Skip("hotkeys are not offered here")
 	}
-	if got := h.hotkeys[hotkeyWindow].String(); got != "Ctrl+Shift+1" {
+	if got := h.hotkeys[hotkeyWindow].String(); got != defaultModPrefix+"+Shift+1" {
 		t.Fatalf("registered %q for the window", got)
 	}
 	a.Tick(Input{Hotkeys: []int{hotkeyWindow}})

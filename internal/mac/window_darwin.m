@@ -16,12 +16,28 @@
 #define FORGE_SURFACE_RING 3
 
 typedef struct {
+	int x0, y0, x1, y1; // empty when x0 >= x1 || y0 >= y1
+} ForgeRect;
+
+typedef struct {
 	IOSurfaceRef    surfaces[FORGE_SURFACE_RING];
+	ForgeRect       dirty[FORGE_SURFACE_RING];
 	int             width;
 	int             height;
 	int             nextIdx;
 	pthread_mutex_t mu;
 } ForgeSurface;
+
+static ForgeRect forge_rect_union(ForgeRect a, ForgeRect b) {
+	if (a.x0 >= a.x1 || a.y0 >= a.y1) return b;
+	if (b.x0 >= b.x1 || b.y0 >= b.y1) return a;
+	ForgeRect r;
+	r.x0 = a.x0 < b.x0 ? a.x0 : b.x0;
+	r.y0 = a.y0 < b.y0 ? a.y0 : b.y0;
+	r.x1 = a.x1 > b.x1 ? a.x1 : b.x1;
+	r.y1 = a.y1 > b.y1 ? a.y1 : b.y1;
+	return r;
+}
 
 static void forge_surface_init(ForgeSurface *s) {
 	memset(s, 0, sizeof(*s));
@@ -34,6 +50,7 @@ static void forge_surface_reset_locked(ForgeSurface *s) {
 			CFRelease(s->surfaces[i]);
 			s->surfaces[i] = NULL;
 		}
+		s->dirty[i] = (ForgeRect){0, 0, 0, 0};
 	}
 	s->width = 0;
 	s->height = 0;
@@ -61,12 +78,15 @@ static IOSurfaceRef forge_create_iosurface(int width, int height) {
 	return IOSurfaceCreate((__bridge CFDictionaryRef)props);
 }
 
-// forge_surface_write writes RGBA pixels into the next BGRA IOSurface in the ring using SIMD permutation.
+// forge_surface_write_rect updates only the dirty sub-rectangle in the next BGRA IOSurface in the ring,
+// accumulating dirty bounds per slot so triple-buffered surfaces stay tear-free and consistent.
 // Returns a retained IOSurfaceRef (caller must CFRelease) or NULL on allocation error.
-static IOSurfaceRef forge_surface_write(ForgeSurface *s, const void *rgba, int width, int height) {
+static IOSurfaceRef forge_surface_write_rect(ForgeSurface *s, const void *rgba, int width, int height,
+                                             int dx, int dy, int dw, int dh) {
 	pthread_mutex_lock(&s->mu);
 	if (s->width != width || s->height != height || !s->surfaces[0]) {
 		forge_surface_reset_locked(s);
+		ForgeRect full = {0, 0, width, height};
 		for (int i = 0; i < FORGE_SURFACE_RING; i++) {
 			s->surfaces[i] = forge_create_iosurface(width, height);
 			if (!s->surfaces[i]) {
@@ -74,33 +94,64 @@ static IOSurfaceRef forge_surface_write(ForgeSurface *s, const void *rgba, int w
 				pthread_mutex_unlock(&s->mu);
 				return NULL;
 			}
+			s->dirty[i] = full;
 		}
 		s->width = width;
 		s->height = height;
 	}
-	IOSurfaceRef surf = s->surfaces[s->nextIdx];
-	s->nextIdx = (s->nextIdx + 1) % FORGE_SURFACE_RING;
 
-	IOSurfaceLock(surf, 0, NULL);
-	vImage_Buffer src = {
-		.data = (void *)rgba,
-		.height = (vImagePixelCount)height,
-		.width = (vImagePixelCount)width,
-		.rowBytes = (size_t)width * 4,
-	};
-	vImage_Buffer dst = {
-		.data = IOSurfaceGetBaseAddress(surf),
-		.height = (vImagePixelCount)height,
-		.width = (vImagePixelCount)width,
-		.rowBytes = IOSurfaceGetBytesPerRow(surf),
-	};
-	const uint8_t permute[4] = {2, 1, 0, 3}; // RGBA -> BGRA
-	vImagePermuteChannels_ARGB8888(&src, &dst, permute, kvImageNoFlags);
-	IOSurfaceUnlock(surf, 0, NULL);
+	ForgeRect req;
+	if (dw <= 0 || dh <= 0) {
+		req = (ForgeRect){0, 0, width, height};
+	} else {
+		int x0 = dx < 0 ? 0 : dx;
+		int y0 = dy < 0 ? 0 : dy;
+		int x1 = dx + dw > width ? width : dx + dw;
+		int y1 = dy + dh > height ? height : dy + dh;
+		req = (ForgeRect){x0, y0, x1, y1};
+	}
+	if (req.x0 < req.x1 && req.y0 < req.y1) {
+		for (int i = 0; i < FORGE_SURFACE_RING; i++) {
+			s->dirty[i] = forge_rect_union(s->dirty[i], req);
+		}
+	}
+
+	int slot = s->nextIdx;
+	IOSurfaceRef surf = s->surfaces[slot];
+	ForgeRect r = s->dirty[slot];
+	s->dirty[slot] = (ForgeRect){0, 0, 0, 0};
+	s->nextIdx = (slot + 1) % FORGE_SURFACE_RING;
+
+	if (r.x0 < r.x1 && r.y0 < r.y1) {
+		IOSurfaceLock(surf, 0, NULL);
+		size_t srcBPR = (size_t)width * 4;
+		size_t dstBPR = IOSurfaceGetBytesPerRow(surf);
+		const uint8_t *srcBase = (const uint8_t *)rgba + (size_t)r.y0 * srcBPR + (size_t)r.x0 * 4;
+		uint8_t *dstBase = (uint8_t *)IOSurfaceGetBaseAddress(surf) + (size_t)r.y0 * dstBPR + (size_t)r.x0 * 4;
+		vImage_Buffer src = {
+			.data = (void *)srcBase,
+			.height = (vImagePixelCount)(r.y1 - r.y0),
+			.width = (vImagePixelCount)(r.x1 - r.x0),
+			.rowBytes = srcBPR,
+		};
+		vImage_Buffer dst = {
+			.data = dstBase,
+			.height = (vImagePixelCount)(r.y1 - r.y0),
+			.width = (vImagePixelCount)(r.x1 - r.x0),
+			.rowBytes = dstBPR,
+		};
+		const uint8_t permute[4] = {2, 1, 0, 3}; // RGBA -> BGRA
+		vImagePermuteChannels_ARGB8888(&src, &dst, permute, kvImageNoFlags);
+		IOSurfaceUnlock(surf, 0, NULL);
+	}
 
 	CFRetain(surf);
 	pthread_mutex_unlock(&s->mu);
 	return surf;
+}
+
+static IOSurfaceRef forge_surface_write(ForgeSurface *s, const void *rgba, int width, int height) {
+	return forge_surface_write_rect(s, rgba, width, height, 0, 0, width, height);
 }
 
 // ---- Cursors ----
@@ -296,12 +347,14 @@ static int mainSurfaceInited;
 
 NSView *forge_content_view(void) { return window.contentView; }
 
-// Modifier bits shared with the Go side: 1 Command or Control, 2 Shift, 4 Option.
+// Modifier bits shared with the Go side: 1 Command or Control, 2 Shift, 4 Option, 8 Command, 16 Control.
 static int modifierBits(NSEventModifierFlags f) {
 	int m = 0;
 	if (f & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) m |= 1;
 	if (f & NSEventModifierFlagShift) m |= 2;
 	if (f & NSEventModifierFlagOption) m |= 4;
+	if (f & NSEventModifierFlagCommand) m |= 8;
+	if (f & NSEventModifierFlagControl) m |= 16;
 	return m;
 }
 
@@ -627,13 +680,13 @@ void forge_clear_hotkeys(void) {
 	hotkeyCount = 0;
 }
 
-int forge_register_hotkey(int id, uint32_t macKeyCode, int ctrl, int alt, int shift) {
+int forge_register_hotkey(int id, uint32_t macKeyCode, int cmd, int ctrl, int alt, int shift) {
 	ensureHotkeyHandler();
 	if (hotkeyCount >= FORGE_MAX_HOTKEYS) {
 		return -1;
 	}
 	UInt32 mods = 0;
-	// Map Ctrl -> Control (not Command) so default Ctrl+Shift+3/4 never collides with macOS Cmd+Shift+3/4 screenshots.
+	if (cmd) mods |= cmdKey;
 	if (ctrl) mods |= controlKey;
 	if (alt) mods |= optionKey;
 	if (shift) mods |= shiftKey;
@@ -844,8 +897,11 @@ void forge_minimize(void) {
 	}
 }
 
+static NSRunningApplication *savedOverlayPrevApp;
+
 void forge_restore(void) {
 	@autoreleasepool {
+		savedOverlayPrevApp = nil;
 		if (!window) {
 			return;
 		}
@@ -888,6 +944,29 @@ char *forge_languages(void) {
 	}
 }
 
+static pthread_mutex_t clipboardMu = PTHREAD_MUTEX_INITIALIZER;
+
+@interface ForgePNGPasteProvider : NSObject <NSPasteboardItemDataProvider>
+@property(nonatomic, strong) NSData *pngData;
+@end
+
+@implementation ForgePNGPasteProvider
+- (void)pasteboard:(NSPasteboard *)pasteboard item:(NSPasteboardItem *)item provideDataForType:(NSPasteboardType)type {
+	if ([type isEqualToString:NSPasteboardTypePNG]) {
+		[item setData:self.pngData forType:NSPasteboardTypePNG];
+	} else if ([type isEqualToString:NSPasteboardTypeTIFF]) {
+		// Decode and convert to TIFF lazily ONLY if a legacy paste target explicitly asks for TIFF.
+		NSBitmapImageRep *rep = [NSBitmapImageRep imageRepWithData:self.pngData];
+		NSData *tiff = rep ? [rep TIFFRepresentation] : nil;
+		if (tiff) {
+			[item setData:tiff forType:NSPasteboardTypeTIFF];
+		}
+	}
+}
+@end
+
+static ForgePNGPasteProvider *activePasteProvider;
+
 char *forge_clipboard_text(void) {
 	@autoreleasepool {
 		return copyString([NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString]);
@@ -896,9 +975,12 @@ char *forge_clipboard_text(void) {
 
 void forge_set_clipboard(const char *text) {
 	@autoreleasepool {
+		pthread_mutex_lock(&clipboardMu);
 		NSPasteboard *pb = NSPasteboard.generalPasteboard;
 		[pb clearContents];
 		[pb setString:@(text) forType:NSPasteboardTypeString];
+		activePasteProvider = nil;
+		pthread_mutex_unlock(&clipboardMu);
 	}
 }
 
@@ -929,16 +1011,20 @@ int forge_set_clipboard_png(const void *pngData, int length) {
 			return 0;
 		}
 		NSData *data = [NSData dataWithBytes:pngData length:(NSUInteger)length];
+		pthread_mutex_lock(&clipboardMu);
 		NSPasteboard *pb = NSPasteboard.generalPasteboard;
 		[pb clearContents];
-		BOOL ok = [pb setData:data forType:NSPasteboardTypePNG];
-		NSBitmapImageRep *rep = [NSBitmapImageRep imageRepWithData:data];
-		if (rep) {
-			NSData *tiff = [rep TIFFRepresentation];
-			if (tiff) {
-				[pb setData:tiff forType:NSPasteboardTypeTIFF];
-			}
+		NSPasteboardItem *item = [[NSPasteboardItem alloc] init];
+		// Write PNG eagerly (fast, persists after app quit) and promise TIFF lazily (0ms/0MB until requested).
+		BOOL ok = [item setData:data forType:NSPasteboardTypePNG];
+		ForgePNGPasteProvider *provider = [[ForgePNGPasteProvider alloc] init];
+		provider.pngData = data;
+		activePasteProvider = provider;
+		[item setDataProvider:provider forTypes:@[ NSPasteboardTypeTIFF ]];
+		if (ok) {
+			ok = [pb writeObjects:@[ item ]];
 		}
+		pthread_mutex_unlock(&clipboardMu);
 		return ok ? 1 : 0;
 	}
 }
@@ -973,9 +1059,13 @@ int forge_set_clipboard_files(const char *newlinePaths) {
 		if (urls.count == 0) {
 			return 0;
 		}
+		pthread_mutex_lock(&clipboardMu);
 		NSPasteboard *pb = NSPasteboard.generalPasteboard;
 		[pb clearContents];
-		return [pb writeObjects:urls] ? 1 : 0;
+		activePasteProvider = nil;
+		BOOL ok = [pb writeObjects:urls];
+		pthread_mutex_unlock(&clipboardMu);
+		return ok ? 1 : 0;
 	}
 }
 
@@ -1066,6 +1156,42 @@ void forge_free(void *p) {
 
 // ---- Transparent Borderless Always-On-Top Overlay Panels ----
 
+// Process-level tracking of the app that was frontmost before the first activating overlay opened,
+// so closing a multi-display picker or ending screen draw returns focus cleanly without raising Forge's main window.
+static int activeKeyOverlays;
+
+static void capturePreviousAppIfNeeded(void) {
+	if (savedOverlayPrevApp) {
+		return;
+	}
+	NSRunningApplication *front = NSWorkspace.sharedWorkspace.frontmostApplication;
+	if (front && front.processIdentifier != NSProcessInfo.processInfo.processIdentifier) {
+		savedOverlayPrevApp = front;
+	}
+}
+
+// activateForOverlay activates the app to deliver keyboard input to an overlay panel WITHOUT
+// NSApplicationActivateAllWindows, so Btelo Forge's main window stays behind the user's apps.
+static void activateForOverlay(void) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+	[[NSRunningApplication currentApplication] activateWithOptions:NSApplicationActivateIgnoringOtherApps];
+#pragma clang diagnostic pop
+}
+
+static NSRunningApplication *takePreviousAppToRestore(void) {
+	if (activeKeyOverlays > 0 || !savedOverlayPrevApp) {
+		return nil;
+	}
+	if (window && window.isKeyWindow) {
+		savedOverlayPrevApp = nil;
+		return nil;
+	}
+	NSRunningApplication *prev = savedOverlayPrevApp;
+	savedOverlayPrevApp = nil;
+	return (prev && !prev.terminated) ? prev : nil;
+}
+
 @interface ForgeOverlayPanel : NSPanel
 @property(nonatomic) BOOL acceptsKey;
 @property(nonatomic) int overlayID;
@@ -1077,6 +1203,10 @@ void forge_free(void *p) {
 }
 - (BOOL)canBecomeMainWindow {
 	return NO;
+}
+// Allow borderless fullscreen overlays to cover the menu bar and notch 1:1 without macOS pushing them down.
+- (NSRect)constrainFrameRect:(NSRect)frameRect toScreen:(NSScreen *)screen {
+	return frameRect;
 }
 @end
 
@@ -1224,7 +1354,7 @@ void forge_free(void *p) {
 }
 @property(nonatomic, strong) ForgeOverlayPanel *panel;
 @property(nonatomic, strong) ForgeOverlayView *view;
-@property(nonatomic, strong) NSRunningApplication *previousApp;
+@property(nonatomic) BOOL countedActive;
 @property(nonatomic) BOOL closed;
 @end
 
@@ -1286,9 +1416,12 @@ void *forge_overlay_open(int id, int x, int y, int width, int height, int activa
 		panel.delegate = h;
 
 		if (activate) {
+			capturePreviousAppIfNeeded();
+			h.countedActive = YES;
+			activeKeyOverlays++;
 			[panel makeFirstResponder:view];
 			[panel makeKeyAndOrderFront:nil];
-			[NSApp activateIgnoringOtherApps:YES];
+			activateForOverlay();
 		} else {
 			[panel orderFrontRegardless];
 		}
@@ -1301,13 +1434,13 @@ double forge_overlay_scale(void *handle) {
 	return (h && h.panel) ? h.panel.backingScaleFactor : 1.0;
 }
 
-int forge_overlay_present(void *handle, const void *rgba, int width, int height) {
+int forge_overlay_present(void *handle, const void *rgba, int width, int height, int dx, int dy, int dw, int dh) {
 	@autoreleasepool {
 		ForgeOverlayHandle *h = (__bridge ForgeOverlayHandle *)handle;
 		if (!h || h.closed) {
 			return 0;
 		}
-		IOSurfaceRef surf = forge_surface_write(&h->surface, rgba, width, height);
+		IOSurfaceRef surf = forge_surface_write_rect(&h->surface, rgba, width, height, dx, dy, dw, dh);
 		if (!surf) {
 			return 0;
 		}
@@ -1347,22 +1480,32 @@ void forge_overlay_take_keyboard(void *handle, int on) {
 		if (!h || !h.panel) {
 			return;
 		}
-		if (on) {
-			NSRunningApplication *front = NSWorkspace.sharedWorkspace.frontmostApplication;
-			if (front && front.processIdentifier != NSProcessInfo.processInfo.processIdentifier) {
-				h.previousApp = front;
+		BOOL want = on != 0;
+		if (h.panel.acceptsKey == want) {
+			return;
+		}
+		if (want) {
+			capturePreviousAppIfNeeded();
+			if (!h.countedActive) {
+				h.countedActive = YES;
+				activeKeyOverlays++;
 			}
 			h.panel.acceptsKey = YES;
 			[h.panel makeFirstResponder:h.view];
 			[h.panel makeKeyAndOrderFront:nil];
-			[NSApp activateIgnoringOtherApps:YES];
+			activateForOverlay();
 		} else {
-			BOOL wasKey = h.panel.isKeyWindow;
 			h.panel.acceptsKey = NO;
-			if (wasKey && h.previousApp && !h.previousApp.terminated) {
-				[h.previousApp activateWithOptions:0];
+			if (h.countedActive) {
+				h.countedActive = NO;
+				if (activeKeyOverlays > 0) {
+					activeKeyOverlays--;
+				}
 			}
-			h.previousApp = nil;
+			NSRunningApplication *prev = takePreviousAppToRestore();
+			if (prev) {
+				[prev activateWithOptions:0];
+			}
 		}
 	}
 }
@@ -1424,6 +1567,16 @@ void forge_overlay_close(void *handle) {
 			return;
 		}
 		h.closed = YES;
+		NSRunningApplication *prevToRestore = nil;
+		if (h.countedActive) {
+			h.countedActive = NO;
+			if (activeKeyOverlays > 0) {
+				activeKeyOverlays--;
+			}
+			// Decide BEFORE orderOut: ordering out the last key panel would otherwise let AppKit
+			// synchronously promote Forge's main window to key before we check window.isKeyWindow.
+			prevToRestore = takePreviousAppToRestore();
+		}
 		if (h.view) {
 			h.view.layer.contents = nil;
 		}
@@ -1433,6 +1586,8 @@ void forge_overlay_close(void *handle) {
 			h.panel = nil;
 		}
 		h.view = nil;
-		h.previousApp = nil;
+		if (prevToRestore) {
+			[prevToRestore activateWithOptions:0];
+		}
 	}
 }

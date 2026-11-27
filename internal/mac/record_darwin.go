@@ -9,8 +9,8 @@ import "fmt"
 
 // Hotkey is a key with modifiers, registered for the whole system via Carbon RegisterEventHotKey.
 type Hotkey struct {
-	Ctrl, Alt, Shift bool
-	VK               uint16 // Windows virtual-key code; 0 is no hotkey
+	Cmd, Ctrl, Alt, Shift bool
+	VK                    uint16 // Windows virtual-key code; 0 is no hotkey
 }
 
 // Minimize sends the window to the Dock.
@@ -50,7 +50,10 @@ func (w *Window) SetHotkeys(keys []Hotkey) []error {
 			errs[i] = fmt.Errorf("hotkey key %#x is not supported on macOS", k.VK)
 			continue
 		}
-		var ctrl, alt, shift C.int
+		var cmd, ctrl, alt, shift C.int
+		if k.Cmd {
+			cmd = 1
+		}
 		if k.Ctrl {
 			ctrl = 1
 		}
@@ -60,7 +63,7 @@ func (w *Window) SetHotkeys(keys []Hotkey) []error {
 		if k.Shift {
 			shift = 1
 		}
-		if st := C.forge_register_hotkey(C.int(i+1), C.uint32_t(code), ctrl, alt, shift); st != 0 {
+		if st := C.forge_register_hotkey(C.int(i+1), C.uint32_t(code), cmd, ctrl, alt, shift); st != 0 {
 			errs[i] = fmt.Errorf("RegisterEventHotKey failed (OSStatus %d)", int(st))
 		}
 	}

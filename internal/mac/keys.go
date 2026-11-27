@@ -27,6 +27,13 @@ var punctuationKeys = map[rune]uint16{
 	'\'': 0xde, '"': 0xde,
 }
 
+// digitKeys maps the macOS ANSI number-row key codes to Windows digit virtual-key codes.
+// NSEvent.charactersIgnoringModifiers still applies Shift (sending "!", "@", "#", "$" for Shift+1..4),
+// so falling back to the hardware key code lets Cmd+Shift+1..0 / Ctrl+Shift+1..0 record as '1'..'0'.
+var digitKeys = map[int]uint16{
+	18: '1', 19: '2', 20: '3', 21: '4', 23: '5', 22: '6', 26: '7', 28: '8', 25: '9', 29: '0',
+}
+
 // vkToMacCode maps Windows virtual-key codes back to macOS ANSI virtual key codes for RegisterEventHotKey.
 var vkToMacCode = map[uint16]uint32{
 	// Letters
@@ -61,8 +68,13 @@ func keyVK(code int, chars string) (uint16, bool) {
 	if unicode.IsLetter(r) || unicode.IsDigit(r) {
 		return uint16(unicode.ToUpper(r)), true
 	}
-	vk, ok := punctuationKeys[r]
-	return vk, ok
+	if vk, ok := punctuationKeys[r]; ok {
+		return vk, true
+	}
+	if vk, ok := digitKeys[code]; ok {
+		return vk, true
+	}
+	return 0, false
 }
 
 // macKeyCode translates a Windows virtual-key code back to a macOS key code for global hotkey registration.

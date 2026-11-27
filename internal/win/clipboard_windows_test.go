@@ -61,3 +61,24 @@ func TestFillClipboardDIBOpaqueAndTranslucent(t *testing.T) {
 		t.Fatal("translucent NRGBA reported as opaque")
 	}
 }
+
+func TestSwizzlePremulBGRASubRectAndLargeBands(t *testing.T) {
+	// Exercise parallel band path (> 1<<18 pixels) and partial dirty rect.
+	const w, h = 640, 480
+	src := make([]byte, w*h*4)
+	dst := make([]byte, w*h*4)
+	for i := 0; i < len(src); i += 4 {
+		src[i], src[i+1], src[i+2], src[i+3] = 10, 20, 30, 128
+	}
+	dirty := image.Rect(10, 10, w-10, h-10)
+	swizzlePremulBGRA(dst, src, w, dirty)
+	// Outside dirty must stay zero.
+	if dst[0] != 0 || dst[3] != 0 {
+		t.Fatalf("outside dirty modified: %v", dst[:4])
+	}
+	// Inside dirty must be BGRA=(30, 20, 10, 128).
+	off := (10*w + 10) * 4
+	if dst[off] != 30 || dst[off+1] != 20 || dst[off+2] != 10 || dst[off+3] != 128 {
+		t.Fatalf("inside dirty = %v, want [30 20 10 128]", dst[off:off+4])
+	}
+}
